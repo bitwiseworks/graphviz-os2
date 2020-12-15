@@ -78,9 +78,9 @@ elseif (APPLE)
 elseif (OS2)
 
     set( BROWSER            start                                )
-    set( DEFAULT_FONTPATH   "/@unixroot/usr/share/fonts/TrueType;"
-                            "/@unixroot/usr/share/fonts/default/Type1;"
-                            "/@unixroot/usr/share/fonts/truetype;"
+    set( DEFAULT_FONTPATH   "/@unixroot/usr/share/fonts/TrueType"
+                            "/@unixroot/usr/share/fonts/default/Type1"
+                            "/@unixroot/usr/share/fonts/truetype"
                             "/@unixroot/usr/common/share/fonts/ttf" )
 
 else ()
