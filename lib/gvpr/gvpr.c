@@ -182,6 +182,9 @@ static int parseArgs(char *s, int argc, char ***argv)
 #ifdef _WIN32
 #define PATHSEP '\\'
 #define LISTSEP ';'
+#elif defined(__OS2__)
+#define PATHSEP '/'
+#define LISTSEP ';'
 #else
 #define PATHSEP '/'
 #define LISTSEP ':'

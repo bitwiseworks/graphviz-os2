@@ -130,7 +130,7 @@ static char* dotneato_basename (char* path)
     char* ret;
     char* s = path;
     if (*s == '\0') return path; /* empty string */
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__OS2__)
     /* On Windows, executables, by convention, end in ".exe". Thus,
      * this may be part of the path name and must be removed for
      * matching to work.
@@ -151,7 +151,7 @@ static char* dotneato_basename (char* path)
 	if ((*s == '/') || (*s == '\\')) ret = s+1;
 	else ret = path;
     }
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__OS2__)
     /* On Windows, names are case-insensitive, so make name lower-case
      */
     {

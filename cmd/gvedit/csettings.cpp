@@ -397,7 +397,7 @@ bool CFrmSettings::renderLayout()
 	if (fileName != activeWindow->outputFile)
 	    activeWindow->outputFile = fileName;
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__OS2__)
 	if ((!fileName.contains('/')) && (!fileName.contains('\\'))) 
 #else
 	if (!fileName.contains('/'))

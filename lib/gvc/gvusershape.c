@@ -597,7 +597,7 @@ boolean gvusershape_file_access(usershape_t *us)
 	    agerr(AGWARN, "Filename \"%s\" is unsafe\n", us->name);
 	    return FALSE;
 	}
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
 	us->f = fopen(fn, "r");
 #else
 	us->f = fopen(fn, "rb");

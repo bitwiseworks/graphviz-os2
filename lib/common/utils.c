@@ -333,7 +333,7 @@ char *Fgets(FILE * fp)
  * N.B. safefile uses a fixed buffer, so functions using it should use the
  * value immediately or make a copy.
  */
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__OS2__)
 #define PATHSEP ";"
 #else
 #define PATHSEP ":"
