@@ -35,3 +35,10 @@ set_target_properties(xdot PROPERTIES
     VERSION 4.0.0
     SOVERSION 4
 )
+
+if(OS2)
+    set_target_properties(xdot PROPERTIES
+        OS2_DEF_VENDOR "$ENV{VENDOR}"
+        OS2_DEF_PATCH "${GRAPHVIZ_VERSION_PATCH}"
+        OS2_DEF_VERSION "${GRAPHVIZ_VERSION_FULL}")
+endif()

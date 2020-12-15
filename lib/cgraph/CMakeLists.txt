@@ -96,3 +96,10 @@ set_target_properties(cgraph PROPERTIES
     VERSION 6.0.0
     SOVERSION 6
 )
+
+if(OS2)
+    set_target_properties(cgraph PROPERTIES
+        OS2_DEF_VENDOR "$ENV{VENDOR}"
+        OS2_DEF_PATCH "${GRAPHVIZ_VERSION_PATCH}"
+        OS2_DEF_VERSION "${GRAPHVIZ_VERSION_FULL}")
+endif()
