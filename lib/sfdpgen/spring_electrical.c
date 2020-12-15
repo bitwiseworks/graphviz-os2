@@ -750,7 +750,11 @@ static void spring_electrical_embedding_slow(int dim, SparseMatrix A0, spring_el
   {
     FILE *f;
     char fname[10000];
+#ifdef __OS2__
+    strcpy(fname,"/@unixroot/var/tmp/graph_layout_0_");
+#else
     strcpy(fname,"/tmp/graph_layout_0_");
+#endif
     sprintf(&(fname[strlen(fname)]), "%d",n);
     f = fopen(fname,"w");
     export_embedding(f, dim, A, x, NULL);
@@ -902,7 +906,11 @@ static void spring_electrical_embedding_slow(int dim, SparseMatrix A0, spring_el
   {
     FILE *f;
     char fname[10000];
+#ifdef __OS2__
+    strcpy(fname,"/@unixroot/var/tmp/graph_layout");
+#else
     strcpy(fname,"/tmp/graph_layout");
+#endif
     sprintf(&(fname[strlen(fname)]), "%d",n);
     f = fopen(fname,"w");
     export_embedding(f, dim, A, x, NULL);
@@ -1007,7 +1015,11 @@ void spring_electrical_embedding(int dim, SparseMatrix A0, spring_electrical_con
   {
     FILE *f;
     char fname[10000];
+#ifdef __OS2__
+    strcpy(fname,"/@unixroot/var/tmp/graph_layout_0_");
+#else
     strcpy(fname,"/tmp/graph_layout_0_");
+#endif
     sprintf(&(fname[strlen(fname)]), "%d",n);
     f = fopen(fname,"w");
     export_embedding(f, dim, A, x, NULL);
@@ -1025,7 +1037,11 @@ void spring_electrical_embedding(int dim, SparseMatrix A0, spring_electrical_con
     FILE *f;
     char fname[10000];
     static int count = 0;
+#ifdef __OS2__
+    sprintf(fname, "/@unixroot/var/tmp/multilevel_%d",count++);
+#else
     sprintf(fname, "/tmp/multilevel_%d",count++);
+#endif
     f = fopen(fname,"w");
     export_embedding(f, dim, A, x, NULL);
     fclose(f);
@@ -1175,7 +1191,11 @@ void spring_electrical_embedding(int dim, SparseMatrix A0, spring_electrical_con
   {
     FILE *f;
     char fname[10000];
+#ifdef __OS2__
+    strcpy(fname,"/@unixroot/var/tmp/graph_layout");
+#else
     strcpy(fname,"/tmp/graph_layout");
+#endif
     sprintf(&(fname[strlen(fname)]), "%d",n);
     f = fopen(fname,"w");
     export_embedding(f, dim, A, x, NULL);
@@ -1352,7 +1372,11 @@ static void spring_maxent_embedding(int dim, SparseMatrix A0, SparseMatrix D, sp
   {
     FILE *f;
     char fname[10000];
+#ifdef __OS2__
+    strcpy(fname,"/@unixroot/var/tmp/graph_layout_0_");
+#else
     strcpy(fname,"/tmp/graph_layout_0_");
+#endif
     sprintf(&(fname[strlen(fname)]), "%d",n);
     f = fopen(fname,"w");
     export_embedding(f, dim, A, x, NULL);
@@ -1592,7 +1616,11 @@ void spring_electrical_spring_embedding(int dim, SparseMatrix A0, SparseMatrix D
   {
     FILE *f;
     char fname[10000];
+#ifdef __OS2__
+    strcpy(fname,"/@unixroot/var/tmp/graph_layout_0_");
+#else
     strcpy(fname,"/tmp/graph_layout_0_");
+#endif
     sprintf(&(fname[strlen(fname)]), "%d",n);
     f = fopen(fname,"w");
     export_embedding(f, dim, A, x, NULL);
@@ -1720,7 +1748,11 @@ void spring_electrical_spring_embedding(int dim, SparseMatrix A0, SparseMatrix D
   {
     FILE *f;
     char fname[10000];
+#ifdef __OS2__
+    strcpy(fname,"/@unixroot/var/tmp/graph_layout");
+#else
     strcpy(fname,"/tmp/graph_layout");
+#endif
     sprintf(&(fname[strlen(fname)]), "%d",n);
     f = fopen(fname,"w");
     export_embedding(f, dim, A, x, NULL);

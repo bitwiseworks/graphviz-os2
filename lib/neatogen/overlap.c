@@ -422,7 +422,11 @@ OverlapSmoother OverlapSmoother_new(SparseMatrix A, int m,
 #ifdef DEBUG
   {
     FILE *fp;
+#ifdef __OS2__
+    fp = fopen("/@unixroot/var/tmp/111","w");
+#else
     fp = fopen("/tmp/111","w");
+#endif
     export_embedding(fp, dim, sm->Lwd, x, NULL);
     fclose(fp);
   }
@@ -498,7 +502,11 @@ real OverlapSmoother_smooth(OverlapSmoother sm, int dim, real *x){
   real res = StressMajorizationSmoother_smooth(sm, dim, x, maxit_sm, 0.001);
 #ifdef DEBUG
   {FILE *fp;
+#ifdef __OS2__
+  fp = fopen("/@unixroot/var/tmp/222","w");
+#else
   fp = fopen("/tmp/222","w");
+#endif
   export_embedding(fp, dim, sm->Lwd, x, NULL);
   fclose(fp);}
 #endif
@@ -611,7 +619,11 @@ void remove_overlap(int dim, SparseMatrix A, real *x, real *label_sizes, int ntr
 
 #ifdef ANIMATE
   {FILE*fp;
+#ifdef __OS2__
+    fp = fopen("/@unixroot/var/tmp/m","wa");
+#else
     fp = fopen("/tmp/m","wa");
+#endif
     fprintf(fp,"{");
 #endif
 
@@ -670,7 +682,11 @@ void remove_overlap(int dim, SparseMatrix A, real *x, real *label_sizes, int ntr
 
 #ifdef DEBUG
   {FILE*fp;
+#ifdef __OS2__
+  fp = fopen("/@unixroot/var/tmp/m","w");
+#else
   fp = fopen("/tmp/m","w");
+#endif
   if (A) export_embedding(fp, dim, A, x, label_sizes);
   fclose(fp);
   }
