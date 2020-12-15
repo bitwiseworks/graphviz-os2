@@ -185,7 +185,7 @@ gvplugin_library_t *gvplugin_library_load(GVC_t * gvc, char *path)
         else
             p = gmalloc(lenp);
     }
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__OS2__)
     if (path[1] == ':') {
 #else
     if (path[0] == '/') {
@@ -218,6 +218,8 @@ gvplugin_library_t *gvplugin_library_load(GVC_t * gvc, char *path)
     len = strlen(s);
 #if defined(_WIN32) && !defined(__MINGW32__) && !defined(__CYGWIN__)
     if (len < strlen("/gvplugin_x")) {
+#elif defined(__OS2__)
+    if (len < strlen("/gvplgxx")) {
 #else
     if (len < strlen("/libgvplugin_x")) {
 #endif
@@ -225,7 +227,7 @@ gvplugin_library_t *gvplugin_library_load(GVC_t * gvc, char *path)
         return NULL;
     }
     sym = gmalloc(len + strlen(suffix) + 1);
-#if defined(_WIN32) && !defined(__MINGW32__) && !defined(__CYGWIN__)
+#if defined(_WIN32) && !defined(__MINGW32__) && !defined(__CYGWIN__) || defined(__OS2__)
     strcpy(sym, s + 1);         /* strip leading "/"  */
 #else
     strcpy(sym, s + 4);         /* strip leading "/lib" or "/cyg" */

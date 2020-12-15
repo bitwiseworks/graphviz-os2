@@ -62,3 +62,11 @@ set_target_properties(gvplugin_core PROPERTIES
     VERSION ${GRAPHVIZ_PLUGIN_VERSION}.0.0
     SOVERSION ${GRAPHVIZ_PLUGIN_VERSION}
 )
+
+if(OS2)
+    set_target_properties(gvplugin_core PROPERTIES
+        OS2_DEF_VENDOR "$ENV{VENDOR}"
+        OS2_DEF_PATCH "0"
+        OS2_DEF_VERSION "${GRAPHVIZ_PLUGIN_VERSION}.0.0"
+        TARGET_SHORT gvplgco)
+endif()
