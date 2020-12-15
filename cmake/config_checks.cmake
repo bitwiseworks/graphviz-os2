@@ -75,6 +75,14 @@ elseif (APPLE)
     set( DARWIN             1                                       )
     set( DARWIN_DYLIB       1                                       )
 
+elseif (OS2)
+
+    set( BROWSER            start                                )
+    set( DEFAULT_FONTPATH   "/@unixroot/usr/share/fonts/TrueType;"
+                            "/@unixroot/usr/share/fonts/default/Type1;"
+                            "/@unixroot/usr/share/fonts/truetype;"
+                            "/@unixroot/usr/common/share/fonts/ttf" )
+
 else ()
 
     set( BROWSER            xdg-open                                )
