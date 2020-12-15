@@ -35,6 +35,8 @@ extern "C" {
 #ifndef FEATURE_MS
 #define FEATURE_MS 1
 #endif
+#elif defined(__OS2__)
+#define FEATURE_OS2 1
 #else
 #define FEATURE_X11 1
 #endif

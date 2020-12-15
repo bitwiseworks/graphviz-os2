@@ -832,7 +832,7 @@ found:
 void Gerr (char *file, int line, int errnum, ...) {
     va_list args;
 
-#ifdef FEATURE_X11
+#if defined(FEATURE_X11) || defined(FEATURE_OS2)
     Gerrno = errnum;
     if (!Gerrflag)
         return;

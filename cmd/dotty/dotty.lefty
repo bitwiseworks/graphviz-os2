@@ -70,6 +70,26 @@ dotty = [
                 'Helvetica-Bold' = 'Arial Bold';
             ];
         ];
+        'os2' = [
+            'fontmap' = [
+                'Times-Roman'    = 'Times New Roman';
+                'Times-Italic'   = 'Times New Roman Italic';
+                'Times-Bold'     = 'Times New Roman Bold';
+                'Courier'        = 'Courier New';
+                'Courier-Bold'   = 'Courier New Bold';
+                'Helvetica'      = 'Arial';
+                'Helvetica-Bold' = 'Arial Bold';
+            ];
+            'psfontmap' = [
+                'Times-Roman'    = 'Times New Roman';
+                'Times-Italic'   = 'Times New Roman Italic';
+                'Times-Bold'     = 'Times New Roman Bold';
+                'Courier'        = 'Courier New';
+                'Courier-Bold'   = 'Courier New Bold';
+                'Helvetica'      = 'Arial';
+                'Helvetica-Bold' = 'Arial Bold';
+            ];
+        ];
     ];
     'protogt' = [
         'graph' = [

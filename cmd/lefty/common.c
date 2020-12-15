@@ -27,8 +27,13 @@ static char *nswin;
 
 #ifndef FEATURE_MS
 #define PATHDEL '/'
+#ifdef FEATURE_OS2
+#define PATHSEP ';'
+#define PATHSEPSTR ";"
+#else
 #define PATHSEP ':'
 #define PATHSEPSTR ":"
+#endif
 #define PATHLEFTY "/../lib/lefty"
 #else
 #define PATHDEL '\\'
@@ -38,6 +43,8 @@ static char *nswin;
 #endif
 #ifdef FEATURE_X11
 #define WINSYS "LEFTYWINSYS=X11"
+#elif defined FEATURE_OS2
+#define WINSYS "LEFTYWINSYS=os2"
 #else
 #define WINSYS "LEFTYWINSYS=mswin"
 #endif
