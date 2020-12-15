@@ -30,6 +30,8 @@ extern "C" {
 #else
 #define extern __declspec(dllimport)
 #endif
+#elif defined(__OS2__) && defined(GVDLL)
+#define extern __declspec(dllexport)
 #endif
 
 extern box mkbox(point p, point q);

@@ -27,6 +27,8 @@ extern "C" {
 #   else
 #       define CGRAPH_API __declspec(dllimport)
 #   endif
+#elif defined(__OS2__) && defined(EXPORT_CGRAPH)
+#   define CGRAPH_API __declspec(dllexport)
 #else
 #   define CGRAPH_API extern
 #endif
