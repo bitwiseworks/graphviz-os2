@@ -51,7 +51,7 @@ set_target_properties(gvplugin_neato_layout PROPERTIES
 )
 
 if(OS2)
-    set_target_properties(gvplugin_core PROPERTIES
+    set_target_properties(gvplugin_neato_layout PROPERTIES
         OS2_DEF_VENDOR "$ENV{VENDOR}"
         OS2_DEF_PATCH "0"
         OS2_DEF_VERSION "${GRAPHVIZ_PLUGIN_VERSION}.0.0"
