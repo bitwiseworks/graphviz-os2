@@ -27,6 +27,8 @@ extern "C" {
 #   else
 #       define XDOT_API __declspec(dllimport)
 #   endif
+#elif defined(__OS2__) && defined(EXPORT_XDOT)
+#   define XDOT_API __declspec(dllexport)
 #else
 #   define XDOT_API extern
 #endif

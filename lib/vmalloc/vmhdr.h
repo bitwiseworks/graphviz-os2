@@ -415,7 +415,9 @@ extern "C" {
 
      extern Vmextern_t _Vmextern;
 
+#ifndef __OS2__
     extern size_t getpagesize(void);
+#endif
 
 #ifndef _WIN32
     extern void abort(void);
@@ -444,7 +446,7 @@ extern "C" {
     extern void _cleanup(void);
 
 /* for vmdcsbrk.c */
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__OS2__)
     extern Vmuchar_t *sbrk(ssize_t);
 #endif
 

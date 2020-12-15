@@ -25,6 +25,8 @@
 #   else
 #       define CGHDR_API __declspec(dllimport)
 #   endif
+#elif defined(__OS2__) && defined(EXPORT_CGHDR)
+#   define CGHDR_API __declspec(dllexport)
 #else
 #   define CGHDR_API extern
 #endif

@@ -63,7 +63,11 @@
 #define POINTS(inch) 72*(inch)
 
 typedef unsigned int boolean;
+#ifndef __OS2__
 extern unsigned char Verbose;
+#else
+unsigned char Verbose;
+#endif
 
 #else  /* STANDALONE */
 #define MALLOC gmalloc

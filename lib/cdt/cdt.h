@@ -21,6 +21,8 @@ extern "C" {
 #   else
 #       define CDT_API __declspec(dllimport)
 #   endif
+#elif defined(__OS2__) && defined(EXPORT_CDT)
+#   define CDT_API __declspec(dllexport)
 #else
 #   define CDT_API extern
 #endif

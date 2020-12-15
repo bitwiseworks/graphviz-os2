@@ -37,6 +37,9 @@ extern "C" {
 #endif
 #endif
 #endif
+#if defined(__OS2__) && defined(_BLD_gvc)
+#define extern __declspec(dllexport)
+#endif
 /*visual studio*/
 #ifdef _WIN32
 #ifndef GVC_EXPORTS
