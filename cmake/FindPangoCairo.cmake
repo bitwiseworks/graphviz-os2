@@ -1,14 +1,6 @@
 find_path(PANGOCAIRO_INCLUDE_DIR pango/pangocairo.h PATH_SUFFIXES pango-1.0)
 find_path(GLIB_INCLUDE_DIR glib.h PATH_SUFFIXES glib-2.0)
-if (OS2)
-find_path(GLIBCONFIG_INCLUDE_DIR glibconfig.h
-  PATHS
-    /@unixroot/usr/include
-    /@unixroot/usr/lib
-  PATH_SUFFIXES glib-2.0/include)
-else()
 find_path(GLIBCONFIG_INCLUDE_DIR glibconfig.h PATH_SUFFIXES glib-2.0/include)
-endif()
 
 find_library(GLIB_LIBRARY NAMES glib-2.0)
 find_library(GOBJECT_LIBRARY NAMES gobject-2.0)
