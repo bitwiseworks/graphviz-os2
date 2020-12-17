@@ -219,7 +219,7 @@ gvplugin_library_t *gvplugin_library_load(GVC_t * gvc, char *path)
 #if defined(_WIN32) && !defined(__MINGW32__) && !defined(__CYGWIN__)
     if (len < strlen("/gvplugin_x")) {
 #elif defined(__OS2__)
-    if (len < strlen("/gvplgxx")) {
+    if (len < strlen("/gvplugin_x")) {
 #else
     if (len < strlen("/libgvplugin_x")) {
 #endif

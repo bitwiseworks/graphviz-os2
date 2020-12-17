@@ -389,7 +389,7 @@ static void config_rescan(GVC_t *gvc, char *config_path)
     char *plugin_re_beg = "[^0-9]";
     char *plugin_re_end = "\\.dll$"; 
 #elif defined(__OS2__)
-    char *plugin_glob = "gvplg*";
+    char *plugin_glob = "gvplugin_*";
     char *plugin_re_beg = "[^0-9]";
     char *plugin_re_end = "\\.dll$"; 
 #elif ((defined(__hpux__) || defined(__hpux)) && !(defined(__ia64)))
