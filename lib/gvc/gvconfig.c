@@ -370,7 +370,7 @@ static void config_rescan(GVC_t *gvc, char *config_path)
     int i, rc, re_status;
     gvplugin_library_t *library;
     regex_t re;
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
     char *plugin_glob = "libgvplugin_*";
 #endif
 #if defined(DARWIN_DYLIB)
