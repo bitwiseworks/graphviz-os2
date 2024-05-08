@@ -419,7 +419,7 @@ static void config_rescan(GVC_t *gvc, char *config_path)
 
     config_re = gmalloc(strlen(plugin_re_beg) + 20 + strlen(plugin_re_end) + 1);
 
-#if defined(_WIN32) && !defined(__MINGW32__) && !defined(__CYGWIN__)
+#if (defined(_WIN32) && !defined(__MINGW32__) && !defined(__CYGWIN__)) || defined(__OS2__)
     sprintf(config_re,"%s%s", plugin_re_beg, plugin_re_end);
 #elif defined(GVPLUGIN_VERSION)
     sprintf(config_re,"%s%d%s", plugin_re_beg, GVPLUGIN_VERSION, plugin_re_end);
@@ -436,6 +436,16 @@ static void config_rescan(GVC_t *gvc, char *config_path)
 	strcat(config_glob, DIRSEP);
     strcat(config_glob, plugin_glob);
 
+#ifdef __OS2__
+    // in the glob() we need the path as /
+    char *p;
+    for (p = config_glob; *p; *p++)
+    {
+        if (*p == '\\')
+            *p = '/';
+    }
+#endif
+
     /* load all libraries even if can't save config */
 
 #if defined(_WIN32)
@@ -443,8 +453,10 @@ static void config_rescan(GVC_t *gvc, char *config_path)
 #else
     rc = glob(config_glob, 0, NULL, &globbuf);
 #endif
+    fprintf (stderr, "glob = \"%s %i\"\n", config_glob, rc);
     if (rc == 0) {
 	for (i = 0; i < globbuf.gl_pathc; i++) {
+            fprintf (stderr, "globbuf = \"%s\"\n", globbuf.gl_pathv[i]);
 	    re_status = regexec(&re, globbuf.gl_pathv[i], (size_t) 0, NULL, 0);
 	    if (re_status == 0) {
 		library = gvplugin_library_load(gvc, globbuf.gl_pathv[i]);
