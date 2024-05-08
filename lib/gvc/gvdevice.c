@@ -32,6 +32,11 @@
 #include "compat.h"
 #endif
 
+#ifdef __OS2__  // for O_BINARY
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #ifdef HAVE_LIBZ
 #include <zlib.h>
 
