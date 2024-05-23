@@ -22,6 +22,9 @@
 
 #include "config.h"
 
+#ifdef __OS2__
+#include <unistd.h>
+#endif
 #include <getopt.h>
 #include <algorithm>
 #include <assert.h>

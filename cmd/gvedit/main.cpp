@@ -18,6 +18,9 @@
 #ifdef _WIN32
 #include "windows.h"
 #endif
+#ifdef __OS2__
+#include <unistd.h>
+#endif
 #include <stdio.h>
 #include <QApplication>
 #include <QFile>

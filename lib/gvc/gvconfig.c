@@ -511,7 +511,7 @@ static void config_rescan(GVC_t *gvc, char *config_path)
 #ifdef __OS2__
     // in the glob() we need the path as /
     char *p;
-    for (p = config_glob; *p; *p++)
+    for (p = agxbuse(&config_glob); *p; *p++)
     {
         if (*p == '\\')
             *p = '/';
@@ -525,7 +525,6 @@ static void config_rescan(GVC_t *gvc, char *config_path)
 #else
     rc = glob(agxbuse(&config_glob), 0, NULL, &globbuf);
 #endif
-    fprintf (stderr, "glob = \"%s %i\"\n", config_glob, rc);
     if (rc == 0) {
 	for (size_t i = 0; i < globbuf.gl_pathc; i++) {
 	    if (is_plugin(globbuf.gl_pathv[i])) {

@@ -219,7 +219,7 @@ if(NOT with_zlib STREQUAL "OFF")
   endif()
 endif()
 
-if(UNIX)
+if(UNIX OR OS2)
   find_library(MATH_LIB m)
   link_libraries(${MATH_LIB})
 endif()
