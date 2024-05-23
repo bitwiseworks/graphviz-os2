@@ -1,8 +1,7 @@
-# $Id$ $Revision$
 ## Process this file with automake to produce Makefile.in
 
 AM_CPPFLAGS = \
-	-I$(top_srcdir) \
+	-I$(top_srcdir)/lib \
 	-I$(top_srcdir)/lib/common \
 	-I$(top_srcdir)/lib/pathplan \
 	-I$(top_srcdir)/lib/gvc \
@@ -32,10 +31,6 @@ libgvplugin_poppler_la_LIBADD = \
 
 if WITH_WIN32
 libgvplugin_poppler_la_LDFLAGS += -no-undefined
-endif
-
-if WITH_DARWIN9
-libgvplugin_poppler_la_LDFLAGS += -Wl,-exported_symbol,_gvplugin_poppler_LTX_library
 endif
 
 EXTRA_DIST =

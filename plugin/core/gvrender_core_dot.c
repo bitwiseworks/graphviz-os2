@@ -1,40 +1,38 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
 #ifdef _WIN32
 #include <io.h>
-#include "compat.h"
 #endif
 
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
-#include "macros.h"
-#include "const.h"
+#include <common/macros.h>
+#include <common/const.h>
 
-#include "gvplugin_render.h"
-#include "gvplugin_device.h"
-#include "agxbuf.h"
-#include "utils.h"
-#include "gvio.h"
-
-#define GNEW(t)          (t*)malloc(sizeof(t))
-
-/* #define NEW_XDOT */
+#include <gvc/gvplugin_render.h>
+#include <gvc/gvplugin_device.h>
+#include <cgraph/alloc.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/prisize_t.h>
+#include <cgraph/streq.h>
+#include <cgraph/unreachable.h>
+#include <common/utils.h>
+#include <gvc/gvc.h>
+#include <gvc/gvio.h>
 
 typedef enum {
 	FORMAT_DOT,
@@ -77,97 +75,47 @@ typedef struct {
     attrsym_t *e_l_draw;
     attrsym_t *hl_draw;
     attrsym_t *tl_draw;
-    unsigned char buf[NUMXBUFS][BUFSIZ];
     unsigned short version;
     char* version_s;
 } xdot_state_t;
 static xdot_state_t* xd;
 
-static void xdot_str_xbuf (agxbuf* xb, char* pfx, char* s)
+static void xdot_str_xbuf (agxbuf* xb, char* pfx, const char* s)
 {
-    char buf[BUFSIZ];
-
-    sprintf (buf, "%s%d -", pfx, (int)strlen(s));
-    agxbput(xb, buf);
-    agxbput(xb, s);
-    agxbputc(xb, ' ');
+    agxbprint (xb, "%s%" PRISIZE_T " -%s ", pfx, strlen(s), s);
 }
 
-static void xdot_str (GVJ_t *job, char* pfx, char* s)
+static void xdot_str (GVJ_t *job, char* pfx, const char* s)
 {   
     emit_state_t emit_state = job->obj->emit_state;
     xdot_str_xbuf (xbufs[emit_state], pfx, s);
-}
-
-/* xdot_trim_zeros
- * Trailing zeros are removed and decimal point, if possible.
- * Add trailing space if addSpace is non-zero.
- */
-static void xdot_trim_zeros (char* buf, int addSpace)
-{
-    char* dotp;
-    char* p;
-
-    if ((dotp = strchr (buf,'.'))) {
-	p = dotp+1;
-	while (*p) p++;  // find end of string
-	p--;
-	while (*p == '0') *p-- = '\0';
-        if (*p == '.')        // If all decimals were zeros, remove ".".
-            *p = '\0';
-	else
-	    p++;
-    }
-    else if (addSpace)
-	p = buf + strlen(buf);
-
-    if (addSpace) { /* p points to null byte */
-	*p++ = ' ';
-	*p = '\0';
-    }
 }
 
 /* xdot_fmt_num:
  * Convert double to string with space at end.
  * Trailing zeros are removed and decimal point, if possible.
  */
-static void xdot_fmt_num (char* buf, double v)
-{
-    // Prevents values like -0
-    if (v > -0.00000001 && v < 0.00000001)
-    {
-        v = 0;
-    }
-    sprintf(buf, "%.02f", v);
-    xdot_trim_zeros (buf, 1);
+static void xdot_fmt_num(agxbuf *buf, double v) {
+  agxbprint(buf, "%.02f", v);
+  agxbuf_trim_zeros(buf);
+  agxbputc(buf, ' ');
 }
 
-static void xdot_point(agxbuf *xbuf, pointf p)
+static void xdot_point(agxbuf *xb, pointf p)
 {
-    char buf[BUFSIZ];
-    xdot_fmt_num (buf, p.x);
-    agxbput(xbuf, buf);
-    xdot_fmt_num (buf, yDir(p.y));
-    agxbput(xbuf, buf);
+  xdot_fmt_num(xb, p.x);
+  xdot_fmt_num(xb, yDir(p.y));
 }
 
-static void xdot_num(agxbuf *xbuf, double v)
+static void xdot_num(agxbuf *xb, double v)
 {
-    char buf[BUFSIZ];
-    xdot_fmt_num (buf, v);
-    agxbput(xbuf, buf);
+  xdot_fmt_num(xb, v);
 }
 
-static void xdot_points(GVJ_t *job, char c, pointf * A, int n)
-{
+static void xdot_points(GVJ_t *job, char c, pointf *A, size_t n) {
     emit_state_t emit_state = job->obj->emit_state;
-    char buf[BUFSIZ];
-    int i;
-
-    agxbputc(xbufs[emit_state], c);
-    sprintf(buf, " %d ", n);
-    agxbput(xbufs[emit_state], buf);
-    for (i = 0; i < n; i++)
+    agxbprint(xbufs[emit_state], "%c %" PRISIZE_T " ", c, n);
+    for (size_t i = 0; i < n; i++)
         xdot_point(xbufs[emit_state], A[i]);
 }
 
@@ -177,9 +125,10 @@ color2str (unsigned char rgba[4])
     static char buf [10];
 
     if (rgba[3] == 0xFF)
-	sprintf (buf, "#%02x%02x%02x", rgba[0], rgba[1],  rgba[2]);
+	snprintf(buf, sizeof(buf), "#%02x%02x%02x", rgba[0], rgba[1],  rgba[2]);
     else
-	sprintf (buf, "#%02x%02x%02x%02x", rgba[0], rgba[1],  rgba[2], rgba[3]);
+	snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", rgba[0], rgba[1],  rgba[2],
+	         rgba[3]);
     return buf;
 }
 
@@ -195,54 +144,78 @@ static void xdot_fillcolor (GVJ_t *job)
 
 static void xdot_style (GVJ_t *job)
 {
-    unsigned char buf0[BUFSIZ];
-    char buf [128]; /* enough to hold a double */
-    agxbuf xbuf;
+    agxbuf xb = {0};
     char* p, **s;
-    int more;
-
-    agxbinit(&xbuf, BUFSIZ, buf0);
 
     /* First, check if penwidth state is correct */
     if (job->obj->penwidth != penwidth[job->obj->emit_state]) {
 	penwidth[job->obj->emit_state] = job->obj->penwidth;
-	agxbput (&xbuf, "setlinewidth(");
-	sprintf (buf, "%.3f", job->obj->penwidth);
-	xdot_trim_zeros (buf, 0);
-	agxbput(&xbuf, buf);
-	agxbputc (&xbuf, ')');
-        xdot_str (job, "S ", agxbuse(&xbuf));
+	agxbput (&xb, "setlinewidth(");
+	agxbprint(&xb, "%.3f", job->obj->penwidth);
+	agxbuf_trim_zeros(&xb);
+	agxbputc(&xb, ')');
+        xdot_str (job, "S ", agxbuse(&xb));
     }
 
     /* now process raw style, if any */
     s = job->obj->rawstyle;
-    if (!s)
+    if (!s) {
+	agxbfree(&xb);
 	return;
+    }
 
     while ((p = *s++)) {
 	if (streq(p, "filled") || streq(p, "bold") || streq(p, "setlinewidth")) continue;
-        agxbput(&xbuf, p);
+        agxbput(&xb, p);
         while (*p)
             p++;
         p++;
         if (*p) {  /* arguments */
-            agxbputc(&xbuf, '(');
-            more = 0;
-            while (*p) {
-                if (more)
-                    agxbputc(&xbuf, ',');
-                agxbput(&xbuf, p);
+            agxbputc(&xb, '(');
+            for (const char *separator = ""; *p; separator = ",") {
+                agxbprint(&xb, "%s%s", separator, p);
                 while (*p) p++;
                 p++;
-                more++;
             }
-            agxbputc(&xbuf, ')');
+            agxbputc(&xb, ')');
         }
-        xdot_str (job, "S ", agxbuse(&xbuf));
+        xdot_str (job, "S ", agxbuse(&xb));
     }
 
-    agxbfree(&xbuf);
+    agxbfree(&xb);
 
+}
+
+/** set the value of a symbol within a node, escaping backslashes
+ *
+ * The back ends that output certain text-based formats, e.g. xdot, assume that
+ * all characters that have special meaning within a string have already been
+ * escaped, with the exception of double quote ("). Hence, any string being
+ * constructed from user-provided input needs to be escaped for other
+ * problematic characters (namely \) beforehand. This is a little utility
+ * function to do such.
+ *
+ * @param n Node to operate on
+ * @param sym Symbol to set
+ * @param value Unescaped string
+ */
+static void put_escaping_backslashes(Agobj_t* n, Agsym_t *sym, const char *value)
+{
+    agxbuf buf = {0};
+
+    /* print the given string to the buffer, escaping as we go */
+    for (; *value != '\0'; ++value) {
+        if (*value == '\\') {
+            agxbputc(&buf, '\\');
+        }
+        agxbputc(&buf, *value);
+    }
+
+    /* update the node's symbol to the escaped text */
+    agxset(n, sym, agxbuse(&buf));
+
+    /* discard the buffer */
+    agxbfree(&buf);
 }
 
 static void xdot_end_node(GVJ_t* job)
@@ -251,7 +224,7 @@ static void xdot_end_node(GVJ_t* job)
     if (agxblen(xbufs[EMIT_NDRAW]))
 	agxset(n, xd->n_draw, agxbuse(xbufs[EMIT_NDRAW]));
     if (agxblen(xbufs[EMIT_NLABEL]))
-	agxset(n, xd->n_l_draw, agxbuse(xbufs[EMIT_NLABEL]));
+	put_escaping_backslashes(&n->base, xd->n_l_draw, agxbuse(xbufs[EMIT_NLABEL]));
     penwidth[EMIT_NDRAW] = 1;
     penwidth[EMIT_NLABEL] = 1;
     textflags[EMIT_NDRAW] = 0;
@@ -269,7 +242,7 @@ static void xdot_end_edge(GVJ_t* job)
     if (agxblen(xbufs[EMIT_HDRAW]))
 	agxset(e, xd->h_draw, agxbuse(xbufs[EMIT_HDRAW]));
     if (agxblen(xbufs[EMIT_ELABEL]))
-	agxset(e, xd->e_l_draw,agxbuse(xbufs[EMIT_ELABEL]));
+	put_escaping_backslashes(&e->base, xd->e_l_draw, agxbuse(xbufs[EMIT_ELABEL]));
     if (agxblen(xbufs[EMIT_TLABEL]))
 	agxset(e, xd->tl_draw, agxbuse(xbufs[EMIT_TLABEL]));
     if (agxblen(xbufs[EMIT_HLABEL]))
@@ -288,42 +261,6 @@ static void xdot_end_edge(GVJ_t* job)
     textflags[EMIT_HLABEL] = 0;
 }
 
-#ifdef NEW_XDOT
-/* xdot_begin_anchor:
- * The encoding of which fields are present assumes that one of the fields is present,
- * so there is never a 0 after the H.
- */
-static void xdot_begin_anchor(GVJ_t * job, char *href, char *tooltip, char *target, char *id)
-{
-    emit_state_t emit_state = job->obj->emit_state;
-    char buf[3];  /* very small integer */
-    unsigned int flags = 0;
-
-    agxbput(xbufs[emit_state], "H ");
-    if (href)
-	flags |= 1;
-    if (tooltip)
-	flags |= 2;
-    if (target)
-	flags |= 4;
-    sprintf (buf, "%d ", flags);
-    agxbput(xbufs[emit_state], buf);
-    if (href)
-	xdot_str (job, "", href);
-    if (tooltip)
-	xdot_str (job, "", tooltip);
-    if (target)
-	xdot_str (job, "", target);
-}
-
-static void xdot_end_anchor(GVJ_t * job)
-{
-    emit_state_t emit_state = job->obj->emit_state;
-
-    agxbput(xbufs[emit_state], "H 0 ");
-}
-#endif
-
 static void xdot_end_cluster(GVJ_t * job)
 {
     Agraph_t* cluster_g = job->obj->u.sg;
@@ -337,27 +274,20 @@ static void xdot_end_cluster(GVJ_t * job)
     textflags[EMIT_CLABEL] = 0;
 }
 
-static unsigned short
-versionStr2Version (char* str)
-{
-    char c, buf[BUFSIZ];
-    int n = 0;
-    char* s = str;
-    unsigned short us;
-
-    while ((c = *s++)) {
-	if (isdigit(c)) {
-	    if (n < BUFSIZ-1) buf[n++] = c;
-	    else {
-		agerr(AGWARN, "xdot version \"%s\" too long", str);
-		break;
-	    }
-	}
+static unsigned short versionStr2Version(const char *str) {
+  unsigned short us = 0;
+  for (size_t i = 0; str[i] != '\0'; ++i) {
+    if (!gv_isdigit(str[i])) {
+      continue;
     }
-    buf[n] = '\0';
-    
-    us = atoi(buf);
-    return us;
+    unsigned short digit = (unsigned short)(str[i] - '0');
+    if (us > (USHRT_MAX - digit) / 10) {
+      agwarningf("xdot version \"%s\" too long", str);
+      break;
+    }
+    us = (unsigned short)(us * 10 + digit);
+  }
+  return us;
 }
 
 /* 
@@ -382,13 +312,13 @@ versionStr2Version (char* str)
  * our drawing spec (and also "<" and ">"), so if you  start generating 
  * output with them, it could break what we have. 
  */
-static void
-xdot_begin_graph (graph_t *g, int s_arrows, int e_arrows, format_type id)
-{
-    int i, us;
+static void xdot_begin_graph(graph_t *g, bool s_arrows, bool e_arrows,
+                             format_type id) {
+    int i;
+    unsigned short us;
     char* s;
 
-    xd = GNEW(xdot_state_t);
+    xd = gv_alloc(sizeof(xdot_state_t));
 
     if (id == FORMAT_XDOT14) {
 	xd->version = 14;
@@ -442,13 +372,11 @@ xdot_begin_graph (graph_t *g, int s_arrows, int e_arrows, format_type id)
 	xd->tl_draw = NULL;
 
     for (i = 0; i < NUMXBUFS; i++)
-	agxbinit(xbuf+i, BUFSIZ, xd->buf[i]);
+	xbuf[i] = (agxbuf){0};
 }
 
 static void dot_begin_graph(GVJ_t *job)
 {
-    int e_arrows;            /* graph has edges with end arrows */
-    int s_arrows;            /* graph has edges with start arrows */
     graph_t *g = job->obj->u.g;
 
     switch (job->render.id) {
@@ -464,10 +392,15 @@ static void dot_begin_graph(GVJ_t *job)
 	    break;
 	case FORMAT_XDOT:
 	case FORMAT_XDOT12:
-	case FORMAT_XDOT14:
+	case FORMAT_XDOT14: {
+	    bool e_arrows; // graph has edges with end arrows
+	    bool s_arrows; // graph has edges with start arrows
 	    attach_attrs_and_arrows(g, &s_arrows, &e_arrows);
 	    xdot_begin_graph(g, s_arrows, e_arrows, job->render.id);
 	    break;
+	}
+	default:
+	    UNREACHABLE();
     }
 }
 
@@ -481,7 +414,7 @@ static void xdot_end_graph(graph_t* g)
 	agxset(g, xd->g_draw, agxbuse(xbufs[EMIT_GDRAW]));
     }
     if (GD_label(g))
-	agxset(g, xd->g_l_draw, agxbuse(xbufs[EMIT_GLABEL]));
+	put_escaping_backslashes(&g->base, xd->g_l_draw, agxbuse(xbufs[EMIT_GLABEL]));
     agsafeset (g, "xdotversion", xd->version_s, "");
 
     for (i = 0; i < NUMXBUFS; i++)
@@ -511,39 +444,39 @@ static void dot_end_graph(GVJ_t *job)
     g->clos->disc.io = &io;
     switch (job->render.id) {
 	case FORMAT_PLAIN:
-	    write_plain(job, g, (FILE*)job, FALSE);
+	    write_plain(job, g, (FILE*)job, false);
 	    break;
 	case FORMAT_PLAIN_EXT:
-	    write_plain(job, g, (FILE*)job, TRUE);
+	    write_plain(job, g, (FILE*)job, true);
 	    break;
 	case FORMAT_DOT:
 	case FORMAT_CANON:
 	    if (!(job->flags & OUTPUT_NOT_REQUIRED))
-		agwrite(g, (FILE*)job);
+		agwrite(g, job);
 	    break;
 	case FORMAT_XDOT:
 	case FORMAT_XDOT12:
 	case FORMAT_XDOT14:
 	    xdot_end_graph(g);
 	    if (!(job->flags & OUTPUT_NOT_REQUIRED))
-		agwrite(g, (FILE*)job);
+		agwrite(g, job);
 	    break;
+	default:
+	    UNREACHABLE();
     }
     g->clos->disc.io = io_save;
 }
 
-static unsigned int flag_masks[] = { 0x1F, 0x3F, 0x7F };
+static const unsigned int flag_masks[] = {0x1F, 0x3F, 0x7F};
 
 static void xdot_textspan(GVJ_t * job, pointf p, textspan_t * span)
 {
     emit_state_t emit_state = job->obj->emit_state;
-    int flags;
-    char buf[BUFSIZ];
+    unsigned flags;
     int j;
     
     agxbput(xbufs[emit_state], "F ");
-    xdot_fmt_num (buf, span->font->size);
-    agxbput(xbufs[emit_state], buf);
+    xdot_fmt_num(xbufs[emit_state], span->font->size);
     xdot_str (job, "", span->font->name);
     xdot_pencolor(job);
 
@@ -563,12 +496,12 @@ static void xdot_textspan(GVJ_t * job, pointf p, textspan_t * span)
 	flags = span->font->flags;
     else
 	flags = 0;
-    if (xd->version >= 15) {
+    const size_t flag_masks_size = sizeof(flag_masks) / sizeof(flag_masks[0]);
+    if (xd->version >= 15 && (size_t)xd->version - 15 < flag_masks_size) {
 	unsigned int mask = flag_masks[xd->version-15];
 	unsigned int bits = flags & mask;
 	if (textflags[emit_state] != bits) {
-	    sprintf (buf, "t %u ", bits);
-	    agxbput(xbufs[emit_state], buf);
+	    agxbprint(xbufs[emit_state], "t %u ", bits);
 	    textflags[emit_state] = bits;
 	}
     }
@@ -576,29 +509,23 @@ static void xdot_textspan(GVJ_t * job, pointf p, textspan_t * span)
     p.y += span->yoffset_centerline;
     agxbput(xbufs[emit_state], "T ");
     xdot_point(xbufs[emit_state], p);
-    sprintf(buf, "%d ", j);
-    agxbput(xbufs[emit_state], buf);
-    xdot_fmt_num (buf, span->size.x);
-    agxbput(xbufs[emit_state], buf);
+    agxbprint(xbufs[emit_state], "%d ", j);
+    xdot_fmt_num(xbufs[emit_state], span->size.x);
     xdot_str (job, "", span->str);
 }
 
 static void xdot_color_stop (agxbuf* xb, float v, gvcolor_t* clr)
 {
-    char buf[BUFSIZ];
-
-    sprintf (buf, "%.03f", v);
-    xdot_trim_zeros (buf, 1);
-    xdot_str_xbuf (xb, buf, color2str (clr->u.rgba));
+  agxbprint(xb, "%.03f", v);
+  agxbuf_trim_zeros(xb);
+  agxbputc(xb, ' ');
+  xdot_str_xbuf(xb, "", color2str (clr->u.rgba));
 }
 
-static void xdot_gradient_fillcolor (GVJ_t* job, int filled, pointf* A, int n)
+static void xdot_gradient_fillcolor(GVJ_t *job, int filled, pointf *A, size_t n)
 {
-    unsigned char buf0[BUFSIZ];
-    agxbuf xbuf;
     obj_state_t* obj = job->obj;
-    float angle = obj->gradient_angle * M_PI / 180;
-    float r1,r2;
+    double angle = obj->gradient_angle * M_PI / 180;
     pointf G[2],c1,c2;
 
     if (xd->version < 14) {
@@ -606,19 +533,18 @@ static void xdot_gradient_fillcolor (GVJ_t* job, int filled, pointf* A, int n)
 	return;
     }
 
-    agxbinit(&xbuf, BUFSIZ, buf0);
+    agxbuf xb = {0};
     if (filled == GRADIENT) {
 	get_gradient_points(A, G, n, angle, 2);
-	agxbputc (&xbuf, '[');
-	xdot_point (&xbuf, G[0]);
-	xdot_point (&xbuf, G[1]);
+	agxbputc (&xb, '[');
+	xdot_point (&xb, G[0]);
+	xdot_point (&xb, G[1]);
     }
     else {
 	get_gradient_points(A, G, n, 0, 3);
-	  //r1 is inner radius, r2 is outer radius
-	r1 = G[1].x;
-	r2 = G[1].y;
-	if (angle == 0) {
+	  // r2 is outer radius
+	double r2 = G[1].y;
+	if (obj->gradient_angle == 0) {
 	    c1.x = G[0].x;
 	    c1.y = G[0].y;
 	}
@@ -628,37 +554,35 @@ static void xdot_gradient_fillcolor (GVJ_t* job, int filled, pointf* A, int n)
 	}
 	c2.x = G[0].x;
 	c2.y = G[0].y;
-	r1 = r2/4;
-	agxbputc(&xbuf, '(');
-	xdot_point (&xbuf, c1);
-	xdot_num (&xbuf, r1);
-	xdot_point (&xbuf, c2);
-	xdot_num (&xbuf, r2);
+	double r1 = r2 / 4;
+	agxbputc(&xb, '(');
+	xdot_point (&xb, c1);
+	xdot_num (&xb, r1);
+	xdot_point (&xb, c2);
+	xdot_num (&xb, r2);
     }
     
-    agxbput(&xbuf, "2 ");
+    agxbput(&xb, "2 ");
     if (obj->gradient_frac > 0) {
-	xdot_color_stop (&xbuf, obj->gradient_frac, &obj->fillcolor);
-	xdot_color_stop (&xbuf, obj->gradient_frac, &obj->stopcolor);
+	xdot_color_stop (&xb, obj->gradient_frac, &obj->fillcolor);
+	xdot_color_stop (&xb, obj->gradient_frac, &obj->stopcolor);
     }
     else {
-	xdot_color_stop (&xbuf, 0, &obj->fillcolor);
-	xdot_color_stop (&xbuf, 1, &obj->stopcolor);
+	xdot_color_stop (&xb, 0, &obj->fillcolor);
+	xdot_color_stop (&xb, 1, &obj->stopcolor);
     }
-    agxbpop(&xbuf);
+    agxbpop(&xb);
     if (filled == GRADIENT)
-	agxbputc(&xbuf, ']');
+	agxbputc(&xb, ']');
     else
-	agxbputc(&xbuf, ')');
-    xdot_str (job, "C ", agxbuse(&xbuf));
-    agxbfree(&xbuf);
+	agxbputc(&xb, ')');
+    xdot_str (job, "C ", agxbuse(&xb));
+    agxbfree(&xb);
 }
 
 static void xdot_ellipse(GVJ_t * job, pointf * A, int filled)
 {
     emit_state_t emit_state = job->obj->emit_state;
-
-    char buf[BUFSIZ];
 
     xdot_style (job);
     xdot_pencolor (job);
@@ -673,35 +597,31 @@ static void xdot_ellipse(GVJ_t * job, pointf * A, int filled)
     else
         agxbput(xbufs[emit_state], "e ");
     xdot_point(xbufs[emit_state], A[0]);
-    xdot_fmt_num (buf, A[1].x - A[0].x);
-    agxbput(xbufs[emit_state], buf);
-    xdot_fmt_num (buf, A[1].y - A[0].y);
-    agxbput(xbufs[emit_state], buf);
+    xdot_fmt_num(xbufs[emit_state], A[1].x - A[0].x);
+    xdot_fmt_num(xbufs[emit_state], A[1].y - A[0].y);
 }
 
-static void xdot_bezier(GVJ_t * job, pointf * A, int n, int arrow_at_start, int arrow_at_end, int filled)
-{
+static void xdot_bezier(GVJ_t *job, pointf *A, size_t n, int filled) {
     xdot_style (job);
     xdot_pencolor (job);
     if (filled) {
 	if ((filled == GRADIENT) || (filled == RGRADIENT)) {
-	   xdot_gradient_fillcolor (job, filled, A, n);
+	   xdot_gradient_fillcolor(job, filled, A, n);
 	}
         else
 	    xdot_fillcolor (job);
-        xdot_points(job, 'b', A, n);   /* NB - 'B' & 'b' are reversed in comparison to the other items */
+        xdot_points(job, 'b', A, n); // NB - 'B' & 'b' are reversed in comparison to the other items
     }
     else
         xdot_points(job, 'B', A, n);
 }
 
-static void xdot_polygon(GVJ_t * job, pointf * A, int n, int filled)
-{
+static void xdot_polygon(GVJ_t *job, pointf *A, size_t n, int filled) {
     xdot_style (job);
     xdot_pencolor (job);
     if (filled) {
 	if ((filled == GRADIENT) || (filled == RGRADIENT)) {
-	   xdot_gradient_fillcolor (job, filled, A, n);
+	   xdot_gradient_fillcolor(job, filled, A, n);
 	}
         else
 	    xdot_fillcolor (job);
@@ -711,25 +631,23 @@ static void xdot_polygon(GVJ_t * job, pointf * A, int n, int filled)
         xdot_points(job, 'p', A, n);
 }
 
-static void xdot_polyline(GVJ_t * job, pointf * A, int n)
-{
+static void xdot_polyline(GVJ_t *job, pointf *A, size_t n) {
     xdot_style (job);
     xdot_pencolor (job);
     xdot_points(job, 'L', A, n);
 }
 
-void core_loadimage_xdot(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+void core_loadimage_xdot(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
+    (void)filled;
+
     emit_state_t emit_state = job->obj->emit_state;
-    char buf[BUFSIZ];
     
     agxbput(xbufs[emit_state], "I ");
     xdot_point(xbufs[emit_state], b.LL);
-    xdot_fmt_num (buf, b.UR.x - b.LL.x);
-    agxbput(xbufs[emit_state], buf);
-    xdot_fmt_num (buf, b.UR.y - b.LL.y);
-    agxbput(xbufs[emit_state], buf);
-    xdot_str (job, "", (char*)(us->name));
+    xdot_fmt_num(xbufs[emit_state], b.UR.x - b.LL.x);
+    xdot_fmt_num(xbufs[emit_state], b.UR.y - b.LL.y);
+    xdot_str (job, "", us->name);
 }
 
 gvrender_engine_t dot_engine = {
@@ -784,13 +702,8 @@ gvrender_engine_t xdot_engine = {
     xdot_end_node,
     0,				/* xdot_begin_edge */
     xdot_end_edge,
-#ifdef NEW_XDOT
-    xdot_begin_anchor,
-    xdot_end_anchor,
-#else
     0,                          /* xdot_begin_anchor */
     0,                          /* xdot_end_anchor */
-#endif
     0,				/* xdot_begin_label */
     0,				/* xdot_end_label */
     xdot_textspan,

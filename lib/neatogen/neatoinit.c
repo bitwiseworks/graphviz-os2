@@ -1,14 +1,18 @@
-/* Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief API neatogen/neatoprocs.h:
+ * @ref neato_init_node, @ref user_pos, @ref neato_cleanup,
+ * @ref init_nop, @ref setSeed, @ref checkStart, @ref neato_layout
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -18,17 +22,25 @@
 #ifndef _WIN32
 #include <unistd.h>
 #endif
-#include <ctype.h>
-
-#include "neato.h"
-#include "pack.h"
-#include "stress.h"
+#include <neatogen/neato.h>
+#include <pack/pack.h>
+#include <neatogen/stress.h>
 #ifdef DIGCOLA
-#include "digcola.h"
+#include <neatogen/digcola.h>
 #endif
-#include "kkutils.h"
-#include "pointset.h"
-#include "sgd.h"
+#include <neatogen/kkutils.h>
+#include <common/pointset.h>
+#include <neatogen/sgd.h>
+#include <cgraph/alloc.h>
+#include <cgraph/bitarray.h>
+#include <cgraph/cgraph.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/prisize_t.h>
+#include <cgraph/startswith.h>
+#include <cgraph/strcasecmp.h>
+#include <cgraph/streq.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 #ifndef HAVE_SRAND48
 #define srand48 srand
@@ -42,33 +54,31 @@ static char *cc_pfx = "_neato_cc";
 
 void neato_init_node(node_t * n)
 {
-    agbindrec(n, "Agnodeinfo_t", sizeof(Agnodeinfo_t), TRUE);	//node custom data
+    agbindrec(n, "Agnodeinfo_t", sizeof(Agnodeinfo_t), true);	//node custom data
     common_init_node(n);
-    ND_pos(n) = N_NEW(GD_ndim(agraphof(n)), double);
+    ND_pos(n) = gv_calloc(GD_ndim(agraphof(n)), sizeof(double));
     gv_nodesize(n, GD_flip(agraphof(n)));
 }
 
 static void neato_init_edge(edge_t * e)
 {
-    agbindrec(e, "Agedgeinfo_t", sizeof(Agedgeinfo_t), TRUE);	//node custom data
+    agbindrec(e, "Agedgeinfo_t", sizeof(Agedgeinfo_t), true);	//node custom data
     common_init_edge(e);
     ED_factor(e) = late_double(e, E_weight, 1.0, 1.0);
 }
 
-int user_pos(attrsym_t * posptr, attrsym_t * pinptr, node_t * np, int nG)
-{
+bool user_pos(attrsym_t *posptr, attrsym_t *pinptr, node_t *np, int nG) {
     double *pvec;
     char *p, c;
     double z;
 
     if (posptr == NULL)
-	return FALSE;
+	return false;
     pvec = ND_pos(np);
     p = agxget(np, posptr);
     if (p[0]) {
 	c = '\0';
-	if ((Ndim >= 3) &&
-            (sscanf(p, "%lf,%lf,%lf%c", pvec, pvec+1, pvec+2, &c) >= 3)){
+	if (Ndim >= 3 && sscanf(p, "%lf,%lf,%lf%c", pvec, pvec+1, pvec+2, &c) >= 3){
 	    ND_pinned(np) = P_SET;
 	    if (PSinputscale > 0.0) {
 		int i;
@@ -77,19 +87,19 @@ int user_pos(attrsym_t * posptr, attrsym_t * pinptr, node_t * np, int nG)
 	    }
 	    if (Ndim > 3)
 		jitter_d(np, nG, 3);
-	    if ((c == '!') || (pinptr && mapbool(agxget(np, pinptr))))
+	    if (c == '!' || (pinptr && mapbool(agxget(np, pinptr))))
 		ND_pinned(np) = P_PIN;
-	    return TRUE;
+	    return true;
 	}
 	else if (sscanf(p, "%lf,%lf%c", pvec, pvec + 1, &c) >= 2) {
 	    ND_pinned(np) = P_SET;
 	    if (PSinputscale > 0.0) {
 		int i;
 		for (i = 0; i < Ndim; i++)
-		    pvec[i] = pvec[i] / PSinputscale;
+		    pvec[i] /= PSinputscale;
 	    }
 	    if (Ndim > 2) {
-		if (N_z && (p = agxget(np, N_z)) && (sscanf(p,"%lf",&z) == 1)) {
+		if (N_z && (p = agxget(np, N_z)) && sscanf(p,"%lf",&z) == 1) {
 		    if (PSinputscale > 0.0) {
 			pvec[2] = z / PSinputscale;
 		    }
@@ -100,14 +110,14 @@ int user_pos(attrsym_t * posptr, attrsym_t * pinptr, node_t * np, int nG)
 		else
 		    jitter3d(np, nG);
 	    }
-	    if ((c == '!') || (pinptr && mapbool(agxget(np, pinptr))))
+	    if (c == '!' || (pinptr && mapbool(agxget(np, pinptr))))
 		ND_pinned(np) = P_PIN;
-	    return TRUE;
+	    return true;
 	} else
-	    agerr(AGERR, "node %s, position %s, expected two doubles\n",
+	    agerrorf("node %s, position %s, expected two doubles\n",
 		  agnameof(np), p);
     }
-    return FALSE;
+    return false;
 }
 
 static void neato_init_node_edge(graph_t * g)
@@ -132,12 +142,10 @@ static void neato_init_node_edge(graph_t * g)
 
 static void neato_cleanup_graph(graph_t * g)
 {
-    if (Nop || (Pack < 0)) {
+    if (Nop || Pack < 0) {
 	free_scan_graph(g);
-	free(GD_clust(g));
     }
-    if (g != agroot(g))
-        agclean(g, AGRAPH , "Agraphinfo_t");
+    free(GD_clust(g));
 }
 
 void neato_cleanup(graph_t * g)
@@ -154,20 +162,19 @@ void neato_cleanup(graph_t * g)
     neato_cleanup_graph(g);
 }
 
-static int numFields(unsigned char *pos)
-{
+static int numFields(const char *pos) {
     int cnt = 0;
-    unsigned char c;
+    char c;
 
     do {
-	while (isspace(*pos))
+	while (gv_isspace(*pos))
 	    pos++;		/* skip white space */
 	if ((c = *pos)) { /* skip token */
 	    cnt++;
-	    while ((c = *pos) && !isspace(c) && (c != ';'))
+	    while ((c = *pos) && !gv_isspace(c) && c != ';')
 		pos++;
 	}
-    } while (isspace(c));
+    } while (gv_isspace(c));
     return cnt;
 }
 
@@ -176,42 +183,40 @@ static void set_label(void* obj, textlabel_t * l, char *name)
     double x, y;
     char *lp;
     lp = agget(obj, name);
-    if (lp && (sscanf(lp, "%lf,%lf", &x, &y) == 2)) {
-	l->pos = pointfof(x, y);
-	l->set = TRUE;
+    if (lp && sscanf(lp, "%lf,%lf", &x, &y) == 2) {
+	l->pos = (pointf){x, y};
+	l->set = true;
     }
 }
 
 #ifdef IPSEPCOLA
-static cluster_data* cluster_map(graph_t *mastergraph, graph_t *g)
-{
+static cluster_data cluster_map(graph_t *mastergraph, graph_t *g) {
     graph_t *subg;
     node_t *n;
      /* array of arrays of node indices in each cluster */
     int **cs,*cn;
     int i,j,nclusters=0;
-    boolean* assigned = N_NEW(agnnodes(g), boolean);
-    cluster_data *cdata = GNEW(cluster_data);
+    bitarray_t assigned = bitarray_new(agnnodes(g));
+    cluster_data cdata = {0};
 
-    cdata->ntoplevel = agnnodes(g);
+    cdata.ntoplevel = agnnodes(g);
     for (subg = agfstsubg(mastergraph); subg; subg = agnxtsubg(subg)) {
-        if (!strncmp(agnameof(subg), "cluster", 7)) {
+        if (startswith(agnameof(subg), "cluster")) {
             nclusters++;
         }
     }
-    cdata->nvars=0;
-    cdata->nclusters = nclusters;
-    cs = cdata->clusters = N_GNEW(nclusters,int*);
-    cn = cdata->clustersizes = N_GNEW(nclusters,int);
+    cdata.nvars=0;
+    cdata.nclusters = nclusters;
+    cs = cdata.clusters = gv_calloc(nclusters, sizeof(int*));
+    cn = cdata.clustersizes = gv_calloc(nclusters, sizeof(int));
     for (subg = agfstsubg(mastergraph); subg; subg = agnxtsubg(subg)) {
         /* clusters are processed by separate calls to ordered_edges */
-        if (!strncmp(agnameof(subg), "cluster", 7)) {
+        if (startswith(agnameof(subg), "cluster")) {
             int *c;
 
             *cn = agnnodes(subg);
-            cdata->nvars += *cn;
-            c = *cs++ = N_GNEW(*cn++,int);
-            /* fprintf(stderr,"Cluster with %d nodes...\n",agnnodes(subg)); */
+            cdata.nvars += *cn;
+            c = *cs++ = gv_calloc(*cn++, sizeof(int));
             for (n = agfstnode(subg); n; n = agnxtnode(subg, n)) {
                 node_t *gn;
                 int ind = 0;
@@ -219,34 +224,32 @@ static cluster_data* cluster_map(graph_t *mastergraph, graph_t *g)
                     if(AGSEQ(gn)==AGSEQ(n)) break;
                     ind++;
                 }
-                /* fprintf(stderr,"  node=%s, id=%d, ind=%d\n",agnameof(n),n->id,ind); */
                 *c++=ind;
-                assigned[ind]=TRUE;
-                cdata->ntoplevel--;
+                bitarray_set(&assigned, ind, true);
+                cdata.ntoplevel--;
             }
         }
     }
-    cdata->bb=N_GNEW(cdata->nclusters,boxf);
-    cdata->toplevel=N_GNEW(cdata->ntoplevel,int);
+    cdata.bb = gv_calloc(cdata.nclusters, sizeof(boxf));
+    cdata.toplevel = gv_calloc(cdata.ntoplevel, sizeof(int));
     for(i=j=0;i<agnnodes(g);i++) {
-        if(!assigned[i]) {
-            cdata->toplevel[j++]=i;
+        if(!bitarray_get(assigned, i)) {
+            cdata.toplevel[j++] = i;
         }
     }
-    assert(cdata->ntoplevel==agnnodes(g)-cdata->nvars);
-    free (assigned);
+    assert(cdata.ntoplevel == agnnodes(g) - cdata.nvars);
+    bitarray_reset(&assigned);
     return cdata;
 }
 
-static void freeClusterData(cluster_data *c) {
-    if(c->nclusters>0) {
-        free(c->clusters[0]);
-        free(c->clusters);
-        free(c->clustersizes);
-        free(c->toplevel);
-        free(c->bb);
+static void freeClusterData(cluster_data c) {
+    if (c.nclusters > 0) {
+        free(c.clusters[0]);
+        free(c.clusters);
+        free(c.clustersizes);
+        free(c.toplevel);
+        free(c.bb);
     }
-    free(c);
 }
 #endif
 
@@ -259,20 +262,19 @@ static int user_spline(attrsym_t * E_pos, edge_t * e)
 {
     char *pos;
     int i, n, npts, nc;
-    pointf *ps = 0;
     pointf *pp;
     double x, y;
     int sflag = 0, eflag = 0;
     pointf sp = { 0, 0 }, ep = { 0, 0};
     bezier *newspl;
     int more = 1;
-    int stype, etype;
-    static boolean warned;
+    static bool warned;
 
     pos = agxget(e, E_pos);
     if (*pos == '\0')
 	return 0;
 
+    uint32_t stype, etype;
     arrow_flags(e, &stype, &etype);
     do {
 	/* check for s head */
@@ -293,43 +295,44 @@ static int user_spline(attrsym_t * E_pos, edge_t * e)
 	    ep.y = y;
 	}
 
-	npts = numFields((unsigned char *) pos);	/* count potential points */
+	npts = numFields(pos); // count potential points
 	n = npts;
-	if ((n < 4) || (n % 3 != 1)) {
+	if (n < 4 || n % 3 != 1) {
 	    gv_free_splines(e);
 	    if (!warned) {
-		warned = 1;
-		agerr(AGWARN, "pos attribute for edge (%s,%s) doesn't have 3n+1 points\n", agnameof(agtail(e)), agnameof(aghead(e)));
+		warned = true;
+		agwarningf("pos attribute for edge (%s,%s) doesn't have 3n+1 points\n", agnameof(agtail(e)), agnameof(aghead(e)));
 	    }
 	    return 0;
 	}
-	ps = ALLOC(n, 0, pointf);
+	pointf *ps = gv_calloc(n, sizeof(pointf));
 	pp = ps;
 	while (n) {
 	    i = sscanf(pos, "%lf,%lf%n", &x, &y, &nc);
 	    if (i < 2) {
 		if (!warned) {
-		    warned = 1;
-		    agerr(AGWARN, "syntax error in pos attribute for edge (%s,%s)\n", agnameof(agtail(e)), agnameof(aghead(e)));
+		    warned = true;
+		    agwarningf("syntax error in pos attribute for edge (%s,%s)\n", agnameof(agtail(e)), agnameof(aghead(e)));
 		}
 		free(ps);
 		gv_free_splines(e);
 		return 0;
 	    }
-	    pos = pos + nc;
+	    pos += nc;
 	    pp->x = x;
 	    pp->y = y;
 	    pp++;
 	    n--;
 	}
- 	while (isspace(*pos)) pos++;
+ 	while (gv_isspace(*pos)) pos++;
 	if (*pos == '\0')
 	    more = 0;
 	else
 	    pos++;
 
 	/* parsed successfully; create spline */
-	newspl = new_spline(e, npts);
+	assert(npts >= 0);
+	newspl = new_spline(e, (size_t)npts);
 	if (sflag) {
 	    newspl->sflag = stype;
 	    newspl->sp = sp;
@@ -382,7 +385,7 @@ static pos_edge nop_init_edges(Agraph_t * g)
 	return AllEdges;
 
     E_pos = agfindedgeattr(g, "pos");
-    if (!E_pos || (Nop < 2))
+    if (!E_pos || Nop < 2)
 	return NoEdges;
 
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
@@ -451,7 +454,8 @@ static void add_cluster(Agraph_t * g, Agraph_t * subg)
 {
     int cno;
     cno = ++(GD_n_cluster(g));
-    GD_clust(g) = ZALLOC(cno + 1, GD_clust(g), graph_t *, GD_n_cluster(g));
+    GD_clust(g) = gv_recalloc(GD_clust(g), GD_n_cluster(g), cno + 1,
+                              sizeof(graph_t*));
     GD_clust(g)[cno] = subg;
     do_graph_label(subg);
 }
@@ -471,8 +475,8 @@ dfs(Agraph_t * subg, Agraph_t * parentg, attrsym_t * G_lp, attrsym_t * G_bb)
 {
     boxf bb;
 
-    if (!strncmp(agnameof(subg), "cluster", 7) && chkBB(subg, G_bb, &bb)) {
-	agbindrec(subg, "Agraphinfo_t", sizeof(Agraphinfo_t), TRUE);
+    if (startswith(agnameof(subg), "cluster") && chkBB(subg, G_bb, &bb)) {
+	agbindrec(subg, "Agraphinfo_t", sizeof(Agraphinfo_t), true);
 	GD_bb(subg) = bb;
 	add_cluster(parentg, subg);
 	nop_init_graphs(subg, G_lp, G_bb);
@@ -499,8 +503,8 @@ nop_init_graphs(Agraph_t * g, attrsym_t * G_lp, attrsym_t * G_bb)
     if (GD_label(g) && G_lp) {
 	s = agxget(g, G_lp);
 	if (sscanf(s, "%lf,%lf", &x, &y) == 2) {
-	    GD_label(g)->pos = pointfof(x, y);
-	    GD_label(g)->set = TRUE;
+	    GD_label(g)->pos = (pointf){x, y};
+	    GD_label(g)->set = true;
 	}
     }
 
@@ -535,7 +539,7 @@ int init_nop(Agraph_t * g, int adjust)
     attrsym_t *G_bb = agfindgraphattr(g, "bb");
     int didAdjust = 0;  /* Have nodes been moved? */
     int haveBackground;
-    boolean translate = !mapBool(agget(g, "notranslate"), FALSE);
+    bool translate = !mapbool(agget(g, "notranslate"));
 
     /* If G_bb not defined, define it */
     if (!G_bb)
@@ -543,8 +547,8 @@ int init_nop(Agraph_t * g, int adjust)
 
     scan_graph(g);		/* mainly to set up GD_neato_nlist */
     for (i = 0; (np = GD_neato_nlist(g)[i]); i++) {
-	if (!hasPos(np) && strncmp(agnameof(np), "cluster", 7)) {
-	    agerr(AGERR, "node %s in graph %s has no position\n",
+	if (!hasPos(np) && !startswith(agnameof(np), "cluster")) {
+	    agerrorf("node %s in graph %s has no position\n",
 		  agnameof(np), agnameof(g));
 	    return -1;
 	}
@@ -561,11 +565,11 @@ int init_nop(Agraph_t * g, int adjust)
     else
 	haveBackground = 0;
 
-    if (adjust && (Nop == 1) && !haveBackground)
+    if (adjust && Nop == 1 && !haveBackground)
 	didAdjust = adjustNodes(g);
 
     if (didAdjust) {
-	if (GD_label(g)) GD_label(g)->set = FALSE;
+	if (GD_label(g)) GD_label(g)->set = false;
 /* FIX:
  *   - if nodes are moved, clusters are no longer valid.
  */
@@ -584,22 +588,22 @@ int init_nop(Agraph_t * g, int adjust)
 	node_t *n;
 	State = GVSPLINES;
 	for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-	    ND_coord(n).x = POINTS_PER_INCH * (ND_pos(n)[0]);
-	    ND_coord(n).y = POINTS_PER_INCH * (ND_pos(n)[1]);
+	    ND_coord(n).x = POINTS_PER_INCH * ND_pos(n)[0];
+	    ND_coord(n).y = POINTS_PER_INCH * ND_pos(n)[1];
 	}
     }
     else {
-	boolean didShift;
-	if (translate && !haveBackground && ((GD_bb(g).LL.x != 0)||(GD_bb(g).LL.y != 0)))
+	bool didShift;
+	if (translate && !haveBackground && (GD_bb(g).LL.x != 0||GD_bb(g).LL.y != 0))
 	    neato_translate (g);
 	didShift = neato_set_aspect(g);
 	/* if we have some edge positions and we either shifted or adjusted, free edge positions */
-	if ((posEdges != NoEdges) && (didShift || didAdjust)) {
+	if (posEdges != NoEdges && (didShift || didAdjust)) {
 	    freeEdgeInfo (g);
 	    posEdges = NoEdges;
 	}
 	if (posEdges != AllEdges)
-	    spline_edges0(g, FALSE);   /* add edges */
+	    spline_edges0(g, false);   /* add edges */
 	else
 	    State = GVSPLINES;
     }
@@ -611,7 +615,7 @@ static void neato_init_graph (Agraph_t * g)
 {
     int outdim;
 
-    setEdgeType (g, ET_LINE);
+    setEdgeType (g, EDGETYPE_LINE);
     outdim = late_int(g, agfindgraphattr(g, "dimen"), 2, 2);
     GD_ndim(agroot(g)) = late_int(g, agfindgraphattr(g, "dim"), outdim, 2);
     Ndim = GD_ndim(g->root) = MIN(GD_ndim(g->root), MAXDIM);
@@ -622,29 +626,26 @@ static void neato_init_graph (Agraph_t * g)
 static int neatoModel(graph_t * g)
 {
     char *p = agget(g, "model");
-    char c;
 
-    if (!p || (!(c = *p)))    /* if p is NULL or "" */
+    if (!p || streq(p, ""))    /* if p is NULL or "" */
 	return MODEL_SHORTPATH;
-    if ((c == 'c') && streq(p, "circuit"))
+    if (streq(p, "circuit"))
 	return MODEL_CIRCUIT;
-    if (c == 's') {
-	if (streq(p, "subset"))
-	    return MODEL_SUBSET;
-	else if (streq(p, "shortpath"))
-	    return MODEL_SHORTPATH;
-    }
-    if ((c == 'm') && streq(p, "mds")) {
+    if (streq(p, "subset"))
+	return MODEL_SUBSET;
+    if (streq(p, "shortpath"))
+	return MODEL_SHORTPATH;
+    if (streq(p, "mds")) {
 	if (agattr(g, AGEDGE, "len", 0))
 	    return MODEL_MDS;
 	else {
-	    agerr(AGWARN,
+	    agwarningf(
 	        "edges in graph %s have no len attribute. Hence, the mds model\n", agnameof(g));
 	    agerr(AGPREV, "is inappropriate. Reverting to the shortest path model.\n");
 	    return MODEL_SHORTPATH;
 	}
     }
-    agerr(AGWARN,
+    agwarningf(
 	  "Unknown value %s for attribute \"model\" in graph %s - ignored\n",
 	  p, agnameof(g));
     return MODEL_SHORTPATH;
@@ -658,7 +659,7 @@ static int neatoMode(graph_t * g)
     int mode = MODE_MAJOR;	/* default mode */
 
     str = agget(g, "mode");
-    if (str && *str) {
+    if (str && !streq(str, "")) {
 	if (streq(str, "KK"))
 	    mode = MODE_KK;
 	else if (streq(str, "major"))
@@ -674,7 +675,7 @@ static int neatoMode(graph_t * g)
 #endif
 #endif
 	else
-	    agerr(AGWARN,
+	    agwarningf(
 		  "Illegal value %s for attribute \"mode\" in graph %s - ignored\n",
 		  str, agnameof(g));
     }
@@ -707,29 +708,30 @@ static void
 dfsCycle (vtx_data* graph, int i,int mode, node_t* nodes[])
 {
     node_t *np, *hp;
-    int j, e, f;
+    int j;
     /* if mode is IPSEP make it an in-edge
      * at both ends, so that an edge constraint won't be generated!
      */
-    double x = (mode==MODE_IPSEP?-1.0:1.0);
+    double x = mode==MODE_IPSEP?-1.0:1.0;
 
     np = nodes[i];
-    ND_mark(np) = TRUE;
-    ND_onstack(np) = TRUE;
-    for (e = 1; e < graph[i].nedges; e++) {
+    ND_mark(np) = true;
+    ND_onstack(np) = true;
+    for (size_t e = 1; e < graph[i].nedges; e++) {
 	if (graph[i].edists[e] == 1.0) continue;  /* in edge */
 	j = graph[i].edges[e];
 	hp = nodes[j];
 	if (ND_onstack(hp)) {  /* back edge: reverse it */
             graph[i].edists[e] = x;
-            for (f = 1; (f < graph[j].nedges) &&(graph[j].edges[f] != i); f++) ;
+            size_t f;
+            for (f = 1; f < graph[j].nedges && graph[j].edges[f] != i; f++) ;
             assert (f < graph[j].nedges);
             graph[j].edists[f] = -1.0;
         }
-	else if (ND_mark(hp) == FALSE) dfsCycle(graph, j, mode, nodes);
+	else if (!ND_mark(hp)) dfsCycle(graph, j, mode, nodes);
 
     }
-    ND_onstack(np) = FALSE;
+    ND_onstack(np) = false;
 }
 
 /* acyclic:
@@ -743,8 +745,8 @@ acyclic (vtx_data* graph, int nv, int mode, node_t* nodes[])
 
     for (i = 0; i < nv; i++) {
 	np = nodes[i];
-	ND_mark(np) = FALSE;
-	ND_onstack(np) = FALSE;
+	ND_mark(np) = false;
+	ND_onstack(np) = false;
     }
     for (i = 0; i < nv; i++) {
 	if (ND_mark(nodes[i])) continue;
@@ -774,10 +776,7 @@ acyclic (vtx_data* graph, int nv, int mode, node_t* nodes[])
  */
 static vtx_data *makeGraphData(graph_t * g, int nv, int *nedges, int mode, int model, node_t*** nodedata)
 {
-    vtx_data *graph;
-    node_t** nodes;
     int ne = agnedges(g);	/* upper bound */
-    int *edges;
     float *ewgts = NULL;
     node_t *np;
     edge_t *ep;
@@ -785,35 +784,29 @@ static vtx_data *makeGraphData(graph_t * g, int nv, int *nedges, int mode, int m
 #ifdef DIGCOLA
     float *edists = NULL;
 #endif
-    attrsym_t *haveLen;
-    int haveWt;
-    int haveDir;
     PointMap *ps = newPM();
-    int i, i_nedges, idx;
+    int i, idx;
 
     /* lengths and weights unused in reweight model */
-    if (model == MODEL_SUBSET) {
-	haveLen = FALSE;
-	haveWt = FALSE;
-    } else {
-	haveLen = agattr(g, AGEDGE, "len", 0) ;
-	haveWt = (E_weight != 0);
+    bool haveLen = false;
+    bool haveWt = false;
+    if (model != MODEL_SUBSET) {
+	haveLen = agattr(g, AGEDGE, "len", 0) != NULL;
+	haveWt = E_weight != 0;
     }
-    if (mode == MODE_HIER || mode == MODE_IPSEP)
-	haveDir = TRUE;
-    else
-	haveDir = FALSE;
+    bool haveDir = mode == MODE_HIER || mode == MODE_IPSEP;
 
-    graph = N_GNEW(nv, vtx_data);
-    nodes = N_GNEW(nv, node_t*);
-    edges = N_GNEW(2 * ne + nv, int);	/* reserve space for self loops */
+    vtx_data *graph = gv_calloc(nv, sizeof(vtx_data));
+    node_t** nodes = gv_calloc(nv, sizeof(node_t*));
+    const size_t edges_size = (size_t)(2 * ne + nv);
+    int *edges = gv_calloc(edges_size, sizeof(int)); // reserve space for self loops
     if (haveLen || haveDir)
-	ewgts = N_GNEW(2 * ne + nv, float);
+	ewgts = gv_calloc(edges_size, sizeof(float));
     if (haveWt)
-	eweights = N_GNEW(2 * ne + nv, float);
+	eweights = gv_calloc(edges_size, sizeof(float));
 #ifdef DIGCOLA
     if (haveDir)
-	edists = N_GNEW(2*ne+nv,float);
+	edists = gv_calloc(edges_size, sizeof(float));
 #endif
 
     i = 0;
@@ -839,7 +832,7 @@ static vtx_data *makeGraphData(graph_t * g, int nv, int *nedges, int mode, int m
 	else
 	    graph[i].edists = NULL;
 #endif
-	i_nedges = 1;		/* one for the self */
+	size_t i_nedges = 1; // one for the self
 
 	for (ep = agfstedge(g, np); ep; ep = agnxtedge(g, ep, np)) {
 	    if (aghead(ep) == agtail(ep))
@@ -849,11 +842,10 @@ static vtx_data *makeGraphData(graph_t * g, int nv, int *nedges, int mode, int m
 		if (haveWt)
 		    graph[i].eweights[idx] += ED_factor(ep);
 		if (haveLen) {
-		    int curlen = graph[i].ewgts[idx];
-		    graph[i].ewgts[idx] = MAX(ED_dist(ep), curlen);
+		    graph[i].ewgts[idx] = fmax(graph[i].ewgts[idx], ED_dist(ep));
 		}
 	    } else {
-		node_t *vp = (((agtail(ep)) == np) ? aghead(ep) : agtail(ep));
+		node_t *vp = agtail(ep) == np ? aghead(ep) : agtail(ep);
 		ne++;
 		j++;
 
@@ -867,10 +859,10 @@ static vtx_data *makeGraphData(graph_t * g, int nv, int *nedges, int mode, int m
 #ifdef DIGCOLA
                 if (haveDir) {
                     char *s = agget(ep,"dir");
-                    if(s&&!strncmp(s,"none",4)) {
+                    if(s && startswith(s, "none")) {
                         *edists++ = 0;
                     } else {
-                        *edists++ = (np == aghead(ep) ? 1.0 : -1.0);
+                        *edists++ = np == aghead(ep) ? 1.0 : -1.0;
                     }
                 }
 #endif
@@ -880,9 +872,6 @@ static vtx_data *makeGraphData(graph_t * g, int nv, int *nedges, int mode, int m
 
 	graph[i].nedges = i_nedges;
 	graph[i].edges[0] = i;
-#ifdef USE_STYLES
-	graph[i].styles = NULL;
-#endif
 	i++;
     }
 #ifdef DIGCOLA
@@ -896,14 +885,14 @@ static vtx_data *makeGraphData(graph_t * g, int nv, int *nedges, int mode, int m
 
     /* If necessary, release extra memory. */
     if (ne != agnedges(g)) {
-	edges = RALLOC(2 * ne + nv, graph[0].edges, int);
+	edges = gv_recalloc(graph[0].edges, edges_size, 2 * ne + nv, sizeof(int));
 	if (haveLen)
-	    ewgts = RALLOC(2 * ne + nv, graph[0].ewgts, float);
+	    ewgts = gv_recalloc(graph[0].ewgts, edges_size, 2 * ne + nv, sizeof(float));
 	if (haveWt)
-	    eweights = RALLOC(2 * ne + nv, graph[0].eweights, float);
+	    eweights = gv_recalloc(graph[0].eweights, edges_size, 2 * ne + nv, sizeof(float));
 
 	for (i = 0; i < nv; i++) {
-	    int sz = graph[i].nedges;
+	    const size_t sz = graph[i].nedges;
 	    graph[i].edges = edges;
 	    edges += sz;
 	    if (haveLen) {
@@ -932,7 +921,7 @@ static void initRegular(graph_t * G, int nG)
     node_t *np;
 
     a = 0.0;
-    da = (2 * M_PI) / nG;
+    da = 2 * M_PI / nG;
     for (np = agfstnode(G); np; np = agnxtnode(G, np)) {
 	ND_pos(np)[0] = nG * Spring_coeff * cos(a);
 	ND_pos(np)[1] = nG * Spring_coeff * sin(a);
@@ -964,34 +953,34 @@ setSeed (graph_t * G, int dflt, long* seedp)
     char *p = agget(G, "start");
     int init = dflt;
 
-    if (!p || (*p == '\0')) return dflt;
-    if (isalpha(*(unsigned char *)p)) {
-	if (!strncmp(p, SMART, SLEN(SMART))) {
+    if (!p || *p == '\0') return dflt;
+    if (gv_isalpha(*p)) {
+	if (startswith(p, SMART)) {
 	    init = INIT_SELF;
 	    p += SLEN(SMART);
-	} else if (!strncmp(p, REGULAR, SLEN(REGULAR))) {
+	} else if (startswith(p, REGULAR)) {
 	    init = INIT_REGULAR;
 	    p += SLEN(REGULAR);
-	} else if (!strncmp(p, RANDOM, SLEN(RANDOM))) {
+	} else if (startswith(p, RANDOM)) {
 	    init = INIT_RANDOM;
 	    p += SLEN(RANDOM);
 	}
 	else init = dflt;
     }
-    else if (isdigit(*(unsigned char *)p)) {
+    else if (gv_isdigit(*p)) {
 	init = INIT_RANDOM;
     }
 
     if (init == INIT_RANDOM) {
 	long seed;
 	/* Check for seed value */
-	if (!isdigit(*(unsigned char *)p) || sscanf(p, "%ld", &seed) < 1) {
+	if (!gv_isdigit(*p) || sscanf(p, "%ld", &seed) < 1) {
 #if defined(_WIN32)
 	    seed = (unsigned) time(NULL);
 #else
 	    seed = (unsigned) getpid() ^ (unsigned) time(NULL);
 #endif
-	    sprintf(smallbuf, "%ld", seed);
+	    snprintf(smallbuf, sizeof(smallbuf), "%ld", seed);
 	    agset(G, "start", smallbuf);
 	}
 	*seedp = seed;
@@ -1008,8 +997,8 @@ setSeed (graph_t * G, int dflt, long* seedp)
 static int checkExp (graph_t * G)
 {
     int exp = late_int(G, agfindgraphattr(G, exp_name), 2, 0);
-    if ((exp == 0) || (exp > 2)) {
-	agerr (AGWARN, "%s attribute value must be 1 or 2 - ignoring\n", exp_name);
+    if (exp == 0 || exp > 2) {
+	agwarningf("%s attribute value must be 1 or 2 - ignoring\n", exp_name);
 	exp = 2;
     }
     return exp;
@@ -1032,8 +1021,8 @@ int checkStart(graph_t * G, int nG, int dflt)
 
     seed = 1;
     init = setSeed (G, dflt, &seed);
-    if (N_pos && (init != INIT_RANDOM)) {
-	agerr(AGWARN, "node positions are ignored unless start=random\n");
+    if (N_pos && init != INIT_RANDOM) {
+	agwarningf("node positions are ignored unless start=random\n");
     }
     if (init == INIT_REGULAR) initRegular(G, nG);
     srand48(seed);
@@ -1044,36 +1033,36 @@ int checkStart(graph_t * G, int nG, int dflt)
 void dumpData(graph_t * g, vtx_data * gp, int nv, int ne)
 {
     node_t *v;
-    int i, j, n;
+    int i;
 
     fprintf(stderr, "#nodes %d #edges %d\n", nv, ne);
     for (v = agfstnode(g); v; v = agnxtnode(g, v)) {
 	fprintf(stderr, "\"%s\" %d\n", agnameof(v), ND_id(v));
     }
     for (i = 0; i < nv; i++) {
-	n = gp[i].nedges;
-	fprintf(stderr, "[%d] %d\n", i, n);
-	for (j = 0; j < n; j++) {
+	const size_t n = gp[i].nedges;
+	fprintf(stderr, "[%d] %" PRISIZE_T "\n", i, n);
+	for (size_t j = 0; j < n; j++) {
 	    fprintf(stderr, "  %3d", gp[i].edges[j]);
 	}
 	fputs("\n", stderr);
 	if (gp[i].ewgts) {
 	    fputs("  ewgts", stderr);
-	    for (j = 0; j < n; j++) {
+	    for (size_t j = 0; j < n; j++) {
 		fprintf(stderr, "  %3f", gp[i].ewgts[j]);
 	    }
 	    fputs("\n", stderr);
 	}
 	if (gp[i].eweights) {
 	    fputs("  eweights", stderr);
-	    for (j = 0; j < n; j++) {
+	    for (size_t j = 0; j < n; j++) {
 		fprintf(stderr, "  %3f", gp[i].eweights[j]);
 	    }
 	    fputs("\n", stderr);
 	}
 	if (gp[i].edists) {
 	    fputs("  edists", stderr);
-	    for (j = 0; j < n; j++) {
+	    for (size_t j = 0; j < n; j++) {
 		fprintf(stderr, "  %3f", gp[i].edists[j]);
 	    }
 	    fputs("\n", stderr);
@@ -1126,11 +1115,10 @@ void dumpOpts (ipsep_options* opp, int nv)
  * mode will be MODE_MAJOR, MODE_HIER or MODE_IPSEP
  */
 static void
-majorization(graph_t *mg, graph_t * g, int nv, int mode, int model, int dim, int steps, adjust_data* am)
+majorization(graph_t *mg, graph_t * g, int nv, int mode, int model, int dim, adjust_data* am)
 {
-    double **coords;
     int ne;
-    int i, rv = 0;
+    int rv = 0;
     node_t *v;
     vtx_data *gp;
     node_t** nodes;
@@ -1139,24 +1127,23 @@ majorization(graph_t *mg, graph_t * g, int nv, int mode, int model, int dim, int
     expand_t margin;
 #endif
 #endif
-    int init = checkStart(g, nv, (mode == MODE_HIER ? INIT_SELF : INIT_RANDOM));
+    int init = checkStart(g, nv, mode == MODE_HIER ? INIT_SELF : INIT_RANDOM);
     int opts = checkExp (g);
 
     if (init == INIT_SELF)
 	opts |= opt_smart_init;
 
-    coords = N_GNEW(dim, double *);
-    coords[0] = N_GNEW(nv * dim, double);
-    for (i = 1; i < Ndim; i++) {
+    double **coords = gv_calloc(dim, sizeof(double *));
+    coords[0] = gv_calloc(nv * dim, sizeof(double));
+    for (int i = 1; i < Ndim; i++) {
 	coords[i] = coords[0] + i * nv;
     }
     if (Verbose) {
 	fprintf(stderr, "model %d smart_init %d stresswt %d iterations %d tol %f\n",
-		model, (init == INIT_SELF), opts & opt_exp_flag, MaxIter, Epsilon);
+		model, init == INIT_SELF, opts & opt_exp_flag, MaxIter, Epsilon);
 	fprintf(stderr, "convert graph: ");
 	start_timer();
         fprintf(stderr, "majorization\n");
-//     fprintf(stderr, "%i\n", count_nodes(g));
     }
     gp = makeGraphData(g, nv, &ne, mode, model, &nodes);
 
@@ -1168,20 +1155,16 @@ majorization(graph_t *mg, graph_t * g, int nv, int mode, int model, int dim, int
     if (mode != MODE_MAJOR) {
         double lgap = late_double(g, agfindgraphattr(g, "levelsgap"), 0.0, -MAXDOUBLE);
         if (mode == MODE_HIER) {
-            rv = stress_majorization_with_hierarchy(gp, nv, ne, coords, nodes, Ndim,
+            rv = stress_majorization_with_hierarchy(gp, nv, coords, nodes, Ndim,
                        opts, model, MaxIter, lgap);
         }
 #ifdef IPSEPCOLA
 	else {
             char* str;
             ipsep_options opt;
-            pointf* nsize;
-	    cluster_data *cs = (cluster_data*)cluster_map(mg,g);
-	    nsize = N_GNEW(nv, pointf);
+	    cluster_data cs = cluster_map(mg,g);
+            pointf *nsize = gv_calloc(nv, sizeof(pointf));
             opt.edge_gap = lgap;
-#ifdef MOSEK
-            opt.mosek = 0;
-#endif /* MOSEK */
             opt.nsize = nsize;
             opt.clusters = cs;
             str = agget(g, "diredgeconstraints");
@@ -1205,14 +1188,6 @@ majorization(graph_t *mg, graph_t * g, int nv, int mode, int model, int dim, int
                     fprintf(stderr,"Removing overlaps as postprocess...\n");
             }
             else opt.noverlap = 0;
-#ifdef MOSEK
-            str = agget(g, "mosek");
-            if(str && !strncmp(str,"true",4)) {
-                opt.mosek = 1;
-                if(Verbose)
-                    fprintf(stderr,"Using Mosek for constraint optimization...\n");
-            }
-#endif /* MOSEK */
 	    margin = sepFactor (g);
  	    /* Multiply by 2 since opt.gap is the gap size, not the margin */
 	    if (margin.doAdd) {
@@ -1222,15 +1197,18 @@ majorization(graph_t *mg, graph_t * g, int nv, int mode, int model, int dim, int
             else opt.gap.x = opt.gap.y = 2.0*PS2INCH(DFLT_MARGIN);
 	    if(Verbose)
 		fprintf(stderr,"gap=%f,%f\n",opt.gap.x,opt.gap.y);
-            for (i=0, v = agfstnode(g); v; v = agnxtnode(g, v),i++) {
-                nsize[i].x = ND_width(v);
-                nsize[i].y = ND_height(v);
+            {
+                size_t i = 0;
+                for (v = agfstnode(g); v; v = agnxtnode(g, v),i++) {
+                    nsize[i].x = ND_width(v);
+                    nsize[i].y = ND_height(v);
+                }
             }
 
 #ifdef DEBUG_COLA
 	    fprintf (stderr, "nv %d ne %d Ndim %d model %d MaxIter %d\n", nv, ne, Ndim, model, MaxIter);
 	    fprintf (stderr, "Nodes:\n");
-	    for (i = 0; i < nv; i++) {
+	    for (int i = 0; i < nv; i++) {
 		fprintf (stderr, "  %s (%f,%f)\n", nodes[i]->name, coords[0][i],  coords[1][i]);
 	    }
 	    fprintf (stderr, "\n");
@@ -1238,7 +1216,7 @@ majorization(graph_t *mg, graph_t * g, int nv, int mode, int model, int dim, int
 	    fprintf (stderr, "\n");
 	    dumpOpts (&opt, nv);
 #endif
-            rv = stress_majorization_cola(gp, nv, ne, coords, nodes, Ndim, model, MaxIter, &opt);
+            rv = stress_majorization_cola(gp, nv, coords, nodes, Ndim, model, MaxIter, &opt);
 	    freeClusterData(cs);
 	    free (nsize);
         }
@@ -1246,15 +1224,14 @@ majorization(graph_t *mg, graph_t * g, int nv, int mode, int model, int dim, int
     }
     else
 #endif
-	rv = stress_majorization_kD_mkernel(gp, nv, ne, coords, nodes, Ndim, opts, model, MaxIter);
+	rv = stress_majorization_kD_mkernel(gp, nv, coords, nodes, Ndim, opts, model, MaxIter);
 
     if (rv < 0) {
 	agerr(AGPREV, "layout aborted\n");
     }
     else for (v = agfstnode(g); v; v = agnxtnode(g, v)) { /* store positions back in nodes */
 	int idx = ND_id(v);
-	int i;
-	for (i = 0; i < Ndim; i++) {
+	for (int i = 0; i < Ndim; i++) {
 	    ND_pos(v)[i] = coords[i][idx];
 	}
     }
@@ -1267,11 +1244,10 @@ majorization(graph_t *mg, graph_t * g, int nv, int mode, int model, int dim, int
 static void subset_model(Agraph_t * G, int nG)
 {
     int i, j, ne;
-    DistType **Dij;
     vtx_data *gp;
 
     gp = makeGraphData(G, nG, &ne, MODE_KK, MODEL_SUBSET, NULL);
-    Dij = compute_apsp_artifical_weights(gp, nG);
+    DistType **Dij = compute_apsp_artificial_weights(gp, nG);
     for (i = 0; i < nG; i++) {
 	for (j = 0; j < nG; j++) {
 	    GD_dist(G)[i][j] = Dij[i][j];
@@ -1286,7 +1262,7 @@ static void subset_model(Agraph_t * G, int nG)
  * Assume the matrix already contains shortest path values.
  * Use the actual lengths provided the input for edges.
  */
-static void mds_model(graph_t * g, int nG)
+static void mds_model(graph_t * g)
 {
     long i, j;
     node_t *v;
@@ -1312,7 +1288,7 @@ static void kkNeato(Agraph_t * g, int nG, int model)
 	subset_model(g, nG);
     } else if (model == MODEL_CIRCUIT) {
 	if (!circuit_model(g, nG)) {
-	    agerr(AGWARN,
+	    agwarningf(
 		  "graph %s is disconnected. Hence, the circuit model\n",
 		  agnameof(g));
 	    agerr(AGPREV,
@@ -1324,7 +1300,7 @@ static void kkNeato(Agraph_t * g, int nG, int model)
 	}
     } else if (model == MODEL_MDS) {
 	shortest_path(g, nG);
-	mds_model(g, nG);
+	mds_model(g);
     } else
 	shortest_path(g, nG);
     initial_positions(g, nG);
@@ -1357,14 +1333,14 @@ neatoLayout(Agraph_t * mg, Agraph_t * g, int layoutMode, int layoutModel,
 	MaxIter = 100 * agnnodes(g);
 
     nG = scan_graph_mode(g, layoutMode);
-    if ((nG < 2) || (MaxIter < 0))
+    if (nG < 2 || MaxIter < 0)
 	return;
     if (layoutMode == MODE_KK)
 	kkNeato(g, nG, layoutModel);
     else if (layoutMode == MODE_SGD)
 	sgd(g, layoutModel);
     else
-	majorization(mg, g, nG, layoutMode, layoutModel, Ndim, MaxIter, am);
+	majorization(mg, g, nG, layoutMode, layoutModel, Ndim, am);
 }
 
 /* addZ;
@@ -1376,9 +1352,9 @@ static void addZ (Agraph_t* g)
     node_t* n;
     char    buf[BUFSIZ];
 
-    if ((Ndim >= 3) && N_z) {
+    if (Ndim >= 3 && N_z) {
 	for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-	    sprintf(buf, "%lf", POINTS_PER_INCH * (ND_pos(n)[2]));
+	    snprintf(buf, sizeof(buf), "%lf", POINTS_PER_INCH * ND_pos(n)[2]);
 	    agxset(n, N_z, buf);
 	}
     }
@@ -1390,8 +1366,8 @@ addCluster (graph_t* g)
 {
     graph_t *subg;
     for (subg = agfstsubg(agroot(g)); subg; subg = agnxtsubg(subg)) {
-	if (!strncmp(agnameof(subg), "cluster", 7)) {
-	    agbindrec(subg, "Agraphinfo_t", sizeof(Agraphinfo_t), TRUE);
+	if (startswith(agnameof(subg), "cluster")) {
+	    agbindrec(subg, "Agraphinfo_t", sizeof(Agraphinfo_t), true);
 	    add_cluster(g, subg);
 	    compute_bb(subg);
 	}
@@ -1406,7 +1382,7 @@ addCluster (graph_t* g)
 static void doEdges(Agraph_t* g)
 {
     compute_bb(g);
-    spline_edges0(g, TRUE);
+    spline_edges0(g, true);
 }
 
 /* neato_layout:
@@ -1432,7 +1408,7 @@ void neato_layout(Agraph_t * g)
 	}
 	else gv_postprocess(g, 0);
     } else {
-	boolean noTranslate = mapBool(agget(g, "notranslate"), FALSE);
+	bool noTranslate = mapbool(agget(g, "notranslate"));
 	PSinputscale = get_inputscale (g);
 	neato_init_graph(g);
 	layoutMode = neatoMode(g);
@@ -1445,7 +1421,7 @@ void neato_layout(Agraph_t * g)
 	    /* If the user has not indicated packing but we are
 	     * using the new neato, turn packing on.
 	     */
-	    if ((Pack < 0) && layoutMode)
+	    if (Pack < 0 && layoutMode)
 		Pack = CL_OFFSET;
 	    pinfo.mode = l_node;
 	} else if (Pack < 0)
@@ -1453,34 +1429,32 @@ void neato_layout(Agraph_t * g)
 	if (Pack >= 0) {
 	    graph_t *gc;
 	    graph_t **cc;
-	    int n_cc;
-	    int i;
-	    boolean pin;
+	    size_t n_cc;
+	    bool pin;
 
 	    cc = pccomps(g, &n_cc, cc_pfx, &pin);
 
 	    if (n_cc > 1) {
-		boolean *bp;
-		for (i = 0; i < n_cc; i++) {
+		bool *bp;
+		for (size_t i = 0; i < n_cc; i++) {
 		    gc = cc[i];
-		    nodeInduce(gc);
+		    (void)graphviz_node_induce(gc, NULL);
 		    neatoLayout(g, gc, layoutMode, model, &am);
 		    removeOverlapWith(gc, &am);
-		    setEdgeType (gc, ET_LINE);
+		    setEdgeType (gc, EDGETYPE_LINE);
 		    if (noTranslate) doEdges(gc);
 		    else spline_edges(gc);
 		}
 		if (pin) {
-		    bp = N_NEW(n_cc, boolean);
-		    bp[0] = TRUE;
+		    bp = gv_calloc(n_cc, sizeof(bool));
+		    bp[0] = true;
 		} else
-		    bp = 0;
-		pinfo.margin = Pack;
+		    bp = NULL;
+		pinfo.margin = (unsigned)Pack;
 		pinfo.fixed = bp;
-		pinfo.doSplines = 1;
+		pinfo.doSplines = true;
 		packGraphs(n_cc, cc, g, &pinfo);
-		if (bp)
-		    free(bp);
+		free(bp);
 	    }
 	    else {
 		neatoLayout(g, g, layoutMode, model, &am);
@@ -1492,7 +1466,7 @@ void neato_layout(Agraph_t * g)
 	    addZ (g);
 
 	    /* cleanup and remove component subgraphs */
-	    for (i = 0; i < n_cc; i++) {
+	    for (size_t i = 0; i < n_cc; i++) {
 		gc = cc[i];
 		free_scan_graph(gc);
 		agdelrec (gc, "Agraphinfo_t");
@@ -1513,3 +1487,13 @@ void neato_layout(Agraph_t * g)
     }
     PSinputscale = save_scale;
 }
+
+/**
+ * @dir lib/neatogen
+ * @brief "spring model" layout engine, API neatogen/neatoprocs.h
+ * @ingroup engines
+ *
+ * [Neato layout user manual](https://graphviz.org/docs/layouts/neato/)
+ *
+ * Other @ref engines
+ */

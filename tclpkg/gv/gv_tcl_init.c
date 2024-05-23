@@ -1,31 +1,34 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include <tcl.h>
-#include "gvc.h"
-#include "gvplugin.h"
-#include "gvcjob.h"
-#include "gvcint.h"
+#include <gvc/gvc.h>
+#include <gvc/gvplugin.h>
+#include <gvc/gvcjob.h>
+#include <gvc/gvcint.h>
+#include <limits.h>
+#include "gv_channel.h"
 
 static size_t gv_string_writer(GVJ_t *job, const char *s, size_t len)
 {
-    Tcl_AppendToObj((Tcl_Obj*)(job->output_file), s, len);
-    return len;
+  // clamp to INT_MAX
+  int l = len > (size_t)INT_MAX ? INT_MAX : (int)len;
+  Tcl_AppendToObj((Tcl_Obj*)(job->output_file), s, l);
+  return (size_t)l;
 }
 
 static size_t gv_channel_writer(GVJ_t *job, const char *s, size_t len)
 {
-    return Tcl_Write((Tcl_Channel)(job->output_file), s, len);
+  // clamp to INT_MAX
+  int l = len > (size_t)INT_MAX ? INT_MAX : (int)len;
+  return (size_t)Tcl_Write((Tcl_Channel)(job->output_file), s, l);
 }
 
 void gv_string_writer_init(GVC_t *gvc)

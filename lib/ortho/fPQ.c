@@ -1,23 +1,20 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /* Priority Queue Code for shortest path in graph */
 
 #include "config.h"
-#include <memory.h>
+#include <cgraph/alloc.h>
 #include <assert.h>
 
-#include "fPQ.h"
+#include <ortho/fPQ.h>
 
 static snode**  pq;
 static int     PQcnt;
@@ -28,7 +25,7 @@ void
 PQgen(int sz)
 {
   if (!pq) {
-    pq = N_NEW(sz+1,snode*);
+    pq = gv_calloc(sz + 1, sizeof(snode*));
     pq[0] = &guard;
     PQsize = sz;
   }
@@ -83,8 +80,8 @@ int
 PQ_insert(snode* np)
 {
   if (PQcnt == PQsize) {
-    agerr (AGERR, "Heap overflow\n");
-    return (1);
+    agerrorf("Heap overflow\n");
+    return 1;
   }
   PQcnt++;
   pq[PQcnt] = np;

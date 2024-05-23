@@ -3,29 +3,34 @@
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
-#include "general.h"
-#include "QuadTree.h"
-#include "furtherest_point.h"
+
+#include <cgraph/alloc.h>
+#include <cgraph/list.h>
+#include <cgraph/prisize_t.h>
+#include <sparse/general.h>
+#include <sparse/QuadTree.h>
+#include <edgepaint/furtherest_point.h>
+#include <stdbool.h>
 #include <string.h>
 
-static real dist(int dim, real *x, real *y){
+static double dist(int dim, double *x, double *y){
   int k;
-  real d = 0;
+  double d = 0;
   for (k = 0; k < dim; k++) d += (x[k] - y[k])*(x[k]-y[k]);
   return sqrt(d);
 }
 
 
-static real distance_to_group(int k, int dim, real *wgt, real *pts, real *center, real (*usr_dist)(int, real*, real*)){
+static double distance_to_group(int k, int dim, double *wgt, double *pts, double *center){
   int i;
-  real distance = -1, dist_min = 0;
+  double distance = -1, dist_min = 0;
   if (!wgt){
     for (i = 0; i < k; i++){
-      distance = (*usr_dist)(dim, &(pts[i*dim]), center);
+      distance = dist(dim, &(pts[i*dim]), center);
       if (i == 0){
 	dist_min = distance;
       } else {
@@ -34,7 +39,7 @@ static real distance_to_group(int k, int dim, real *wgt, real *pts, real *center
     }
   } else {
     for (i = 0; i < k; i++){
-      distance = (*usr_dist)(dim, &(pts[i*dim]), center);
+      distance = dist(dim, &(pts[i*dim]), center);
       if (i == 0){
 	dist_min = wgt[i]*distance;
       } else {
@@ -45,7 +50,9 @@ static real distance_to_group(int k, int dim, real *wgt, real *pts, real *center
   return dist_min;
 }
 
-void furtherest_point(int k, int dim, real *wgt, real *pts, real *center, real width, int max_level, real (*usr_dist)(int, real*, real*), real *dist_max, real **argmax){
+DEFINE_LIST(qt_list, QuadTree)
+
+void furtherest_point(int k, int dim, double *wgt, double *pts, double *center, double width, int max_level, double *dist_max, double **argmax){
   /* Assume that in the box defined by {center, width} are feasible;     
      find, in the, a point "furtherest_point" that is furtherest away from a group of k-points pts, using quadtree,
      with up to max_level. Here the distance of a point to a group of point is defined as the minimum 
@@ -62,38 +69,31 @@ void furtherest_point(int k, int dim, real *wgt, real *pts, real *center, real w
      center: the center of the root of quadtree
      width: the width of the root
      max_level: max level to go down
-     usr_dist: the distance function. If NULL, assume Euclidean. If NULL, set to Euclidean.
      argmax: on entry, if NULL, will be allocated, iotherwise must be an array of size >= dim which will hold the furtherest point. 
 
      Return: the point (argmax) furtherest away from the group, and the distance dist_max.
    */
   QuadTree qt, qt0;
-  int ncandidates = 10, ncandidates_max = 10, ntmp;
-  QuadTree *candidates, *ctmp;/* a cadidate array of quadtrees */
-  int ncandidates2 = 10, ncandidates2_max = 10;
-  QuadTree *candidates2;/* a cadidate array of quadtrees */
-  real distance;
+  double distance;
   int level = 0;
-  int i, ii, j, pruned;
-  real wmax = 0;
+  int ii, j;
+  double wmax = 0;
 
-  if (!usr_dist) usr_dist = dist;
   if (wgt){
-    for (i = 0; i < k; i++) wmax = MAX(wgt[i], wmax);
+    for (int i = 0; i < k; i++) wmax = MAX(wgt[i], wmax);
   } else {
     wmax = 1.;
   }
 
   qt0 = qt = QuadTree_new(dim, center, width, max_level);
 
-  qt->total_weight = *dist_max = distance_to_group(k, dim, wgt, pts, center, usr_dist);/* store distance in total_weight */
-  if (!(*argmax)) *argmax = MALLOC(sizeof(real)*dim);
-  memcpy(*argmax, center, sizeof(real)*dim);
+  qt->total_weight = *dist_max = distance_to_group(k, dim, wgt, pts, center);/* store distance in total_weight */
+  if (!(*argmax)) *argmax = gv_calloc(dim, sizeof(double));
+  memcpy(*argmax, center, sizeof(double)*dim);
 
-  candidates = MALLOC(sizeof(qt)*ncandidates_max);
-  candidates2 = MALLOC(sizeof(qt)*ncandidates2_max);
-  candidates[0] = qt;
-  ncandidates = 1;
+  qt_list_t candidates = {0};
+  qt_list_t candidates2 = {0};
+  qt_list_append(&candidates, qt);
 
   /* idea: maintain the current best point and best (largest) distance. check the list of candidate. Subdivide each into quadrants, if any quadrant gives better distance, update, and put on the candidate
      list. If we can not prune a quadrant (a quadrant can be pruned if the distance of its center to the group of points pts, plus that from the center to the corner of the quadrant, is smaller than the best), we
@@ -102,26 +102,26 @@ void furtherest_point(int k, int dim, real *wgt, real *pts, real *center, real w
     if (Verbose > 10) {
       fprintf(stderr,"level=%d=================\n", level);
     }
-    ncandidates2 = 0;
-    for (i = 0; i < ncandidates; i++){
+    qt_list_clear(&candidates2);
+    for (size_t i = 0; i < qt_list_size(&candidates); i++){
 
 
-      qt = candidates[i];
+      qt = qt_list_get(&candidates, i);
       assert(!(qt->qts));
 
       if (Verbose > 10) {
-	fprintf(stderr,"candidate %d at {", i);
+	fprintf(stderr, "candidate %" PRISIZE_T " at {", i);
 	for (j = 0; j < dim; j++) fprintf(stderr,"%f, ", qt->center[j]);
 	fprintf(stderr,"}, width = %f, dist = %f\n", qt->width, qt->total_weight);
       }
 
       distance = qt->total_weight;/* total_weight is used to store the distance from the center to the group */
-      if (distance + wmax*sqrt(((real) dim))*qt->width < *dist_max) continue;/* this could happen if this candidate was entered into the list earlier than a better one later in the list */
-      qt->qts = MALLOC(sizeof(QuadTree)*(1<<dim));
+      if (distance + wmax*sqrt(((double) dim))*qt->width < *dist_max) continue;/* this could happen if this candidate was entered into the list earlier than a better one later in the list */
+      qt->qts = gv_calloc(1 << dim, sizeof(QuadTree));
       for (ii = 0; ii < 1<<dim; ii++) {
 	qt->qts[ii] = QuadTree_new_in_quadrant(qt->dim, qt->center, (qt->width)/2, max_level, ii);
-	qt->qts[ii]->total_weight = distance = distance_to_group(k, dim, wgt, pts, qt->qts[ii]->center, usr_dist);/* store distance in total_weight */
-	pruned = FALSE;
+	qt->qts[ii]->total_weight = distance = distance_to_group(k, dim, wgt, pts, qt->qts[ii]->center);/* store distance in total_weight */
+	bool pruned = false;
 	if (distance > *dist_max){
 	  *dist_max = distance;
 	  if (Verbose > 10) {
@@ -129,30 +129,18 @@ void furtherest_point(int k, int dim, real *wgt, real *pts, real *center, real w
 	    for (j = 0; j < dim; j++) fprintf(stderr,"%f, ", qt->qts[ii]->center[j]);
 	    fprintf(stderr,"}\n");
  	  }
-	  memcpy(*argmax, qt->qts[ii]->center, sizeof(real)*dim);
-	} else if (distance + wmax*sqrt(((real) dim))*(qt->width)/2 < *dist_max){
-	  pruned = TRUE;
+	  memcpy(*argmax, qt->qts[ii]->center, sizeof(double)*dim);
+	} else if (distance + wmax*sqrt(((double) dim))*(qt->width)/2 < *dist_max){
+	  pruned = true;
 	}
 	if (!pruned){
-	  if (ncandidates2 >= ncandidates2_max){
-	    ncandidates2_max += (int)MAX(0.2*ncandidates2_max, 10);
-	    candidates2 = REALLOC(candidates2, sizeof(QuadTree)*ncandidates2_max);
-	  }
-	  candidates2[ncandidates2++] = qt->qts[ii];
+	  qt_list_append(&candidates2, qt->qts[ii]);
 	}
       }/* finish checking every of the 2^dim siblings */
     }/* finish checking all the candidates */
 
     /* sawp the two lists */
-    ntmp = ncandidates;
-    ncandidates = ncandidates2;
-    ncandidates2 = ntmp;
-
-    ntmp = ncandidates_max;
-    ncandidates_max = ncandidates2_max;
-    ncandidates2_max = ntmp;
-
-    ctmp = candidates;
+    qt_list_t ctmp = candidates;
     candidates = candidates2;
     candidates2 = ctmp;
 
@@ -166,14 +154,12 @@ void furtherest_point(int k, int dim, real *wgt, real *pts, real *center, real w
 
   QuadTree_delete(qt0);
 
-  FREE(candidates);
-  FREE(candidates2);
-
+  qt_list_free(&candidates);
+  qt_list_free(&candidates2);
 }
 
-
-void furtherest_point_in_list(int k, int dim, real *wgt, real *pts, QuadTree qt, int max_level, 
-			      real (*usr_dist)(int, real*, real*), real *dist_max, real **argmax){
+void furtherest_point_in_list(int k, int dim, double *wgt, double *pts, QuadTree qt, int max_level, 
+			      double *dist_max, double **argmax){
   /* Given a list of points in the Euclidean space contained in the quadtree qt (called the feasible points), find among them one that
      is closest to another list of point {dim, k, pts}.
 
@@ -193,39 +179,31 @@ void furtherest_point_in_list(int k, int dim, real *wgt, real *pts, QuadTree qt,
      center: the center of the root of quadtree
      width: the width of the root
      max_level: max level to go down
-     usr_dist: the distance function. If NULL, assume Euclidean. If NULL, set to Euclidean.
      argmax: on entry, if NULL, will be allocated, otherwise must be an array of size >= dim which will hold the furtherest point. 
 
      Return: the point (argmax) furtherest away from the group, and the distance dist_max.
    */
 
-  int ncandidates = 10, ncandidates_max = 10, ntmp;
-  QuadTree *candidates, *ctmp;/* a candidate array of quadtrees */
-  int ncandidates2 = 10, ncandidates2_max = 10;
-  QuadTree *candidates2;/* a candidate array of quadtrees */
-  real distance;
+  double distance;
   int level = 0;
-  int i, ii, j, pruned;
-  real *average;
-  real wmax = 0.;
-
-  if (!usr_dist) usr_dist = dist;
+  int ii, j;
+  double *average;
+  double wmax = 0.;
 
   if (wgt){
-    for (i = 0; i < k; i++) wmax = MAX(wgt[i], wmax);
+    for (int i = 0; i < k; i++) wmax = MAX(wgt[i], wmax);
   } else {
     wmax = 1.;
   }
 
   average = qt->average;
-  qt->total_weight = *dist_max = distance_to_group(k, dim, wgt, pts, average, usr_dist);/* store distance in total_weight */
-  if (!(*argmax)) *argmax = MALLOC(sizeof(real)*dim);
-  memcpy(*argmax, average, sizeof(real)*dim);
+  qt->total_weight = *dist_max = distance_to_group(k, dim, wgt, pts, average);/* store distance in total_weight */
+  if (!(*argmax)) *argmax = gv_calloc(dim, sizeof(double));
+  memcpy(*argmax, average, sizeof(double)*dim);
 
-  candidates = MALLOC(sizeof(qt)*ncandidates_max);
-  candidates2 = MALLOC(sizeof(qt)*ncandidates2_max);
-  candidates[0] = qt;
-  ncandidates = 1;
+  qt_list_t candidates = {0};
+  qt_list_t candidates2 = {0};
+  qt_list_append(&candidates, qt);
 
   /* idea: maintain the current best point and best (largest) distance. check the list of candidate. Subdivide each into quadrants, if any quadrant gives better distance, update, and put on the candidate
      list. If we can not prune a quadrant (a quadrant can be pruned if the distance of its center to the group of points pts, plus that from the center to the corner of the quadrant, is smaller than the best), we
@@ -234,26 +212,26 @@ void furtherest_point_in_list(int k, int dim, real *wgt, real *pts, QuadTree qt,
     if (Verbose > 10) {
       fprintf(stderr,"level=%d=================\n", level);
     }
-    ncandidates2 = 0;
-    for (i = 0; i < ncandidates; i++){
-      qt = candidates[i];
+    qt_list_clear(&candidates2);
+    for (size_t i = 0; i < qt_list_size(&candidates); i++){
+      qt = qt_list_get(&candidates, i);
 
       if (Verbose > 10) {
-	fprintf(stderr,"candidate %d at {", i);
+	fprintf(stderr,"candidate %" PRISIZE_T " at {", i);
 	for (j = 0; j < dim; j++) fprintf(stderr,"%f, ", qt->center[j]);
 	fprintf(stderr,"}, width = %f, dist = %f\n", qt->width, qt->total_weight);
       }
 
       distance = qt->total_weight;/* total_weight is used to store the distance from average feasible points to the group */
-      if (qt->n == 1 || distance + wmax*2*sqrt(((real) dim))*qt->width < *dist_max) continue;/* this could happen if this candidate was entered into the list earlier than a better one later in the list. Since the distance
+      if (qt->n == 1 || distance + wmax*2*sqrt(((double) dim))*qt->width < *dist_max) continue;/* this could happen if this candidate was entered into the list earlier than a better one later in the list. Since the distance
 									     is from the average of the feasible points in the square which may not be at the center */
 
       if (!(qt->qts)) continue;
 
       for (ii = 0; ii < 1<<dim; ii++) {
 	if (!(qt->qts[ii])) continue;
-	qt->qts[ii]->total_weight = distance = distance_to_group(k, dim, wgt, pts, qt->qts[ii]->average, usr_dist);/* store distance in total_weight */
-	pruned = FALSE;
+	qt->qts[ii]->total_weight = distance = distance_to_group(k, dim, wgt, pts, qt->qts[ii]->average);/* store distance in total_weight */
+	bool pruned = false;
 	if (distance > *dist_max){
 	  *dist_max = distance;
 	  if (Verbose > 10) {
@@ -261,36 +239,23 @@ void furtherest_point_in_list(int k, int dim, real *wgt, real *pts, QuadTree qt,
 	    for (j = 0; j < dim; j++) fprintf(stderr,"%f, ", qt->qts[ii]->average[j]);
 	    fprintf(stderr,"}\n");
  	  }
-	  memcpy(*argmax, qt->qts[ii]->average, sizeof(real)*dim);
-	} else if (distance + wmax*sqrt(((real) dim))*(qt->width) < *dist_max){/* average feasible point in this square is too close to the point set */
-	  pruned = TRUE;
+	  memcpy(*argmax, qt->qts[ii]->average, sizeof(double)*dim);
+	} else if (distance + wmax*sqrt(((double) dim))*(qt->width) < *dist_max){/* average feasible point in this square is too close to the point set */
+	  pruned = true;
 	}
 	if (!pruned){
-	  if (ncandidates2 >= ncandidates2_max){
-	    ncandidates2_max += (int)MAX(0.2*ncandidates2_max, 10);
-	    candidates2 = REALLOC(candidates2, sizeof(QuadTree)*ncandidates2_max);
-	  }
-	  candidates2[ncandidates2++] = qt->qts[ii];
+	  qt_list_append(&candidates2, qt->qts[ii]);
 	}
       }/* finish checking every of the 2^dim siblings */
     }/* finish checking all the candidates */
 
     /* sawp the two lists */
-    ntmp = ncandidates;
-    ncandidates = ncandidates2;
-    ncandidates2 = ntmp;
-
-    ntmp = ncandidates_max;
-    ncandidates_max = ncandidates2_max;
-    ncandidates2_max = ntmp;
-
-    ctmp = candidates;
+    qt_list_t ctmp = candidates;
     candidates = candidates2;
     candidates2 = ctmp;
 
   }/* continue down the quadtree */
 
-  FREE(candidates);
-  FREE(candidates2);
-
+  qt_list_free(&candidates);
+  qt_list_free(&candidates2);
 }

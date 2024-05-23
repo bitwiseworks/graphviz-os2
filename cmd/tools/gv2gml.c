@@ -1,9 +1,11 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief DOT-GML converter
+ */
 
 /**********************************************************
 *      This software is part of the graphviz package      *
-*                http://www.graphviz.org/                 *
+*                  https://graphviz.org                   *
 *                                                         *
 *            Copyright (c) 1994-2004 AT&T Corp.           *
 *                and is licensed under the                *
@@ -14,28 +16,31 @@
 *              AT&T Research, Florham Park NJ             *
 **********************************************************/
 
-#include "config.h"
-
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 
 #include <getopt.h>
 
-#include <cgraph.h>
-#include <ctype.h>
-#include <ingraphs.h>
+#include <cgraph/cgraph.h>
+#include <cgraph/exit.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/ingraphs.h>
+#include <cgraph/streq.h>
+#include <cgraph/strview.h>
+#include <cgraph/tokenize.h>
+#include <cgraph/unreachable.h>
+#include <common/types.h>
+#include <common/utils.h>
+#include "openFile.h"
 
 static FILE *outFile;
 static char *CmdName;
 static char **Files;
 static uint64_t id;
-
-#define streq(s,t) (!strcmp(s,t))
+static bool yworks; ///< use yWorks.com variant of GML?
 
 #define POS_SET (1<<0)
 #define W_SET   (1<<1)
@@ -81,89 +86,69 @@ typedef struct {
     char* fontName;
 } edge_attrs;
 
-typedef struct Agnodeinfo_t {
+typedef struct {
     Agrec_t h;
     uint64_t id;
-} Agnodeinfo_t;
+} Local_Agnodeinfo_t;
 
-#define ID(n)  (((Agnodeinfo_t*)(n->base.data))->id)
+#define ID(n)  (((Local_Agnodeinfo_t*)(n->base.data))->id)
 
-static void indent (int ix, FILE* outFile)
-{
+static void indent(int ix) {
     while (ix--)
 	fprintf (outFile, "  ");
 }
 
-/* isNumber:
- * Return true if input string is number
- */
-static int
-isNumber (char* s)
-{
+/// Return true if input string is number
+static bool isNumber(char* s) {
     char* ep = s;
     strtod(s, &ep);
     if (s != ep) {
-	while (*ep && isspace(*ep)) ep++;
-	if (*ep) return 0;
-	else return 1;
+	while (gv_isspace(*ep)) ep++;
+	if (*ep) return false;
+	return true;
     }
-    else
-	return 0;
+    return false;
 }
 
-/* parseStyle:
- * Simple implementation for parsing style attribute
- */
+/// Simple implementation for parsing style attribute
 static int 
 parseStyle (char* s)
 {
     int flags = 0;
-    char* ip;
     char* sep = " \t,";
 
-#ifdef _WIN32 
-	s = _strdup(s);
-#else
-	s = strdup(s);
-#endif
-    for (ip = strtok (s, sep); ip; ip = strtok (NULL, sep)) {
-	if (streq(ip,"invis")) flags |= INVIS;
-	else if (streq(ip,"filled")) flags |= FILL;
-	else if (streq(ip,"dashed")) flags |= DASH;
-	else if (streq(ip,"dotted")) flags |= DOT;
-	else if (streq(ip,"solid")) flags |= LINE;
-	else if (streq(ip,"bold")) flags |= BOLD;
+    for (tok_t t = tok(s, sep); !tok_end(&t); tok_next(&t)) {
+	strview_t ip = tok_get(&t);
+	if (strview_str_eq(ip, "invis")) flags |= INVIS;
+	else if (strview_str_eq(ip, "filled")) flags |= FILL;
+	else if (strview_str_eq(ip, "dashed")) flags |= DASH;
+	else if (strview_str_eq(ip, "dotted")) flags |= DOT;
+	else if (strview_str_eq(ip, "solid")) flags |= LINE;
+	else if (strview_str_eq(ip, "bold")) flags |= BOLD;
     }  
 
-    free (s);
     return flags;
 }
 
-static void 
-emitInt (char* name, int value, FILE* outFile, int ix)
-{
-    indent (ix, outFile);
+static void emitInt(char *name, int value, int ix) {
+    indent(ix);
     fprintf (outFile, "%s %d\n", name, value);
 }
 
-static void 
-emitReal (char* name, double value, FILE* outFile, int ix)
-{
-    indent (ix, outFile);
+static void emitReal(char *name, double value, int ix) {
+    indent(ix);
     fprintf (outFile, "%s %g\n", name, value);
 }
 
-static void
-emitPoint (double x, double y, FILE* outFile, int ix)
-{
-    indent (ix, outFile);
+static void emitPoint(double x, double y, int ix) {
+    indent(ix);
     fprintf (outFile, "point [ x %g y %g ]\n", x, y);
 }
 
 static char*
 skipWS (char* s)
 {
-    while (isspace(*s)) s++;
+    while (gv_isspace(*s)) s++;
     return s;
 }
 
@@ -194,42 +179,53 @@ arrowEnd (char* s0, char* pfx, int* fp, double* xp, double* yp)
     s = readPoint (s, xp, yp);
     if (s == NULL) {
 	fprintf (stderr, "Illegal spline end: %s\n", s0);
-	exit (1);
+	graphviz_exit(1);
     }
     *fp = 1;
     return s;
 }
 
-static void
-emitSpline (char* s, FILE* outFile, int ix)
-{
+static void emitSpline(char *s, int ix) {
     double sx, sy, ex, ey;
     int sarrow = 0;
     int earrow = 0;
 
     s = arrowEnd (s, "e,", &earrow, &ex, &ey); 
     s = arrowEnd (s, "s,", &sarrow, &sx, &sy); 
-    indent (ix, outFile);
+    indent(ix);
     fprintf (outFile, "Line [\n");
     if (sarrow)
-	emitPoint (sx, sy, outFile, ix+1);
+	emitPoint(sx, sy, ix+1);
     while ((s = readPoint (s, &sx, &sy)))
-	emitPoint (sx, sy, outFile, ix+1);
+	emitPoint(sx, sy, ix+1);
     if (earrow)
-	emitPoint (ex, ey, outFile, ix+1);
-    indent (ix, outFile);
+	emitPoint(ex, ey, ix+1);
+    indent(ix);
     fprintf (outFile, "]\n");
 
 }
 
-static void 
-emitAttr (char* name, char* value, FILE* outFile, int ix)
-{
-    indent (ix, outFile);
+// `fputs` wrapper to handle the difference in calling convention to what
+// `xml_escape`’s `cb` expects
+static inline int put(void *stream, const char *s) {
+  return fputs(s, stream);
+}
+
+// write a string to the given file, XML-escaping the input
+static inline int xml_puts(FILE *stream, const char *s) {
+  const xml_flags_t flags = {.dash = 1, .nbsp = 1};
+  return xml_escape(s, flags, put, stream);
+}
+
+static void emitAttr(char *name, char *value, int ix) {
+    indent(ix);
     if (isNumber (value))
 	fprintf (outFile, "%s %s\n", name, value);
-    else  
-	fprintf (outFile, "%s \"%s\"\n", name, value);
+    else {
+	fprintf(outFile, "%s \"", name);
+	xml_puts(outFile, value);
+	fputs("\"\n", outFile);
+    }
 }
 
 /* node attributes:
@@ -237,9 +233,7 @@ emitAttr (char* name, char* value, FILE* outFile, int ix)
  * graphics
  * LabelGraphics
  */
-static void 
-emitNodeAttrs (Agraph_t* G, Agnode_t* np, FILE* outFile, int ix)
-{
+static void  emitNodeAttrs(Agraph_t *G, Agnode_t *np, int ix) {
     Agsym_t*  s;
     char* v;
     node_attrs attrs;
@@ -272,12 +266,12 @@ emitNodeAttrs (Agraph_t* G, Agnode_t* np, FILE* outFile, int ix)
 	    v = agxget (np, s);
 	    if (streq("\\N", v)) {
 		label = agnameof(np);
-		emitAttr (s->name, label, outFile, ix);
+		emitAttr(s->name, label, ix);
 		doLabelGraphics = 1;
 	    }
 	    else if (*v) {
 		label = v;
-		emitAttr (s->name, label, outFile, ix);
+		emitAttr(s->name, label, ix);
 		doLabelGraphics = 1;
 	    }
 	}
@@ -357,7 +351,7 @@ emitNodeAttrs (Agraph_t* G, Agnode_t* np, FILE* outFile, int ix)
 	}
 	else {
 	    v = agxget (np, s);
-	    emitAttr (s->name, v, outFile, ix);
+	    emitAttr(s->name, v, ix);
 	}
     }
 
@@ -365,53 +359,53 @@ emitNodeAttrs (Agraph_t* G, Agnode_t* np, FILE* outFile, int ix)
     if (doGraphics) {
 	fprintf (outFile, "    graphics [\n");
 	if (attrs.flags & POS_SET) {
-	    emitReal ("x", attrs.x, outFile, ix+1);
-	    emitReal ("y", attrs.y, outFile, ix+1);
+	    emitReal("x", attrs.x, ix+1);
+	    emitReal("y", attrs.y, ix+1);
 	}
 	if (attrs.flags & W_SET) {
-	    emitReal ("w", attrs.w, outFile, ix+1);
+	    emitReal("w", attrs.w, ix+1);
 	}
 	if (attrs.flags & H_SET) {
-	    emitReal ("H", attrs.h, outFile, ix+1);
+	    emitReal("H", attrs.h, ix+1);
 	}
 	if (attrs.flags & INVIS) {
-	    emitInt ("visible", 0, outFile, ix+1);
+	    emitInt("visible", 0, ix+1);
 	}
 	if (attrs.flags & FILL) {
-	    emitInt ("hasFill", 1, outFile, ix+1);
+	    emitInt("hasFill", 1, ix+1);
 	}
 	if (attrs.type) {
-	    emitAttr ("type", attrs.type, outFile, ix+1);
+	    emitAttr("type", attrs.type, ix+1);
 	}
 	if (attrs.image) {
-	    emitAttr ("image", attrs.image, outFile, ix+1);
+	    emitAttr("image", attrs.image, ix+1);
 	}
 	if (attrs.fill) {
-	    emitAttr ("fill", attrs.fill, outFile, ix+1);
+	    emitAttr("fill", attrs.fill, ix+1);
 	}
 	if (attrs.outline) {
-	    emitAttr ("outline", attrs.outline, outFile, ix+1);
+	    emitAttr("outline", attrs.outline, ix+1);
 	}
 	if (attrs.width) {
-	    emitAttr ("width", attrs.width, outFile, ix+1);
+	    emitAttr("width", attrs.width, ix+1);
 	}
 	if (attrs.outlineStyle) {
-	    emitAttr ("outlineStyle", attrs.outlineStyle, outFile, ix+1);
+	    emitAttr("outlineStyle", attrs.outlineStyle, ix+1);
 	}
 	fprintf (outFile, "    ]\n");
     }
 
     if (doLabelGraphics) {
 	fprintf (outFile, "    LabelGraphics [\n");
-	if (label) emitAttr ("text", label, outFile, ix+1);
+	if (label) emitAttr("text", label, ix+1);
 	if (attrs.fontColor) {
-	    emitAttr ("fontColor", attrs.fontColor, outFile, ix+1);
+	    emitAttr(yworks ? "color" : "fontColor", attrs.fontColor, ix+1);
 	}
 	if (attrs.fontSize) {
-	    emitAttr ("fontSize", attrs.fontSize, outFile, ix+1);
+	    emitAttr("fontSize", attrs.fontSize, ix+1);
 	}
 	if (attrs.fontName) {
-	    emitAttr ("fontName", attrs.fontName, outFile, ix+1);
+	    emitAttr("fontName", attrs.fontName, ix+1);
 	}
 	fprintf (outFile, "    ]\n");
     }
@@ -421,13 +415,12 @@ emitNodeAttrs (Agraph_t* G, Agnode_t* np, FILE* outFile, int ix)
  * set node id
  * label, width height, x, y, type fillcolor
  */
-static void 
-emitNode (Agraph_t* G, Agnode_t* n, FILE* outFile)
-{
-    agbindrec (n, "nodeinfo", sizeof(Agnodeinfo_t), TRUE);
-    fprintf (outFile, "  node [\n    id %lu\n    name \"%s\"\n", id, agnameof(n));
+static void emitNode(Agraph_t *G, Agnode_t *n) {
+    agbindrec(n, "nodeinfo", sizeof(Local_Agnodeinfo_t), true);
+    fprintf(outFile, "  node [\n    id %" PRIu64 "\n    name \"%s\"\n", id,
+            agnameof(n));
     ID(n) = id++;
-    emitNodeAttrs (G, n, outFile, 2);
+    emitNodeAttrs(G, n, 2);
     fprintf (outFile, "  ]\n");
 
 }
@@ -437,9 +430,7 @@ emitNode (Agraph_t* G, Agnode_t* n, FILE* outFile)
  * graphics
  * LabelGraphics
  */
-static void 
-emitEdgeAttrs (Agraph_t* G, Agedge_t* ep, FILE* outFile, int ix)
-{
+static void emitEdgeAttrs(Agraph_t *G, Agedge_t *ep, int ix) {
     Agsym_t*  s;
     char* v;
     edge_attrs attrs;
@@ -470,7 +461,7 @@ emitEdgeAttrs (Agraph_t* G, Agedge_t* ep, FILE* outFile, int ix)
 	else if (streq(s->name, "label")) {
 	    if (*(v = agxget (ep, s))) {
 		label = v;
-		emitAttr (s->name, label, outFile, ix);
+		emitAttr(s->name, label, ix);
 		doLabelGraphics = 1;
 	    }
 	}
@@ -536,7 +527,7 @@ emitEdgeAttrs (Agraph_t* G, Agedge_t* ep, FILE* outFile, int ix)
 	}
 	else {
 	    v = agxget (ep, s);
-	    emitAttr (s->name, v, outFile, ix);
+	    emitAttr(s->name, v, ix);
 	}
     }
 
@@ -544,89 +535,81 @@ emitEdgeAttrs (Agraph_t* G, Agedge_t* ep, FILE* outFile, int ix)
     if (doGraphics) {
 	fprintf (outFile, "    graphics [\n");
 	if (attrs.pos) {
-	    emitSpline (attrs.pos, outFile, ix+1);
+	    emitSpline(attrs.pos, ix+1);
 	}
 	if (attrs.flags & INVIS) {
-	    emitInt ("visible", 0, outFile, ix+1);
+	    emitInt("visible", 0, ix+1);
 	}
 	if (attrs.fill) {
-	    emitAttr ("fill", attrs.fill, outFile, ix+1);
+	    emitAttr("fill", attrs.fill, ix+1);
 	}
 	if (attrs.width) {
-	    emitAttr ("width", attrs.width, outFile, ix+1);
+	    emitAttr("width", attrs.width, ix+1);
 	}
 	if (attrs.arrowhead) {
-	    emitAttr ("targetArrow", attrs.arrowhead, outFile, ix+1);
+	    emitAttr("targetArrow", attrs.arrowhead, ix+1);
 	}
 	if (attrs.arrowtail) {
-	    emitAttr ("sourceArrow", attrs.arrowtail, outFile, ix+1);
+	    emitAttr("sourceArrow", attrs.arrowtail, ix+1);
 	}
 	if (attrs.flags & DASH) {
-	    emitAttr ("style", "dashed", outFile, ix+1);
+	    emitAttr("style", "dashed", ix+1);
 	}
 	else if (attrs.flags & DOT) {
-	    emitAttr ("style", "dotted", outFile, ix+1);
+	    emitAttr("style", "dotted", ix+1);
 	}
 	else if (attrs.flags & LINE) {
-	    emitAttr ("style", "line", outFile, ix+1);
+	    emitAttr("style", "line", ix+1);
 	}
 	if (attrs.arrow) {
 	    if (streq(attrs.arrow,"forward"))
-		emitAttr ("arrow", "first", outFile, ix+1);
+		emitAttr("arrow", "first", ix+1);
 	    else if (streq(attrs.arrow,"back"))
-		emitAttr ("arrow", "last", outFile, ix+1);
+		emitAttr("arrow", "last", ix+1);
 	    else if (streq(attrs.arrow,"both"))
-		emitAttr ("arrow", "both", outFile, ix+1);
+		emitAttr("arrow", "both", ix+1);
 	    else if (streq(attrs.arrow,"none"))
-		emitAttr ("arrow", "none", outFile, ix+1);
+		emitAttr("arrow", "none", ix+1);
 	}
 	fprintf (outFile, "    ]\n");
     }
 
     if (doLabelGraphics) {
 	fprintf (outFile, "    LabelGraphics [\n");
-	if (label) emitAttr ("text", label, outFile, ix+1);
+	if (label) emitAttr("text", label, ix+1);
 	if (attrs.fontColor) {
-	    emitAttr ("fontColor", attrs.fontColor, outFile, ix+1);
+	    emitAttr(yworks ? "color" : "fontColor", attrs.fontColor, ix+1);
 	}
 	if (attrs.fontSize) {
-	    emitAttr ("fontSize", attrs.fontSize, outFile, ix+1);
+	    emitAttr("fontSize", attrs.fontSize, ix+1);
 	}
 	if (attrs.fontName) {
-	    emitAttr ("fontName", attrs.fontName, outFile, ix+1);
+	    emitAttr("fontName", attrs.fontName, ix+1);
 	}
 	fprintf (outFile, "    ]\n");
     }
 }
 
-/* emitEdge:
- */
-static void 
-emitEdge (Agraph_t* G, Agedge_t* e, FILE* outFile)
-{
-    fprintf (outFile, "  edge [\n    id %lu\n", (uint64_t)AGSEQ(e));
-    fprintf (outFile, "    source %lu\n", ID(agtail(e)));
-    fprintf (outFile, "    target %lu\n", ID(aghead(e)));
-    emitEdgeAttrs (G, e, outFile, 2);
+static void emitEdge(Agraph_t *G, Agedge_t *e) {
+    fprintf(outFile, "  edge [\n    id %" PRIu64 "\n", (uint64_t)AGSEQ(e));
+    fprintf(outFile, "    source %" PRIu64 "\n", ID(agtail(e)));
+    fprintf(outFile, "    target %" PRIu64 "\n", ID(aghead(e)));
+    emitEdgeAttrs(G, e, 2);
     fprintf (outFile, "  ]\n");
 }
 
-static void 
-emitGraphAttrs (Agraph_t* G, FILE* outFile)
-{
+static void emitGraphAttrs(Agraph_t *G) {
     Agsym_t*  s;
     char* v;
 
     for (s = agnxtattr (G, AGRAPH, NULL); s; s = agnxtattr (G, AGRAPH, s)) {
 	if (*(v = agxget (G, s))) {
-	    emitAttr (s->name, v, outFile, 1);
+	    emitAttr(s->name, v, 1);
 	}
     }
 }
 
-static void 
-gv_to_gml(Agraph_t* G, FILE* outFile)
-{
+static void gv_to_gml(Agraph_t *G) {
     Agnode_t* n;
     Agedge_t* e;
 
@@ -636,62 +619,43 @@ gv_to_gml(Agraph_t* G, FILE* outFile)
     else
 	fprintf (outFile, "  directed 0\n");
 	
-    emitGraphAttrs (G, outFile);
+    emitGraphAttrs(G);
 
     /* FIX: Not sure how to handle default attributes or subgraphs */
 
     for (n = agfstnode(G); n; n = agnxtnode (G, n)) {
-	emitNode (G, n, outFile);
+	emitNode(G, n);
     } 
     
     for (n = agfstnode(G); n; n = agnxtnode (G, n)) {
 	for (e = agfstout(G, n); e; e = agnxtout (G, e)) {
-	    emitEdge (G, e, outFile);
+	    emitEdge(G, e);
 	}
     }
     fprintf (outFile, "]\n");
 }
 
-static FILE *openFile(char *name, char *mode)
-{
-    FILE *fp;
-    char *modestr;
-
-    fp = fopen(name, mode);
-    if (!fp) {
-        if (*mode == 'r')
-            modestr = "reading";
-        else
-            modestr = "writing";
-        fprintf(stderr, "%s: could not open file %s for %s\n",
-                CmdName, name, modestr);
-        perror(name);
-        exit(1);
-    }
-    return fp;
-}
-
-
-static char *useString = "Usage: %s [-?] <files>\n\
+static char *useString = "Usage: %s [-y] [-?] <files>\n\
   -o<file>  : output to <file> (stdout)\n\
+  -y        : output yWorks.com GML variant\n\
   -? - print usage\n\
 If no files are specified, stdin is used\n";
 
 static void usage(int v)
 {
     printf(useString, CmdName);
-    exit(v);
+    graphviz_exit(v);
 }
 
-static char *cmdName(char *path)
+static char *cmdName(char *cmd)
 {
     char *sp;
 
-    sp = strrchr(path, '/');
+    sp = strrchr(cmd, '/');
     if (sp)
         sp++;
     else
-        sp = path;
+        sp = cmd;
     return sp;
 }
 
@@ -701,10 +665,15 @@ static void initargs(int argc, char **argv)
 
     CmdName = cmdName(argv[0]);
     opterr = 0;
-    while ((c = getopt(argc, argv, ":o:")) != -1) {
+    while ((c = getopt(argc, argv, ":o:y")) != -1) {
 	switch (c) {
 	case 'o':
-	    outFile = openFile(optarg, "w");
+	    if (outFile != NULL)
+		fclose(outFile);
+	    outFile = openFile(CmdName, optarg, "w");
+	    break;
+	case 'y':
+	    yworks = true;
 	    break;
 	case ':':
 	    fprintf(stderr, "%s: option -%c missing parameter\n", CmdName, optopt);
@@ -719,6 +688,8 @@ static void initargs(int argc, char **argv)
 		usage(1);
 	    }
 	    break;
+	default:
+	    UNREACHABLE();
 	}
     }
 
@@ -731,11 +702,6 @@ static void initargs(int argc, char **argv)
 	outFile = stdout;
 }
 
-static Agraph_t *gread(FILE * fp)
-{
-    return agread(fp, (Agdisc_t *) 0);
-}
-
 int main(int argc, char **argv)
 {
     Agraph_t *G;
@@ -745,7 +711,7 @@ int main(int argc, char **argv)
 
     rv = 0;
     initargs(argc, argv);
-    newIngraph(&ig, Files, gread);
+    newIngraph(&ig, Files);
 
     while ((G = nextGraph(&ig))) {
 	if (prev) {
@@ -753,8 +719,8 @@ int main(int argc, char **argv)
 	    agclose(prev);
 	}
 	prev = G;
-	gv_to_gml(G, outFile);
+	gv_to_gml(G);
 	fflush(outFile);
     }
-    exit(rv);
+    graphviz_exit(rv);
 }

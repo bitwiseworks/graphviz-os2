@@ -1,24 +1,35 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
-#include "gvconfig.h"
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
 
+#include <assert.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <cgraph/exit.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/startswith.h>
+#include <gvc/gvconfig.h>
+#include <stdbool.h>
+#include <stdlib.h>
 #include	<string.h>
-#include    <regex.h>
+#include <unistd.h>
 
 #ifdef ENABLE_LTDL
+#ifdef HAVE_DL_ITERATE_PHDR
+#include <link.h>
+#endif
 #include	<sys/types.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -26,12 +37,8 @@
 #define GLOB_ABORTED    2   /* Read error.  */
 #define GLOB_NOMATCH    3   /* No matches found.  */
 #define GLOB_NOSORT     4
-#define DMKEY "Software\\Microsoft" //key to look for library dir
 typedef struct {
-    int gl_pathc;           /* count of total paths so far */
-    int gl_matchc;          /* count of paths matching pattern */
-    int gl_offs;            /* reserved at beginning of gl_pathv */
-    int gl_flags;           /* returned flags */
+    size_t gl_pathc;        /* count of total paths so far */
     char **gl_pathv;        /* list of paths matching pattern */
 } glob_t;
 static void globfree (glob_t* pglob);
@@ -40,30 +47,26 @@ static int glob (GVC_t * gvc, char*, int, int (*errfunc)(const char *, int), glo
 #include	<glob.h>
 #endif 
 #include	<sys/stat.h>
-#ifdef HAVE_UNISTD_H
-#include	<unistd.h>
-#endif
 #endif
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
 
-#include        "memory.h"
-#include        "const.h"
-#include        "types.h"
+#include        <common/const.h>
+#include        <common/types.h>
 
-#include	"gvplugin.h"
-#include	"gvcjob.h"
-#include	"gvcint.h"
-#include        "gvcproc.h"
+#include	<gvc/gvplugin.h>
+#include	<gvc/gvcjob.h>
+#include	<gvc/gvcint.h>
+#include        <gvc/gvcproc.h>
 
 /* FIXME */
-extern Dt_t * textfont_dict_open(GVC_t *gvc);
+extern void textfont_dict_open(GVC_t *gvc);
 
 /*
     A config for gvrender is a text file containing a
-    list of plugin librariess and their capabilities using a tcl-like
+    list of plugin libraries and their capabilities using a tcl-like
     syntax
 
     Lines beginning with '#' are ignored as comments
@@ -90,11 +93,12 @@ extern Dt_t * textfont_dict_open(GVC_t *gvc);
 
  */
 
-static gvplugin_package_t * gvplugin_package_record(GVC_t * gvc, const char *path, const char *name)
-{
-    gvplugin_package_t *package = gmalloc(sizeof(gvplugin_package_t));
-    package->path = (path) ? strdup(path) : NULL;
-    package->name = strdup(name);
+static gvplugin_package_t * gvplugin_package_record(GVC_t * gvc,
+                                                    const char *package_path,
+                                                    const char *name) {
+    gvplugin_package_t *package = gv_alloc(sizeof(gvplugin_package_t));
+    package->path = package_path ? gv_strdup(package_path) : NULL;
+    package->name = gv_strdup(name);
     package->next = gvc->packages;
     gvc->packages = package;
     return package;
@@ -168,24 +172,27 @@ static char *token(int *nest, char **tokens)
 
 static int gvconfig_plugin_install_from_config(GVC_t * gvc, char *s)
 {
-    char *path, *name, *api;
+    char *package_path, *name;
     const char *type;
-    api_t gv_api;
-    int quality, rc;
+    int quality;
     int nest = 0;
     gvplugin_package_t *package;
 
     separator(&nest, &s);
     while (*s) {
-	path = token(&nest, &s);
+	package_path = token(&nest, &s);
 	if (nest == 0)
 	    name = token(&nest, &s);
         else
 	    name = "x";
-        package = gvplugin_package_record(gvc, path, name);
+        package = gvplugin_package_record(gvc, package_path, name);
 	do {
-	    api = token(&nest, &s);
-	    gv_api = gvplugin_api(api);
+	    const char *api = token(&nest, &s);
+	    const api_t gv_api = gvplugin_api(api);
+	    if (gv_api == (api_t)-1) {
+		agerrorf("config error: %s %s not found\n", package_path, api);
+		return 0;
+	    }
 	    do {
 		if (nest == 2) {
 		    type = token(&nest, &s);
@@ -193,10 +200,9 @@ static int gvconfig_plugin_install_from_config(GVC_t * gvc, char *s)
 		        quality = atoi(token(&nest, &s));
 		    else
 		        quality = 0;
-		    rc = gvplugin_install (gvc, gv_api,
-				    type, quality, package, NULL);
+		    bool rc = gvplugin_install(gvc, gv_api, type, quality, package, NULL);
 		    if (!rc) {
-		        agerr(AGERR, "config error: %s %s %s\n", path, api, type);
+		        agerrorf("config error: %s %s %s\n", package_path, api, type);
 		        return 0;
 		    }
 		}
@@ -207,14 +213,14 @@ static int gvconfig_plugin_install_from_config(GVC_t * gvc, char *s)
 }
 #endif
 
-void gvconfig_plugin_install_from_library(GVC_t * gvc, char *path, gvplugin_library_t *library)
-{
+void gvconfig_plugin_install_from_library(GVC_t * gvc, char *package_path,
+                                          gvplugin_library_t *library) {
     gvplugin_api_t *apis;
     gvplugin_installed_t *types;
     gvplugin_package_t *package;
     int i;
 
-    package = gvplugin_package_record(gvc, path, library->packagename);
+    package = gvplugin_package_record(gvc, package_path, library->packagename);
     for (apis = library->apis; (types = apis->types); apis++) {
 	for (i = 0; types[i].type; i++) {
 	    gvplugin_install(gvc, apis->api, types[i].type,
@@ -232,23 +238,22 @@ static void gvconfig_plugin_install_builtins(GVC_t * gvc)
 
     for (s = gvc->common.builtins; (name = s->name); s++)
 	if (name[0] == 'g' && strstr(name, "_LTX_library")) 
-	    gvconfig_plugin_install_from_library(gvc, NULL,
-		    (gvplugin_library_t *)(s->address));
+	    gvconfig_plugin_install_from_library(gvc, NULL, s->address);
 }
 
 #ifdef ENABLE_LTDL
-static void gvconfig_write_library_config(GVC_t *gvc, char *path, gvplugin_library_t *library, FILE *f)
-{
-    gvplugin_api_t *apis;
+static void gvconfig_write_library_config(GVC_t *gvc, char *lib_path,
+                                          gvplugin_library_t *library,
+                                          FILE *f) {
     gvplugin_installed_t *types;
-    int i;
 
-    fprintf(f, "%s %s {\n", path, library->packagename);
-    for (apis = library->apis; (types = apis->types); apis++) {
+    fprintf(f, "%s %s {\n", lib_path, library->packagename);
+    for (gvplugin_api_t *apis = library->apis; (types = apis->types); apis++) {
         fprintf(f, "\t%s {\n", gvplugin_api_name(apis->api));
-	for (i = 0; types[i].type; i++) {
+	for (size_t i = 0; types[i].type; i++) {
 	    /* verify that dependencies are available */
-            if (! (gvplugin_load(gvc, apis->api, types[i].type)))
+            if (!gvplugin_load(gvc, apis->api, types[i].type,
+                               gvc->common.verbose > 0 ? f : NULL))
 		fprintf(f, "#FAILS");
 	    fprintf(f, "\t\t%s %d\n", types[i].type, types[i].quality);
 	}
@@ -259,14 +264,31 @@ static void gvconfig_write_library_config(GVC_t *gvc, char *path, gvplugin_libra
 
 #define BSZ 1024
 #define DOTLIBS "/.libs"
-#define STRLEN(s) (sizeof(s)-1)
+
+#ifdef HAVE_DL_ITERATE_PHDR
+static int line_callback(struct dl_phdr_info *info, size_t size, void *line)
+{
+   const char *p = info->dlpi_name;
+   char *tmp = strstr(p, "/libgvc.");
+   (void) size;
+   if (tmp) {
+        *tmp = 0;
+        /* Check for real /lib dir. Don't accept pre-install /.libs */
+        if (strcmp(strrchr(p,'/'), DOTLIBS) != 0) {
+            memmove(line, p, strlen(p) + 1); // use line buffer for result
+            strcat(line, "/graphviz");  /* plugins are in "graphviz" subdirectory */
+            return 1;
+        }
+   }
+   return 0;
+}
+#endif
 
 char * gvconfig_libdir(GVC_t * gvc)
 {
     static char line[BSZ];
     static char *libdir;
-    static boolean dirShown = 0; 
-    char *tmp;
+    static bool dirShown = false;
 
     if (!libdir) {
         libdir=getenv("GVBINDIR");
@@ -277,17 +299,17 @@ char * gvconfig_libdir(GVC_t * gvc)
 		
 		MEMORY_BASIC_INFORMATION mbi;
 		if (VirtualQuery (&gvconfig_libdir, &mbi, sizeof(mbi)) == 0) {
-		agerr(AGERR,"failed to get handle for executable.\n");
+		agerrorf("failed to get handle for executable.\n");
 		return 0;
 	    }
 	    r = GetModuleFileName ((HMODULE)mbi.AllocationBase, line, BSZ);
 	    if (!r || (r == BSZ)) {
-		agerr(AGERR,"failed to get path for executable.\n");
+		agerrorf("failed to get path for executable.\n");
 		return 0;
 	    }
 	    s = strrchr(line,'\\');
 	    if (!s) {
-		agerr(AGERR,"no slash in path %s.\n", line);
+		agerrorf("no slash in path %s.\n", line);
 		return 0;
 	    }
 	    *s = '\0';
@@ -297,51 +319,54 @@ char * gvconfig_libdir(GVC_t * gvc)
 #ifdef __APPLE__
 	    uint32_t i, c = _dyld_image_count();
 	    size_t len, ind;
-	    const char* path;
 	    for (i = 0; i < c; ++i) {
-		path = _dyld_get_image_name(i);
-		tmp = strstr(path, "/libgvc.");
+		const char *p = _dyld_get_image_name(i);
+		const char* tmp = strstr(p, "/libgvc.");
 		if (tmp) {
-		    if (tmp > path) {
+		    if (tmp > p) {
 			/* Check for real /lib dir. Don't accept pre-install /.libs */
-			char* s = tmp-1;
+			const char *s = tmp - 1;
 			/* back up to previous slash (or head of string) */
-			while ((*s != '/') && (s > path)) s--;
-			if (strncmp (s, DOTLIBS, STRLEN(DOTLIBS)) == 0)
+			while (*s != '/' && s > p) s--;
+			if (startswith(s, DOTLIBS))
 			    continue;
 		    }
 
-		    ind = tmp - path;  /* byte offset */
+		    ind = tmp - p; // byte offset
 		    len = ind + sizeof("/graphviz");
 		    if (len < BSZ)
 			libdir = line;
 		    else
-		        libdir = gmalloc(len);
-		    bcopy (path, libdir, ind);
+		        libdir = gv_alloc(len);
+		    if (ind > 0) {
+		        memmove(libdir, p, ind);
+		    }
 		    /* plugins are in "graphviz" subdirectory */
 		    strcpy(libdir+ind, "/graphviz");  
 		    break;
 		}
 	    }
+#elif defined(HAVE_DL_ITERATE_PHDR)
+	    dl_iterate_phdr(line_callback, line);
+	    libdir = line;
 #else
 	    FILE* f = fopen ("/proc/self/maps", "r");
-	    char* path;
 	    if (f) {
 		while (!feof (f)) {
 		    if (!fgets (line, sizeof (line), f))
 			continue;
 		    if (!strstr (line, " r-xp "))
 			continue;
-		    path = strchr (line, '/');
-		    if (!path)
+		    char *p = strchr(line, '/');
+		    if (!p)
 		        continue;
-		    tmp = strstr (path, "/libgvc.");
+		    char* tmp = strstr(p, "/libgvc.");
 		    if (tmp) {
 			*tmp = 0;
 			/* Check for real /lib dir. Don't accept pre-install /.libs */
-			if (strcmp(strrchr(path,'/'), "/.libs") == 0)
+			if (strcmp(strrchr(p, '/'), "/.libs") == 0)
 			    continue;
-			strcpy(line, path);  /* use line buffer for result */
+			memmove(line, p, strlen(p) + 1); // use line buffer for result
 			strcat(line, "/graphviz");  /* plugins are in "graphviz" subdirectory */
 			libdir = line;
 			break;
@@ -355,57 +380,120 @@ char * gvconfig_libdir(GVC_t * gvc)
     }
     if (gvc->common.verbose && !dirShown) {
 	fprintf (stderr, "libdir = \"%s\"\n", (libdir ? libdir : "<null>"));
-	dirShown = 1;
+	dirShown = true;
     }
     return libdir;
 }
 #endif
 
 #ifdef ENABLE_LTDL
+// does this path look like a Graphviz plugin of our version?
+static bool is_plugin(const char *filepath) {
+
+    if (filepath == NULL) {
+	return false;
+    }
+
+    // shared library suffix to strip before looking for version number
+#if defined(DARWIN_DYLIB)
+    static const char SUFFIX[] = ".dylib";
+#elif defined(__MINGW32__) || defined(__CYGWIN__) || defined(_WIN32) || defined(__OS2__)
+    static const char SUFFIX[] = ".dll";
+#else
+    static const char SUFFIX[] = "";
+#endif
+
+    // does this filename end with the expected suffix?
+    size_t len = strlen(filepath);
+    if (len < strlen(SUFFIX)
+        || strcmp(filepath + len - strlen(SUFFIX), SUFFIX) != 0) {
+	return false;
+    }
+    len -= strlen(SUFFIX);
+
+#if (defined(_WIN32) && !defined(__MINGW32__) && !defined(__CYGWIN__)) || defined(__OS2__)
+    // Windows libraries do not have a version in the filename
+
+#elif defined(GVPLUGIN_VERSION)
+    // turn GVPLUGIN_VERSION into a string
+    #define STRINGIZE_(x) #x
+    #define STRINGIZE(x) STRINGIZE_(x)
+    static const char VERSION[] = STRINGIZE(GVPLUGIN_VERSION);
+    #undef STRINGIZE
+    #undef STRINGIZE_
+
+    // does this filename contain the expected version?
+    if (len < strlen(VERSION)
+        || !startswith(filepath + len - strlen(VERSION), VERSION)) {
+	return false;
+    }
+    len -= strlen(VERSION);
+
+#else
+    // does this filename have a version?
+    if (len == 0 || !gv_isdigit(filepath[len - 1])) {
+	return false;
+    }
+    while (len > 0 && gv_isdigit(filepath[len - 1])) {
+	--len;
+    }
+
+#endif
+
+    // ensure the remainder conforms to what we expect of a shared library
+#if defined(DARWIN_DYLIB)
+    if (len < 2 || gv_isdigit(filepath[len - 2]) || filepath[len - 1] != '.') {
+	return false;
+    }
+#elif defined(__MINGW32__) || defined(__CYGWIN__)
+    if (len < 2 || gv_isdigit(filepath[len - 2]) || filepath[len - 1] != '-') {
+	return false;
+    }
+#elif defined(_WIN32) || defined(__OS2__)
+    if (len < 1 || gv_isdigit(filepath[len - 1])) {
+	return false;
+    }
+#elif ((defined(__hpux__) || defined(__hpux)) && !(defined(__ia64)))
+    static const char SL[] = ".sl.";
+    if (len < strlen(SL) || !startswith(filepath + len - strlen(SL), SL)) {
+	return false;
+    }
+#else
+    static const char SO[] = ".so.";
+    if (len < strlen(SO) || !startswith(filepath + len - strlen(SO), SO)) {
+	return false;
+    }
+#endif
+
+    return true;
+}
+
 static void config_rescan(GVC_t *gvc, char *config_path)
 {
     FILE *f = NULL;
     glob_t globbuf;
-    char *config_glob, *config_re, *path, *libdir;
-    int i, rc, re_status;
+    char *libdir;
+    int rc;
     gvplugin_library_t *library;
-    regex_t re;
-#if !defined(_WIN32) && !defined(__OS2__)
-    char *plugin_glob = "libgvplugin_*";
-#endif
 #if defined(DARWIN_DYLIB)
-    char *plugin_re_beg = "[^0-9]\\.";
-    char *plugin_re_end = "\\.dylib$";
+    char *plugin_glob = "libgvplugin_*";
 #elif defined(__MINGW32__)
 	char *plugin_glob = "libgvplugin_*";
-	char *plugin_re_beg = "[^0-9]-";
-    char *plugin_re_end = "\\.dll$"; 
 #elif defined(__CYGWIN__)
-    plugin_glob = "cyggvplugin_*";
-    char *plugin_re_beg = "[^0-9]-";
-    char *plugin_re_end = "\\.dll$"; 
+    char *plugin_glob = "cyggvplugin_*";
 #elif defined(_WIN32)
     char *plugin_glob = "gvplugin_*";
-    char *plugin_re_beg = "[^0-9]";
-    char *plugin_re_end = "\\.dll$"; 
 #elif defined(__OS2__)
     char *plugin_glob = "gvplugin_*";
-    char *plugin_re_beg = "[^0-9]";
-    char *plugin_re_end = "\\.dll$"; 
-#elif ((defined(__hpux__) || defined(__hpux)) && !(defined(__ia64)))
-    char *plugin_re_beg = "\\.sl\\.";
-    char *plugin_re_end = "$"; 
 #else
-    /* Everyone else */
-    char *plugin_re_beg = "\\.so\\.";
-    char *plugin_re_end= "$";
+    char *plugin_glob = "libgvplugin_*";
 #endif
 
     if (config_path) {
 	f = fopen(config_path,"w");
 	if (!f) {
-	    agerr(AGERR,"failed to open %s for write.\n", config_path);
-	    exit(1);
+	    agerrorf("failed to open %s for write.\n", config_path);
+	    graphviz_exit(1);
 	}
 
 	fprintf(f, "# This file was generated by \"dot -c\" at time of install.\n\n");
@@ -417,24 +505,8 @@ static void config_rescan(GVC_t *gvc, char *config_path)
 
     libdir = gvconfig_libdir(gvc);
 
-    config_re = gmalloc(strlen(plugin_re_beg) + 20 + strlen(plugin_re_end) + 1);
-
-#if (defined(_WIN32) && !defined(__MINGW32__) && !defined(__CYGWIN__)) || defined(__OS2__)
-    sprintf(config_re,"%s%s", plugin_re_beg, plugin_re_end);
-#elif defined(GVPLUGIN_VERSION)
-    sprintf(config_re,"%s%d%s", plugin_re_beg, GVPLUGIN_VERSION, plugin_re_end);
-#else
-    sprintf(config_re,"%s[0-9]+%s", plugin_re_beg, plugin_re_end);
-#endif
-
-    if (regcomp(&re, config_re, REG_EXTENDED|REG_NOSUB) != 0) {
-	agerr(AGERR,"cannot compile regular expression %s", config_re);
-    }
-
-    config_glob = gmalloc(strlen(libdir) + 1 + strlen(plugin_glob) + 1);
-    strcpy(config_glob, libdir);
-	strcat(config_glob, DIRSEP);
-    strcat(config_glob, plugin_glob);
+    agxbuf config_glob = {0};
+    agxbprint(&config_glob, "%s%s%s", libdir, DIRSEP, plugin_glob);
 
 #ifdef __OS2__
     // in the glob() we need the path as /
@@ -449,16 +521,14 @@ static void config_rescan(GVC_t *gvc, char *config_path)
     /* load all libraries even if can't save config */
 
 #if defined(_WIN32)
-    rc = glob(gvc, config_glob, GLOB_NOSORT, NULL, &globbuf);
+    rc = glob(gvc, agxbuse(&config_glob), GLOB_NOSORT, NULL, &globbuf);
 #else
-    rc = glob(config_glob, 0, NULL, &globbuf);
+    rc = glob(agxbuse(&config_glob), 0, NULL, &globbuf);
 #endif
     fprintf (stderr, "glob = \"%s %i\"\n", config_glob, rc);
     if (rc == 0) {
-	for (i = 0; i < globbuf.gl_pathc; i++) {
-            fprintf (stderr, "globbuf = \"%s\"\n", globbuf.gl_pathv[i]);
-	    re_status = regexec(&re, globbuf.gl_pathv[i], (size_t) 0, NULL, 0);
-	    if (re_status == 0) {
+	for (size_t i = 0; i < globbuf.gl_pathc; i++) {
+	    if (is_plugin(globbuf.gl_pathv[i])) {
 		library = gvplugin_library_load(gvc, globbuf.gl_pathv[i]);
 		if (library) {
 		    gvconfig_plugin_install_from_library(gvc, globbuf.gl_pathv[i], library);
@@ -466,24 +536,21 @@ static void config_rescan(GVC_t *gvc, char *config_path)
 	    }
 	}
 	/* rescan with all libs loaded to check cross dependencies */
-	for (i = 0; i < globbuf.gl_pathc; i++) {
-	    re_status = regexec(&re, globbuf.gl_pathv[i], (size_t) 0, NULL, 0);
-	    if (re_status == 0) {
+	for (size_t i = 0; i < globbuf.gl_pathc; i++) {
+	    if (is_plugin(globbuf.gl_pathv[i])) {
 		library = gvplugin_library_load(gvc, globbuf.gl_pathv[i]);
 		if (library) {
-		    path = strrchr(globbuf.gl_pathv[i],DIRSEP[0]);
-		    if (path)
-			path++;
-		    if (f && path)
-			gvconfig_write_library_config(gvc, path, library, f);
+		    char *p = strrchr(globbuf.gl_pathv[i], DIRSEP[0]);
+		    if (p)
+			p++;
+		    if (f && p)
+			gvconfig_write_library_config(gvc, p, library, f);
 		}
 	    }
 	}
     }
-    regfree(&re);
     globfree(&globbuf);
-    free(config_glob);
-    free(config_re);
+    agxbfree(&config_glob);
     if (f)
 	fclose(f);
 }
@@ -492,48 +559,43 @@ static void config_rescan(GVC_t *gvc, char *config_path)
 /*
   gvconfig - parse a config file and install the identified plugins
  */
-void gvconfig(GVC_t * gvc, boolean rescan)
+void gvconfig(GVC_t * gvc, bool rescan)
 {
-#if 0
-    gvplugin_library_t **libraryp;
-#endif
 #ifdef ENABLE_LTDL
-    int sz, rc;
-    struct stat config_st, libdir_st;
+    int rc;
+    struct stat config_st;
     FILE *f = NULL;
     char *config_text = NULL;
     char *libdir;
     char *config_file_name = GVPLUGIN_CONFIG_FILE;
 
-#define MAX_SZ_CONFIG 100000
 #endif
     
     /* builtins don't require LTDL */
     gvconfig_plugin_install_builtins(gvc);
    
-    gvc->config_found = FALSE;
+    gvc->config_found = false;
 #ifdef ENABLE_LTDL
     if (gvc->common.demand_loading) {
         /* see if there are any new plugins */
         libdir = gvconfig_libdir(gvc);
-        rc = stat(libdir, &libdir_st);
-        if (rc == -1) {
-	    gvtextlayout_select(gvc);   /* choose best available textlayout plugin immediately */
+        if (access(libdir, F_OK) < 0) {
     	    /* if we fail to stat it then it probably doesn't exist so just fail silently */
-	    return;
+	    goto done;
         }
     
         if (! gvc->config_path) {
-            gvc->config_path = gmalloc(strlen(libdir) + 1 + strlen(config_file_name) + 1);
-            strcpy(gvc->config_path, libdir);
-            strcat(gvc->config_path, DIRSEP);
-            strcat(gvc->config_path, config_file_name);
+            agxbuf xb = {0};
+            agxbprint(&xb, "%s%s%s", libdir, DIRSEP, config_file_name);
+            gvc->config_path = agxbdisown(&xb);
         }
     	
         if (rescan) {
     	    config_rescan(gvc, gvc->config_path);
-    	    gvc->config_found = TRUE;
+    	    gvc->config_found = true;
 	    gvtextlayout_select(gvc);   /* choose best available textlayout plugin immediately */
+	    assert(gvc->textfont_dt != NULL &&
+	           "config rescan performed without any prior first scan");
     	    return;
         }
     
@@ -541,27 +603,26 @@ void gvconfig(GVC_t * gvc, boolean rescan)
     
         rc = stat(gvc->config_path, &config_st);
         if (rc == -1) {
-	    gvtextlayout_select(gvc);   /* choose best available textlayout plugin immediately */
     	    /* silently return without setting gvc->config_found = TRUE */
-    	    return;
-        }
-        else if (config_st.st_size > MAX_SZ_CONFIG) {
-    	    agerr(AGERR,"%s is bigger than I can handle.\n", gvc->config_path);
+    	    goto done;
         }
         else {
     	    f = fopen(gvc->config_path,"r");
     	    if (!f) {
-    	        agerr (AGERR,"failed to open %s for read.\n", gvc->config_path);
+    	        agerrorf("failed to open %s for read.\n", gvc->config_path);
 		return;
     	    }
+    	    else if (config_st.st_size == 0) {
+    	        agerrorf("%s is zero sized.\n", gvc->config_path);
+    	    }
     	    else {
-    	        config_text = gmalloc(config_st.st_size + 1);
-    	        sz = fread(config_text, 1, config_st.st_size, f);
+    	        config_text = gv_alloc((size_t)config_st.st_size + 1);
+    	        size_t sz = fread(config_text, 1, (size_t)config_st.st_size, f);
     	        if (sz == 0) {
-    		    agerr(AGERR,"%s is zero sized, or other read error.\n", gvc->config_path);
+    	            agerrorf("%s read error.\n", gvc->config_path);
     	        }
     	        else {
-    	            gvc->config_found = TRUE;
+    	            gvc->config_found = true;
     	            config_text[sz] = '\0';  /* make input into a null terminated string */
     	            rc = gvconfig_plugin_install_from_config(gvc, config_text);
     	        }
@@ -572,6 +633,7 @@ void gvconfig(GVC_t * gvc, boolean rescan)
 	    }
         }
     }
+done:
 #endif
     gvtextlayout_select(gvc);   /* choose best available textlayout plugin immediately */
     textfont_dict_open(gvc);    /* initialize font dict */
@@ -606,12 +668,12 @@ glob (GVC_t* gvc, char* pattern, int flags, int (*errfunc)(const char *, int), g
     do {
       if (cnt >= arrsize-1) {
         arrsize += 512;
-        if (str) str = (char**)realloc (str, arrsize*sizeof(char*));
-        else str = (char**)malloc (arrsize*sizeof(char*));
-        if (!str) return GLOB_NOSPACE;
+        char **new_str = realloc(str, arrsize * sizeof(char*));
+        if (!new_str) goto oom;
+        str = new_str;
       }
-      str[cnt] = (char*)malloc (strlen(libdir)+1+strlen(wfd.cFileName)+1);
-      if (!str[cnt]) return GLOB_NOSPACE;
+      str[cnt] = malloc (strlen(libdir)+1+strlen(wfd.cFileName)+1);
+      if (!str[cnt]) goto oom;
       strcpy(str[cnt],libdir);
       strcat(str[cnt],DIRSEP);
       strcat(str[cnt],wfd.cFileName);
@@ -620,9 +682,15 @@ glob (GVC_t* gvc, char* pattern, int flags, int (*errfunc)(const char *, int), g
     str[cnt] = 0;
 
     pglob->gl_pathc = cnt;
-    pglob->gl_pathv = (char**)realloc(str, (cnt+1)*sizeof(char*));
+    pglob->gl_pathv = realloc(str, (cnt+1)*sizeof(char*));
     
     return 0;
+
+oom:
+    for (int i = 0; i < cnt; ++i)
+      free(str[i]);
+    free(str);
+    return GLOB_NOSPACE;
 }
 
 static void
@@ -631,8 +699,7 @@ globfree (glob_t* pglob)
     int i;
     for (i = 0; i < pglob->gl_pathc; i++)
       free (pglob->gl_pathv[i]);
-    if (pglob->gl_pathv)
-		free (pglob->gl_pathv);
+    free (pglob->gl_pathv);
 }
 #endif
 #endif

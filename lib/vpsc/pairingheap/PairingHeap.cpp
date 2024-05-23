@@ -16,7 +16,7 @@
  * This version is released under the CPL (Common Public License) with
  * the Graphviz distribution.
  * A version is also available under the LGPL as part of the Adaptagrams
- * project: http://sourceforge.net/projects/adaptagrams.  
+ * project: https://github.com/mjwybrow/adaptagrams.  
  * If you make improvements or bug fixes to this code it would be much
  * appreciated if you could also contribute those changes back to the
  * Adaptagrams repository.
@@ -24,8 +24,8 @@
 
 #include <vector>
 #include <list>
-#include "dsexceptions.h"
-#include "PairingHeap.h"
+#include <vpsc/pairingheap/dsexceptions.h>
+#include <vpsc/pairingheap/PairingHeap.h>
 
 #ifndef PAIRING_HEAP_CPP
 #define PAIRING_HEAP_CPP
@@ -36,22 +36,10 @@ using namespace std;
 template <class T>
 PairingHeap<T>::PairingHeap( bool (*lessThan)(T const &lhs, T const &rhs) )
 {
-	root = NULL;
-	counter=0;
+	root = nullptr;
 	this->lessThan=lessThan;
 }
 
-
-/**
-* Copy constructor
-*/
-template <class T>
-PairingHeap<T>::PairingHeap( const PairingHeap<T> & rhs )
-{
-	root = NULL;
-	counter=rhs->size();
-	*this = rhs;
-}
 
 /**
 * Destroy the leftist heap.
@@ -72,16 +60,11 @@ PairingHeap<T>::insert( const T & x )
 {
 	PairNode<T> *newNode = new PairNode<T>( x );
 
-	if( root == NULL )
+	if( root == nullptr )
 		root = newNode;
 	else
 		compareAndLink( root, newNode );
-	counter++;
 	return newNode;
-}
-template <class T>
-int PairingHeap<T>::size() {
-	return counter;
 }
 /**
 * Find the smallest item in the priority queue.
@@ -106,11 +89,10 @@ void PairingHeap<T>::deleteMin( )
 
     PairNode<T> *oldRoot = root;
 
-    if( root->leftChild == NULL )
-        root = NULL;
+    if( root->leftChild == nullptr )
+        root = nullptr;
     else
         root = combineSiblings( root->leftChild );
-	counter--;
     delete oldRoot;
 }
 
@@ -121,17 +103,7 @@ void PairingHeap<T>::deleteMin( )
 template <class T>
 bool PairingHeap<T>::isEmpty( ) const
 {
-	return root == NULL;
-}
-
-/**
-* Test if the priority queue is logically full.
-* Returns false in this implementation.
-*/
-template <class T>
-bool PairingHeap<T>::isFull( ) const
-{
-	return false;
+	return root == nullptr;
 }
 
 /**
@@ -141,23 +113,7 @@ template <class T>
 void PairingHeap<T>::makeEmpty( )
 {
 	reclaimMemory( root );
-	root = NULL;
-}
-
-/**
-* Deep copy.
-*/
-template <class T>
-const PairingHeap<T> &
-PairingHeap<T>::operator=( const PairingHeap<T> & rhs )
-{
-	if( this != &rhs )
-	{
-		makeEmpty( );
-		root = clone( rhs.root );
-	}
-
-	return *this;
+	root = nullptr;
 }
 
 /**
@@ -167,7 +123,7 @@ PairingHeap<T>::operator=( const PairingHeap<T> & rhs )
 template <class T>
 void PairingHeap<T>::reclaimMemory( PairNode<T> * t ) const
 {
-	if( t != NULL )
+	if( t != nullptr )
 	{
 		reclaimMemory( t->leftChild );
 		reclaimMemory( t->nextSibling );
@@ -176,39 +132,11 @@ void PairingHeap<T>::reclaimMemory( PairNode<T> * t ) const
 }
 
 /**
-* Change the value of the item stored in the pairing heap.
-* Does nothing if newVal is larger than currently stored value.
-* p points to a node returned by insert.
-* newVal is the new value, which must be smaller
-*    than the currently stored value.
-*/
-template <class T>
-void PairingHeap<T>::decreaseKey( PairNode<T> *p,
-										  const T & newVal )
-{
-	if( p->element < newVal )
-		return;    // newVal cannot be bigger
-	p->element = newVal;
-	if( p != root )
-	{
-		if( p->nextSibling != NULL )
-			p->nextSibling->prev = p->prev;
-		if( p->prev->leftChild == p )
-			p->prev->leftChild = p->nextSibling;
-		else
-			p->prev->nextSibling = p->nextSibling;
-
-		p->nextSibling = NULL;
-		compareAndLink( root, p );
-	}
-}
-
-/**
 * Internal method that is the basic operation to maintain order.
 * Links first and second together to satisfy heap order.
-* first is root of tree 1, which may not be NULL.
-*    first->nextSibling MUST be NULL on entry.
-* second is root of tree 2, which may be NULL.
+* first is root of tree 1, which may not be nullptr.
+*    first->nextSibling MUST be nullptr on entry.
+* second is root of tree 2, which may be nullptr.
 * first becomes the result of the tree merge.
 */
 template <class T>
@@ -216,7 +144,7 @@ void PairingHeap<T>::
 compareAndLink( PairNode<T> * & first,
 			   PairNode<T> *second ) const
 {
-	if( second == NULL )
+	if( second == nullptr )
 		return;
 	if( lessThan(second->element,first->element) )
 	{
@@ -224,7 +152,7 @@ compareAndLink( PairNode<T> * & first,
 		second->prev = first->prev;
 		first->prev = second;
 		first->nextSibling = second->leftChild;
-		if( first->nextSibling != NULL )
+		if( first->nextSibling != nullptr )
 			first->nextSibling->prev = first;
 		second->leftChild = first;
 		first = second;
@@ -234,10 +162,10 @@ compareAndLink( PairNode<T> * & first,
 		// Attach second as leftmost child of first
 		second->prev = first;
 		first->nextSibling = second->nextSibling;
-		if( first->nextSibling != NULL )
+		if( first->nextSibling != nullptr )
 			first->nextSibling->prev = first;
 		second->nextSibling = first->leftChild;
-		if( second->nextSibling != NULL )
+		if( second->nextSibling != nullptr )
 			second->nextSibling->prev = second;
 		first->leftChild = second;
 	}
@@ -246,42 +174,37 @@ compareAndLink( PairNode<T> * & first,
 /**
 * Internal method that implements two-pass merging.
 * firstSibling the root of the conglomerate;
-*     assumed not NULL.
+*     assumed not nullptr.
 */
 template <class T>
 PairNode<T> *
 PairingHeap<T>::combineSiblings( PairNode<T> *firstSibling ) const
 {
-	if( firstSibling->nextSibling == NULL )
+	if( firstSibling->nextSibling == nullptr )
 		return firstSibling;
 
-	// Allocate the array
-	static vector<PairNode<T> *> treeArray( 5 );
+	vector<PairNode<T>*> treeArray;
 
 	// Store the subtrees in an array
-	int numSiblings = 0;
-	for( ; firstSibling != NULL; numSiblings++ )
+	size_t numSiblings = 0;
+	for( ; firstSibling != nullptr; numSiblings++ )
 	{
-		if( numSiblings == (int)treeArray.size( ) )
-			treeArray.resize( numSiblings * 2 );
-		treeArray[ numSiblings ] = firstSibling;
-		firstSibling->prev->nextSibling = NULL;  // break links
+		treeArray.push_back(firstSibling);
+		firstSibling->prev->nextSibling = nullptr;  // break links
 		firstSibling = firstSibling->nextSibling;
 	}
-	if( numSiblings == (int)treeArray.size( ) )
-		treeArray.resize( numSiblings + 1 );
-	treeArray[ numSiblings ] = NULL;
+	treeArray.push_back(nullptr);
 
 	// Combine subtrees two at a time, going left to right
-	int i = 0;
+	size_t i = 0;
 	for( ; i + 1 < numSiblings; i += 2 )
 		compareAndLink( treeArray[ i ], treeArray[ i + 1 ] );
 
-	int j = i - 2;
+	size_t j = i - 2;
 
 	// j has the result of last compareAndLink.
 	// If an odd number of trees, get the last one.
-	if( j == numSiblings - 3 )
+	if (j + 3 == numSiblings)
 		compareAndLink( treeArray[ j ], treeArray[ j + 2 ] );
 
 	// Now go right to left, merging last tree with
@@ -291,41 +214,21 @@ PairingHeap<T>::combineSiblings( PairNode<T> *firstSibling ) const
 	return treeArray[ 0 ];
 }
 
-/**
-* Internal method to clone subtree.
-* WARNING: This is prone to running out of stack space.
-*/
-template <class T>
-PairNode<T> *
-PairingHeap<T>::clone( PairNode<T> * t ) const
-{
-	if( t == NULL ) 
-		return NULL;
-	else
-	{
-		PairNode<T> *p = new PairNode<T>( t->element );
-		if( ( p->leftChild = clone( t->leftChild ) ) != NULL )
-			p->leftChild->prev = p;
-		if( ( p->nextSibling = clone( t->nextSibling ) ) != NULL )
-			p->nextSibling->prev = p;
-		return p;
-	}
-}
 template <class T>
 ostream& operator <<(ostream &os, const PairingHeap<T> &b)
 {
 	os<<"Heap:";
-	if (b.root != NULL) {
+	if (b.root != nullptr) {
 		PairNode<T> *r = b.root;
 		list<PairNode<T>*> q;
 		q.push_back(r);
 		while (!q.empty()) {
 			r = q.front();
 			q.pop_front();
-			if (r->leftChild != NULL) {
+			if (r->leftChild != nullptr) {
 				os << *r->element << ">";
 				PairNode<T> *c = r->leftChild;
-				while (c != NULL) {
+				while (c != nullptr) {
 					q.push_back(c);
 					os << "," << *c->element;
 					c = c->nextSibling;

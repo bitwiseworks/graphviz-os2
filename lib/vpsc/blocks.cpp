@@ -13,26 +13,24 @@
  * This version is released under the CPL (Common Public License) with
  * the Graphviz distribution.
  * A version is also available under the LGPL as part of the Adaptagrams
- * project: http://sourceforge.net/projects/adaptagrams.  
+ * project: https://github.com/mjwybrow/adaptagrams.  
  * If you make improvements or bug fixes to this code it would be much
  * appreciated if you could also contribute those changes back to the
  * Adaptagrams repository.
  */
 
-#include "blocks.h"
-#include "block.h"
-#include "constraint.h"
-#ifdef RECTANGLE_OVERLAP_LOGGING
+#include <vpsc/blocks.h>
+#include <vpsc/block.h>
+#include <vpsc/constraint.h>
 #include <fstream>
 using std::ios;
 using std::ofstream;
-using std::endl;
-#endif
 using std::set;
-using std::vector;
-using std::iterator;
 using std::list;
-using std::copy;
+
+#ifndef RECTANGLE_OVERLAP_LOGGING
+	#define RECTANGLE_OVERLAP_LOGGING 0
+#endif
 
 long blockTimeCtr;
 
@@ -42,26 +40,25 @@ Blocks::Blocks(const int n, Variable *vs[]) : vs(vs),nvs(n) {
 		insert(new Block(vs[i]));
 	}
 }
-Blocks::~Blocks(void)
+Blocks::~Blocks()
 {
 	blockTimeCtr=0;
-	for(set<Block*>::iterator i=begin();i!=end();i++) {
-		delete *i;
+	for (Block *b : *this) {
+		delete b;
 	}
-	clear();
 }
 
 /**
  * returns a list of variables with total ordering determined by the constraint 
  * DAG
  */
-list<Variable*> *Blocks::totalOrder() {
-	list<Variable*> *order = new list<Variable*>;
+list<Variable*> Blocks::totalOrder() {
+	list<Variable*> order;
 	for(int i=0;i<nvs;i++) {
 		vs[i]->visited=false;
 	}
 	for(int i=0;i<nvs;i++) {
-		if(vs[i]->in.size()==0) {
+		if(vs[i]->in.empty()) {
 			dfsVisit(vs[i],order);
 		}
 	}
@@ -69,42 +66,41 @@ list<Variable*> *Blocks::totalOrder() {
 }
 // Recursive depth first search giving total order by pushing nodes in the DAG
 // onto the front of the list when we finish searching them
-void Blocks::dfsVisit(Variable *v, list<Variable*> *order) {
+void Blocks::dfsVisit(Variable *v, list<Variable*> &order) {
 	v->visited=true;
-	vector<Constraint*>::iterator it=v->out.begin();
-	for(;it!=v->out.end();it++) {
-		Constraint *c=*it;
+	for (Constraint *c : v->out) {
 		if(!c->right->visited) {
 			dfsVisit(c->right, order);
 		}
 	}	
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	ofstream f(LOGFILE,ios::app);
-	f<<"  order="<<*v<<endl;
-#endif
-	order->push_front(v);
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"  order="<<*v<<"\n";
+	}
+	order.push_front(v);
 }
 /**
  * Processes incoming constraints, most violated to least, merging with the
  * neighbouring (left) block until no more violated constraints are found
  */
 void Blocks::mergeLeft(Block *r) {	
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	ofstream f(LOGFILE,ios::app);
-	f<<"mergeLeft called on "<<*r<<endl;
-#endif
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"mergeLeft called on "<<*r<<"\n";
+	}
 	r->timeStamp=++blockTimeCtr;
 	r->setUpInConstraints();
 	Constraint *c=r->findMinInConstraint();
-	while (c != NULL && c->slack()<0) {
-#ifdef RECTANGLE_OVERLAP_LOGGING
-		f<<"mergeLeft on constraint: "<<*c<<endl;
-#endif
+	while (c != nullptr && c->slack()<0) {
+		if (RECTANGLE_OVERLAP_LOGGING) {
+			ofstream f(LOGFILE,ios::app);
+			f<<"mergeLeft on constraint: "<<*c<<"\n";
+		}
 		r->deleteMinInConstraint();
 		Block *l = c->left->block;		
-		if (l->in==NULL) l->setUpInConstraints();
+		if (l->in==nullptr) l->setUpInConstraints();
 		double dist = c->right->offset - c->left->offset - c->gap;
-		if (r->vars->size() < l->vars->size()) {
+		if (r->vars.size() < l->vars.size()) {
 			dist=-dist;
 			std::swap(l, r);
 		}
@@ -115,29 +111,31 @@ void Blocks::mergeLeft(Block *r) {
 		removeBlock(l);
 		c=r->findMinInConstraint();
 	}		
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	f<<"merged "<<*r<<endl;
-#endif
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"merged "<<*r<<"\n";
+	}
 }	
 /**
  * Symmetrical to mergeLeft
  */
 void Blocks::mergeRight(Block *l) {	
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	ofstream f(LOGFILE,ios::app);
-	f<<"mergeRight called on "<<*l<<endl;
-#endif	
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"mergeRight called on "<<*l<<"\n";
+	}
 	l->setUpOutConstraints();
 	Constraint *c = l->findMinOutConstraint();
-	while (c != NULL && c->slack()<0) {		
-#ifdef RECTANGLE_OVERLAP_LOGGING
-		f<<"mergeRight on constraint: "<<*c<<endl;
-#endif
+	while (c != nullptr && c->slack()<0) {		
+		if (RECTANGLE_OVERLAP_LOGGING) {
+			ofstream f(LOGFILE,ios::app);
+			f<<"mergeRight on constraint: "<<*c<<"\n";
+		}
 		l->deleteMinOutConstraint();
 		Block *r = c->right->block;
 		r->setUpOutConstraints();
 		double dist = c->left->offset + c->gap - c->right->offset;
-		if (l->vars->size() > r->vars->size()) {
+		if (l->vars.size() > r->vars.size()) {
 			dist=-dist;
 			std::swap(l, r);
 		}
@@ -146,21 +144,23 @@ void Blocks::mergeRight(Block *l) {
 		removeBlock(r);
 		c=l->findMinOutConstraint();
 	}	
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	f<<"merged "<<*l<<endl;
-#endif
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"merged "<<*l<<"\n";
+	}
 }
 void Blocks::removeBlock(Block *doomed) {
 	doomed->deleted=true;
 	//erase(doomed);
 }
 void Blocks::cleanup() {
-	vector<Block*> b_copy(begin(),end());
-	for(vector<Block*>::iterator i=b_copy.begin();i!=b_copy.end();i++) {
+	for (auto i = begin(); i != end();) {
 		Block *b=*i;
 		if(b->deleted) {
-			erase(b);
+			i = erase(i);
 			delete b;
+		} else {
+			++i;
 		}
 	}
 }
@@ -170,11 +170,11 @@ void Blocks::cleanup() {
  */
 void Blocks::split(Block *b, Block *&l, Block *&r, Constraint *c) {
 	b->split(l,r,c);
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	ofstream f(LOGFILE,ios::app);
-	f<<"Split left: "<<*l<<endl;
-	f<<"Split right: "<<*r<<endl;
-#endif
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"Split left: "<<*l<<"\n";
+		f<<"Split right: "<<*r<<"\n";
+	}
 	r->posn = b->posn;
 	r->wposn = r->posn * r->weight;
 	mergeLeft(l);
@@ -194,9 +194,8 @@ void Blocks::split(Block *b, Block *&l, Block *&r, Constraint *c) {
  */
 double Blocks::cost() {
 	double c = 0;
-	for(set<Block*>::iterator i=begin();i!=end();i++) {
-		c += (*i)->cost();
+	for (Block *b : *this) {
+		c += b->cost();
 	}
 	return c;
 }
-

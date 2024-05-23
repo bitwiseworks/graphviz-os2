@@ -1,4 +1,5 @@
-#include	"dthdr.h"
+#include	<cdt/dthdr.h>
+#include	<stdlib.h>
 
 /*	Change search method.
 **
@@ -7,41 +8,35 @@
 
 Dtmethod_t* dtmethod(Dt_t* dt, Dtmethod_t* meth)
 {
-	reg Dtlink_t	*list, *r;
-	reg Dtdisc_t*	disc = dt->disc;
-	reg Dtmethod_t*	oldmeth = dt->meth;
+	Dtlink_t	*list, *r;
+	Dtdisc_t*	disc = dt->disc;
+	Dtmethod_t*	oldmeth = dt->meth;
 
 	if(!meth || meth->type == oldmeth->type)
 		return oldmeth;
 
-	if(disc->eventf &&
-	   (*disc->eventf)(dt,DT_METH,(void*)meth,disc) < 0)
-		return NIL(Dtmethod_t*);
-
-	dt->data->minp = 0;
-
 	/* get the list of elements */
 	list = dtflatten(dt);
 
-	if(dt->data->type&(DT_LIST|DT_STACK|DT_QUEUE) )
-		dt->data->head = NIL(Dtlink_t*);
-	else if(dt->data->type&(DT_SET|DT_BAG) )
+	if(dt->data->type&DT_QUEUE)
+		dt->data->head = NULL;
+	else if(dt->data->type&DT_SET)
 	{	if(dt->data->ntab > 0)
-			(*dt->memoryf)(dt,(void*)dt->data->htab,0,disc);
+			free(dt->data->htab);
 		dt->data->ntab = 0;
-		dt->data->htab = NIL(Dtlink_t**);
+		dt->data->htab = NULL;
 	}
 
-	dt->data->here = NIL(Dtlink_t*);
+	dt->data->here = NULL;
 	dt->data->type = (dt->data->type&~(DT_METHODS|DT_FLATTEN)) | meth->type;
 	dt->meth = meth;
 	if(dt->searchf == oldmeth->searchf)
 		dt->searchf = meth->searchf;
 
-	if(meth->type&(DT_LIST|DT_STACK|DT_QUEUE) )
-	{	if(!(oldmeth->type&(DT_LIST|DT_STACK|DT_QUEUE)) )
+	if(meth->type&DT_QUEUE)
+	{	if(!(oldmeth->type&DT_QUEUE))
 		{	if((r = list) )
-			{	reg Dtlink_t*	t;
+			{	Dtlink_t*	t;
 				for(t = r->right; t; r = t, t = t->right )
 					t->left = r;
 				list->left = r;
@@ -53,13 +48,13 @@ Dtmethod_t* dtmethod(Dt_t* dt, Dtmethod_t* meth)
 	{	dt->data->size = 0;
 		while(list)
 		{	r = list->right;
-			(*meth->searchf)(dt,(void*)list,DT_RENEW);
+			meth->searchf(dt, list, DT_RENEW);
 			list = r;
 		}
 	}
-	else if(!((meth->type&DT_BAG) && (oldmeth->type&DT_SET)) )
+	else if(oldmeth->type&DT_SET)
 	{	int	rehash;
-		if((meth->type&(DT_SET|DT_BAG)) && !(oldmeth->type&(DT_SET|DT_BAG)))
+		if((meth->type&DT_SET) && !(oldmeth->type&DT_SET))
 			rehash = 1;
 		else	rehash = 0;
 
@@ -67,11 +62,11 @@ Dtmethod_t* dtmethod(Dt_t* dt, Dtmethod_t* meth)
 		while(list)
 		{	r = list->right;
 			if(rehash)
-			{	reg void* key = _DTOBJ(list,disc->link);
+			{	void* key = _DTOBJ(list,disc->link);
 				key = _DTKEY(key,disc->key,disc->size);
-				list->hash = _DTHSH(dt,key,disc,disc->size);
+				list->hash = dtstrhash(key, disc->size);
 			}
-			(void)(*meth->searchf)(dt,(void*)list,DT_RENEW);
+			(void)meth->searchf(dt, list, DT_RENEW);
 			list = r;
 		}
 	}

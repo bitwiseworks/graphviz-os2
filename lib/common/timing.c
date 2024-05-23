@@ -1,19 +1,17 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup common_utils
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #ifndef _WIN32
 
-#include        <unistd.h>
 #include	<sys/types.h>
 #include	<sys/times.h>
 #include	<sys/param.h>
@@ -30,8 +28,6 @@ typedef struct tms mytime_t;
 #else
 
 #include	<time.h>
-#include "render.h"
-#include    "utils.h"
 
 typedef clock_t mytime_t;
 #define GET_TIME(S) S = clock()
@@ -39,6 +35,8 @@ typedef clock_t mytime_t;
 
 #endif
 
+#include <common/types.h>
+#include <common/utils.h>
 
 static mytime_t T;
 

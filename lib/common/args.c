@@ -1,14 +1,13 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup common_utils
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /* FIXME
@@ -20,19 +19,18 @@
  * Needs to be fixed before layout engines can be plugins.
  */
 
-#include <ctype.h>
-#include "render.h"
-#include "tlayout.h"
-#include "gvc.h"
-#include "fdp.h"
+#include <assert.h>
+#include <cgraph/gv_ctype.h>
+#include <common/render.h>
+#include <fdpgen/tlayout.h>
+#include <gvc/gvc.h>
+#include <fdpgen/fdp.h>
+#include <stdbool.h>
 
-/* neato_extra_args:
- * Handle special neato arguments.
+/* Handle special neato arguments.
  * Return number of unprocessed arguments; return < 0 on error.
  */
-static int
-neato_extra_args(GVC_t *gvc, int argc, char** argv)
-{
+static int neato_extra_args(int argc, char** argv) {
   char** p = argv+1;
   int    i;
   char*  arg;
@@ -40,14 +38,15 @@ neato_extra_args(GVC_t *gvc, int argc, char** argv)
 
   for (i = 1; i < argc; i++) {
     arg = argv[i];
-    if (arg && *arg == '-') {
+    assert(arg != NULL);
+    if (arg[0] == '-') {
       switch (arg[1]) {
-      case 'x' : Reduce = TRUE; break;
+      case 'x' : Reduce = true; break;
       case 'n':
         if (arg[2]) {
           Nop = atoi(arg+2);
           if (Nop <= 0) {
-            agerr (AGERR, "Invalid parameter \"%s\" for -n flag\n", arg+2);
+            agerrorf("Invalid parameter \"%s\" for -n flag\n", arg+2);
             dotneato_usage (1);
 	    return -1;
           }
@@ -71,52 +70,7 @@ neato_extra_args(GVC_t *gvc, int argc, char** argv)
   return cnt;
 }
 
-/* memtest_extra_args:
- * Handle special memtest arguments.
- * Return number of unprocessed arguments; return < 0 on error.
- */
-static int
-memtest_extra_args(GVC_t *gvc, int argc, char** argv)
-{
-  char** p = argv+1;
-  int    i;
-  char*  arg;
-  int    cnt = 1;
-
-  for (i = 1; i < argc; i++) {
-    arg = argv[i];
-    if (arg && *arg == '-') {
-      switch (arg[1]) {
-      case 'm' :
-        if (arg[2]) {
-          MemTest = atoi(arg+2);
-          if (MemTest <= 0) {
-            agerr (AGERR, "Invalid parameter \"%s\" for -m flag\n", arg+2);
-            dotneato_usage (1);
-	    return -1;
-          }
-        }
-        else MemTest = -1;
-	break;
-      default :
-        cnt++;
-        if (*p != arg) *p = arg;
-        p++;
-        break;
-      }
-    }
-    else {
-      cnt++;
-      if (*p != arg) *p = arg;
-      p++;
-    }
-  }
-  *p = 0;
-  return cnt;
-}
-
-/* config_extra_args:
- * Handle special config arguments.
+/* Handle special config arguments.
  * Return number of unprocessed arguments; return < 0 on error.
  */
 static int
@@ -129,18 +83,19 @@ config_extra_args(GVC_t *gvc, int argc, char** argv)
 
   for (i = 1; i < argc; i++) {
     arg = argv[i];
-    if (arg && *arg == '-') {
+    assert(arg != NULL);
+    if (arg[0] == '-') {
       switch (arg[1]) {
       case 'v':
 	gvc->common.verbose = 1;
-	if (isdigit(arg[2]))
+	if (gv_isdigit(arg[2]))
 	  gvc->common.verbose = atoi(&arg[2]);
         break;
       case 'O' :
-          gvc->common.auto_outfile_names = TRUE;
+          gvc->common.auto_outfile_names = true;
 	  break;
       case 'c' :
-          gvc->common.config = TRUE;
+          gvc->common.config = true;
 	  break;
       default :
         cnt++;
@@ -159,8 +114,7 @@ config_extra_args(GVC_t *gvc, int argc, char** argv)
   return cnt;
 }
 
-/* setDouble:
- * If arg is an double, value is stored in v
+/* If arg is an double, value is stored in v
  * and functions returns 0; otherwise, returns 1.
  */
 static int
@@ -171,15 +125,14 @@ setDouble (double* v, char* arg)
 
   d = strtod(arg,&p);
   if (p == arg) {
-    agerr (AGERR, "bad value in flag -L%s - ignored\n", arg-1);
+    agerrorf("bad value in flag -L%s - ignored\n", arg-1);
     return 1;
   }
   *v = d;
   return 0;
 }
 
-/* setInt:
- * If arg is an integer, value is stored in v
+/* If arg is an integer, value is stored in v
  * and functions returns 0; otherwise, returns 1.
  */
 static int
@@ -190,16 +143,14 @@ setInt (int* v, char* arg)
 
   i = (int)strtol(arg,&p,10);
   if (p == arg) {
-    agerr (AGERR, "bad value in flag -L%s - ignored\n", arg-1);
+    agerrorf("bad value in flag -L%s - ignored\n", arg-1);
     return 1;
   }
   *v = i;
   return 0;
 }
 
-/* setFDPAttr:
- * Actions for fdp specific flags
- */
+/// Actions for fdp specific flags
 static int
 setFDPAttr (char* arg)
 {
@@ -228,20 +179,17 @@ setFDPAttr (char* arg)
     }
     break;
   default :
-    agerr (AGWARN, "unknown flag -L%s - ignored\n", arg-1);
+    agwarningf("unknown flag -L%s - ignored\n", arg-1);
     break;
   }
   return 0;
 }
 
-/* fdp_extra_args:
- * Handle fdp specific arguments.
+/* Handle fdp specific arguments.
  * These have the form -L<name>=<value>.
  * Return number of unprocessed arguments; return < 0 on error.
  */
-static int
-fdp_extra_args (GVC_t *gvc, int argc, char** argv)
-{
+static int fdp_extra_args(int argc, char** argv) {
   char** p = argv+1;
   int    i;
   char*  arg;
@@ -249,7 +197,8 @@ fdp_extra_args (GVC_t *gvc, int argc, char** argv)
 
   for (i = 1; i < argc; i++) {
     arg = argv[i];
-    if (arg && (*arg == '-') && (*(arg+1) == 'L')) {
+    assert(arg != NULL);
+    if (arg[0] == '-' && arg[1] == 'L') {
       if (setFDPAttr (arg+2)) {
 	dotneato_usage(1);
 	return -1;
@@ -265,18 +214,15 @@ fdp_extra_args (GVC_t *gvc, int argc, char** argv)
   return cnt;
 }
 
-/* gvParseArgs:
- * Return 0 on success.
+/* Return 0 on success.
  * Return x if calling function should call exit(x-1).
  */
 int gvParseArgs(GVC_t *gvc, int argc, char** argv)
 {
     int rv;
-    if ((argc = neato_extra_args(gvc, argc, argv)) < 0)
+    if ((argc = neato_extra_args(argc, argv)) < 0)
 	return (1-argc);
-    if ((argc = fdp_extra_args(gvc, argc, argv)) < 0)
-	return (1-argc);
-    if ((argc = memtest_extra_args(gvc, argc, argv)) < 0)
+    if ((argc = fdp_extra_args(argc, argv)) < 0)
 	return (1-argc);
     if ((argc = config_extra_args(gvc, argc, argv)) < 0)
 	return (1-argc);

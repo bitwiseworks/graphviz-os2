@@ -1,16 +1,15 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
+#include <cgraph/alloc.h>
+#include <limits.h>
 #include "selectionfuncs.h"
 #include "topviewfuncs.h"
 #include "smyrna_utils.h"
@@ -61,7 +60,6 @@ static void select_edge(Agraph_t* g,Agedge_t*  obj,int reverse)
 	{
 	    agxset(obj,sel_attr,"0");
 	    ED_selected(obj) = 0;
-	    ED_printLabel(obj) = 0;
 	}
 	else
 	{
@@ -73,9 +71,8 @@ static void select_edge(Agraph_t* g,Agedge_t*  obj,int reverse)
 
 }
 
-
-static void pick_objects_in_rect(Agraph_t* g,GLfloat x1,GLfloat y1,GLfloat x2,GLfloat y2)
-{
+static void pick_objects_in_rect(Agraph_t *g, float x1, float y1, float x2,
+                                 float y2) {
     Agnode_t *v;
     Agedge_t *e;
     glCompPoint posT;
@@ -115,10 +112,10 @@ static void* pick_object(Agraph_t* g,glCompPoint p)
     glCompPoint posH;
     glCompPoint posN;
     int defaultNodeShape;
-    float dist=999999999;
-    GLfloat nd; /*node distance to point*/
-    GLfloat ed; /*edge distance to point*/
-    GLfloat nodeSize=0;
+    float dist = FLT_MAX;
+    float nd; // node distance to point
+    float ed; // edge distance to point
+    float nodeSize=0;
     void* rv=(void*)0;
 
     defaultNodeShape=getAttrBool(g,g,"defaultnodeshape",0);
@@ -153,8 +150,7 @@ static void* pick_object(Agraph_t* g,glCompPoint p)
     return rv;
 }
 
-void pick_object_xyz(Agraph_t* g,topview* t,GLfloat x,GLfloat y,GLfloat z) 
-{
+void pick_object_xyz(Agraph_t *g, topview *t, float x, float y, float z) {
     glCompPoint p;
     void* a;
     p.x=x;p.y=y;p.z=z;
@@ -173,16 +169,14 @@ void pick_object_xyz(Agraph_t* g,topview* t,GLfloat x,GLfloat y,GLfloat z)
     {
 	select_edge(g,a,1);	
 	cacheSelectedEdges(g,t);
-	ED_printLabel((Agedge_t*)a) = 1;
     }
 }
 void pick_objects_rect(Agraph_t* g) 
 {
-
-    GLfloat x1;
-    GLfloat y1;
-    GLfloat x2;
-    GLfloat y2;
+    float x1;
+    float y1;
+    float x2;
+    float y2;
     if(view->mouse.GLfinalPos.x > view->mouse.GLinitPos.x)
     {
         x1=view->mouse.GLinitPos.x;
@@ -231,7 +225,6 @@ void deselect_all(Agraph_t* g)
 	{
 	    agxset(e,esel_attr,"0");
 	    ED_selected(e) = 0;
-	    ED_printLabel(e) = 0;
 	}
     }
     cacheSelectedNodes(g,view->Topview);
@@ -240,13 +233,14 @@ void deselect_all(Agraph_t* g)
 
 void clear_selpoly(glCompPoly* sp)
 {
-    sp->pts=realloc(sp->pts,0);
+    free(sp->pts);
+    sp->pts = NULL;
     sp->cnt=0;
 }
 static int close_poly(glCompPoly* selPoly,glCompPoint pt)
 {
     /* int i=0; */
-    float EPS=GetOGLDistance(3);
+    const float EPS = GetOGLDistance(3.0f);
     if (selPoly->cnt < 2)
 	return 0;
     if(
@@ -276,8 +270,9 @@ void add_selpoly(Agraph_t* g,glCompPoly* selPoly,glCompPoint pt)
 {
     if(!close_poly(selPoly,pt))
     {
+	selPoly->pts = gv_recalloc(selPoly->pts, selPoly->cnt, selPoly->cnt + 1,
+	                           sizeof(glCompPoint));
 	selPoly->cnt ++;
-	selPoly->pts=realloc(selPoly->pts,sizeof(glCompPoint)*selPoly->cnt);
 	selPoly->pts[selPoly->cnt-1].x=pt.x;
 	selPoly->pts[selPoly->cnt-1].y=pt.y;
 	selPoly->pts[selPoly->cnt-1].z=0;

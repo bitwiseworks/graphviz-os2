@@ -1,20 +1,19 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
-
-#include "gvplugin_device.h"
-#include "gvio.h"
+#include <assert.h>
+#include <cgraph/unreachable.h>
+#include <gvc/gvplugin_device.h>
+#include <gvc/gvio.h>
+#include <limits.h>
 #ifdef HAVE_PANGOCAIRO
 #include <gdk-pixbuf/gdk-pixbuf.h>
 
@@ -48,7 +47,7 @@ argb2rgba ( unsigned int width, unsigned int height, char *data)
     for (y = 0; y < height; y++) {
         for (x = 0; x < width; x++) {
             /* swap red and blue */
-            unsigned char r = data[Ra];
+            char r = data[Ra];
             data[Bb] = data[Ba];
 	    data[Rb] = r;
             data += 4;
@@ -59,9 +58,8 @@ argb2rgba ( unsigned int width, unsigned int height, char *data)
 static gboolean
 writer ( const gchar *buf, gsize count, GError **error, gpointer data)
 {
-    if (count == gvwrite((GVJ_t *)data, buf, count))
-        return TRUE;
-    return FALSE;
+  (void)error;
+  return count == gvwrite(data, buf, count);
 }
 
 static void gdk_format(GVJ_t * job)
@@ -85,29 +83,30 @@ static void gdk_format(GVJ_t * job)
     case FORMAT_TIFF:
 	format_str = "tiff";
 	break;
+    default:
+	UNREACHABLE();
     }
 
     argb2rgba(job->width, job->height, job->imagedata);
+
+    assert(job->width <= (unsigned)INT_MAX / 4 && "width out of range");
+    assert(job->height <= (unsigned)INT_MAX && "height out of range");
 
     pixbuf = gdk_pixbuf_new_from_data(
                 (unsigned char*)(job->imagedata), // data
                 GDK_COLORSPACE_RGB,     // colorspace
                 TRUE,                   // has_alpha
                 8,                      // bits_per_sample
-                job->width,             // width
-                job->height,            // height
-                4 * job->width,         // rowstride
+                (int)job->width,        // width
+                (int)job->height,       // height
+                4 * (int)job->width,    // rowstride
                 NULL,                   // destroy_fn
                 NULL                    // destroy_fn_data
                );
 
     gdk_pixbuf_save_to_callback(pixbuf, writer, job, format_str, NULL, NULL);
 
-#if HAVE_G_OBJECT_UNREF 
     g_object_unref(pixbuf);
-#else
-    gdk_pixbuf_unref(pixbuf);
-#endif
 }
 
 static gvdevice_engine_t gdk_engine = {

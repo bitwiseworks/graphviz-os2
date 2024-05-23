@@ -1,20 +1,17 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "glcompmouse.h"
-#include "glcompfont.h"
-#include "glcompset.h"
-#include "glutils.h"
+#include <glcomp/glcompmouse.h>
+#include <glcomp/glcompfont.h>
+#include <glcomp/glcompset.h>
+#include <glcomp/glutils.h>
 
 void glCompMouseInit(glCompMouse * m)
 {
@@ -42,42 +39,58 @@ void glCompMouseInit(glCompMouse * m)
     m->down = 0;
 
 }
-extern void glCompClick(glCompObj * o, GLfloat x, GLfloat y,
-			glMouseButtonType t)
-{
 
-}
-extern void glCompDoubleClick(glCompObj * obj, GLfloat x, GLfloat y,
-			      glMouseButtonType t)
-{
-
+void glCompClick(glCompObj *o, float x, float y, glMouseButtonType t) {
+    (void)o;
+    (void)x;
+    (void)y;
+    (void)t;
 }
 
-extern void glCompMouseDown(glCompObj * obj, GLfloat x, GLfloat y,
+void glCompDoubleClick(glCompObj *obj, float x, float y, glMouseButtonType t) {
+    (void)obj;
+    (void)x;
+    (void)y;
+    (void)t;
+}
+
+void glCompMouseDown(glCompObj *obj, float x, float y, glMouseButtonType t) {
+    (void)obj;
+    (void)x;
+    (void)y;
+    (void)t;
+}
+
+void glCompMouseIn(glCompObj *obj, float x, float y) {
+    (void)obj;
+    (void)x;
+    (void)y;
+}
+
+void glCompMouseOut(glCompObj *obj, float x, float y) {
+    (void)obj;
+    (void)x;
+    (void)y;
+}
+
+void glCompMouseOver(glCompObj *obj, float x, float y) {
+    (void)obj;
+    (void)x;
+    (void)y;
+}
+
+void glCompMouseUp(glCompObj *obj, float x, float y, glMouseButtonType t) {
+    (void)obj;
+    (void)x;
+    (void)y;
+    (void)t;
+}
+
+void glCompMouseDrag(glCompObj *obj, float dx, float dy,
 			    glMouseButtonType t)
 {
-
-}
-
-extern void glCompMouseIn(glCompObj * obj, GLfloat x, GLfloat y)
-{
-
-}
-extern void glCompMouseOut(glCompObj * obj, GLfloat x, GLfloat y)
-{
-
-}
-extern void glCompMouseOver(glCompObj * obj, GLfloat x, GLfloat y)
-{
-
-}
-extern void glCompMouseUp(glCompObj * obj, GLfloat x, GLfloat y,
-			  glMouseButtonType t)
-{
-
-}
-extern void glCompMouseDrag(glCompObj * obj, GLfloat dx, GLfloat dy,
-			    glMouseButtonType t)
-{
-
+    (void)obj;
+    (void)dx;
+    (void)dy;
+    (void)t;
 }

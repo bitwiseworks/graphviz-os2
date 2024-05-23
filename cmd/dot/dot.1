@@ -146,7 +146,7 @@ Additional less common or more special\(hypurpose output formats
 can be found at https://www.graphviz.org/doc/info/output.html.
 .PP
 Alternative plugins providing support for a given output format
-can be found from the error message resulting from appending a ':' to the format. e.g. \fB-Tpng:\fP
+can be found from the error message resulting from appending a ':' to the format. e.g. \fB\-Tpng:\fP
 The first plugin listed is always the default.
 .PP
 The \fB\-P\fP switch can be used to produce a graph of all output variants supported by plugins in the local installation of graphviz.
@@ -174,16 +174,17 @@ Any subgraph, node, or edge appearing after this inherits the new
 default attributes.
 .PP
 \fBn0 [\fIname0=val0,name1=val1,...\fB];\fR
+.br
 Creates node \fBn0\fP (if it does not already exist)
 and sets its attributes according to the optional list. 
 .PP
-\fBn0 \fIedgeop\fR n1 \fIedgeop\fR \fI...\fB \fIedgeop\fR nn [\fIname0=val0,name1=val1,...\fB];\fR
+\fBn0 \fIedgeop\fR n1 \fIedgeop\fR \fI...\fB \fIedgeop\fR nn \fB[\fIname0=val0,name1=val1,...\fB];\fR
 .br
 Creates edges between nodes \fBn0\fP, \fBn1\fP, ..., \fBnn\fP and sets
 their attributes according to the optional list.
 Creates nodes as necessary.
 .PP
-[\fBsubgraph \fIname\fB] { \fIstatement\(hylist \fB}\fR
+[\fBsubgraph \fIname\fB] \fB{ \fIstatement\(hylist \fB}\fR
 .br
 Creates a subgraph.  Subgraphs may be used in place
 of \fBn0\fP, ..., \fBnn\fP in the above statements to create edges.
@@ -589,6 +590,12 @@ The default is 1.0.
 \fB\-E\fP sets a default edge attribute.
 Example: \fB\-Gsize="7,8" \-Nshape=box \-Efontsize=8\fR
 .PP
+\fB\-\-filepath=\fIpath\fR uses \fIpath\fR as a prefix for locating externally
+referenced files. For example, using \fB\-\-filepath=bar/baz\fR would cause
+\fBfoo.png\fR in \fBimage="foo.png"\fR to be looked for on disk as
+\fBbar/baz/foo.png\fR. This overrides any \fBimagepath\fR set either on the
+command line or as an attribute within the input graph source.
+.PP
 \fB\-l\fIfile\fR loads custom PostScript library files.
 Usually these define custom shapes or styles.
 If \fB\-l\fP is given by itself, the standard library is omitted.
@@ -626,8 +633,6 @@ As usual, edge layout is guided by the \fBsplines\fR attribute.
 \fB\-v\fP (verbose) prints various information useful for debugging.
 .PP
 \fB\-c\fP configure plugins.
-.PP
-\fB\-m\fP memory test (observe no growth with top, kill when done).
 .PP
 \fB\-q\fIlevel\fR set level of message suppression. The default is 1.
 .PP
@@ -714,13 +719,7 @@ found at https://www.graphviz.org/documentation/, especially in the
 on\(hyline reference pages. Most of these documents are also available in the
 \fIdoc\fP and \fIdoc/info\fP subtrees in the source and binary distributions.
 .PP
-dotty(1)
-.br
-tcldot(n)
-.br
-xcolors(1)
-.br
-libcgraph(3)
+.BR tcldot (n), xcolors (1), libcgraph (3).
 .PP
 E. R. Gansner, S. C. North,  K. P. Vo, "DAG \(hy A Program to Draw Directed Graphs", Software \(hy Practice and Experience 17(1), 1988, pp. 1047\(hy1062.
 .br
@@ -737,4 +736,6 @@ Available https://www.graphviz.org/pdf/neatoguide.pdf.
 .br
 E. R. Gansner and Y. Hu, "Efficient, Proximity-Preserving Node Overlap Removal",
 J. Graph Algorithms Appl., 14(1) pp. 53\(hy74, 2010. 
-
+.SH "NOTES"
+On non-Windows platforms, sending \fBSIGUSR1\fR to Graphviz can be used to
+toggle on and off some extra points reporting in the neatogen code.

@@ -1,17 +1,16 @@
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef XLABELS_H
-#define XLABELS_H
+#pragma once
+
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,12 +36,11 @@ typedef struct {
     unsigned char force;	/* If true, all labels must be placed */
 } label_params_t;
 
-int placeLabels(object_t * objs, int n_objs,
-		xlabel_t * lbls, int n_lbls, label_params_t * params);
+int placeLabels(object_t *objs, size_t n_objs, xlabel_t *lbls, size_t n_lbls,
+                label_params_t *params);
 
 #ifdef XLABEL_INT
-#include <index.h>
-#include <logic.h>
+#include <label/index.h>
 #include <cdt.h>
 
 #ifndef XLNDSCALE
@@ -89,9 +87,9 @@ typedef struct obyh {
 
 typedef struct XLabels_s {
     object_t *objs;
-    int n_objs;
+    size_t n_objs;
     xlabel_t *lbls;
-    int n_lbls;
+    size_t n_lbls;
     label_params_t *params;
 
     Dt_t *hdx;			// splay tree keyed with hilbert spatial codes
@@ -104,5 +102,3 @@ typedef struct XLabels_s {
 #ifdef __cplusplus
 }
 #endif
-
-#endif				/*XLABELS_H */

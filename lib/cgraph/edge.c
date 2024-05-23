@@ -1,36 +1,33 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/**
+ * @file
+ * @ingroup cgraph_edge
+ * @ingroup cgraph_core
+ */
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include <cghdr.h>
-
-#define IN_SET FALSE
-#define OUT_SET TRUE
-#define ID_ORDER TRUE
-#define SEQ_ORDER FALSE
-
-static Agtag_t Tag;		/* to silence warnings about initialization */
-
+#include <assert.h>
+#include <cgraph/cghdr.h>
+#include <stddef.h>
+#include <stdbool.h>
 
 /* return first outedge of <n> */
 Agedge_t *agfstout(Agraph_t * g, Agnode_t * n)
 {
     Agsubnode_t *sn;
-    Agedge_t *e = NILedge;
+    Agedge_t *e = NULL;
 
     sn = agsubrep(g, n);
     if (sn) {
 		dtrestore(g->e_seq, sn->out_seq);
-		e = (Agedge_t *) dtfirst(g->e_seq);
+		e = dtfirst(g->e_seq);
 		sn->out_seq = dtextract(g->e_seq);
 	}
     return e;
@@ -41,13 +38,13 @@ Agedge_t *agnxtout(Agraph_t * g, Agedge_t * e)
 {
     Agnode_t *n;
     Agsubnode_t *sn;
-    Agedge_t *f = NILedge;
+    Agedge_t *f = NULL;
 
     n = AGTAIL(e);
     sn = agsubrep(g, n);
     if (sn) {
 		dtrestore(g->e_seq, sn->out_seq);
-		f = (Agedge_t *) dtnext(g->e_seq, e);
+		f = dtnext(g->e_seq, e);
 		sn->out_seq = dtextract(g->e_seq);
 	}
     return f;
@@ -56,12 +53,12 @@ Agedge_t *agnxtout(Agraph_t * g, Agedge_t * e)
 Agedge_t *agfstin(Agraph_t * g, Agnode_t * n)
 {
     Agsubnode_t *sn;
-    Agedge_t *e = NILedge;
+    Agedge_t *e = NULL;
 
     sn = agsubrep(g, n);
 	if (sn) {
 		dtrestore(g->e_seq, sn->in_seq);
-		e = (Agedge_t *) dtfirst(g->e_seq);
+		e = dtfirst(g->e_seq);
 		sn->in_seq = dtextract(g->e_seq);
 	}
     return e;
@@ -71,13 +68,13 @@ Agedge_t *agnxtin(Agraph_t * g, Agedge_t * e)
 {
     Agnode_t *n;
     Agsubnode_t *sn;
-    Agedge_t *f = NILedge;
+    Agedge_t *f = NULL;
 
     n = AGHEAD(e);
     sn = agsubrep(g, n);
 	if (sn) {
 		dtrestore(g->e_seq, sn->in_seq);
-		f = (Agedge_t *) dtnext(g->e_seq, e);
+		f = dtnext(g->e_seq, e);
 		sn->in_seq = dtextract(g->e_seq);
 	}
 	return f;
@@ -87,7 +84,7 @@ Agedge_t *agfstedge(Agraph_t * g, Agnode_t * n)
 {
     Agedge_t *rv;
     rv = agfstout(g, n);
-    if (rv == NILedge)
+    if (rv == NULL)
 	rv = agfstin(g, n);
     return rv;
 }
@@ -98,16 +95,16 @@ Agedge_t *agnxtedge(Agraph_t * g, Agedge_t * e, Agnode_t * n)
 
     if (AGTYPE(e) == AGOUTEDGE) {
 	rv = agnxtout(g, e);
-	if (rv == NILedge) {
+	if (rv == NULL) {
 	    do {
 		rv = !rv ? agfstin(g, n) : agnxtin(g,rv);
-	    } while (rv && (rv->node == n));
+	    } while (rv && rv->node == n);
 	}
     } else {
 	do {
 	    rv = agnxtin(g, e);		/* so that we only see each edge once, */
 		e = rv;
-	} while (rv && (rv->node == n));	/* ignore loops as in-edges */
+	} while (rv && rv->node == n);	/* ignore loops as in-edges */
     }
     return rv;
 }
@@ -119,26 +116,16 @@ static Agedge_t *agfindedge_by_key(Agraph_t * g, Agnode_t * t, Agnode_t * h,
     Agedge_t *e, template;
     Agsubnode_t *sn;
 
-    if ((t == NILnode) || (h == NILnode))
-	return NILedge;
+    if (t == NULL || h == NULL)
+	return NULL;
     template.base.tag = key;
     template.node = t;		/* guess that fan-in < fan-out */
     sn = agsubrep(g, h);
     if (!sn) e = 0;
     else {
-#if 0
-	if (t != h) {
-#endif
 	    dtrestore(g->e_id, sn->in_id);
-	    e = (Agedge_t *) dtsearch(g->e_id, &template);
+	    e = dtsearch(g->e_id, &template);
 	    sn->in_id = dtextract(g->e_id);
-#if 0
-	} else {			/* self edge */
-	    dtrestore(g->e_id, sn->out_id);
-	    e = (Agedge_t *) dtsearch(g->e_id, &template);
-	    sn->out_id = dtextract(g->e_id);
-	}
-#endif
     }
     return e;
 }
@@ -146,9 +133,8 @@ static Agedge_t *agfindedge_by_key(Agraph_t * g, Agnode_t * t, Agnode_t * h,
 static Agedge_t *agfindedge_by_id(Agraph_t * g, Agnode_t * t, Agnode_t * h,
                   IDTYPE id)
 {
-    Agtag_t tag;
+    Agtag_t tag = {0};
 
-    tag = Tag;
     tag.objtype = AGEDGE;
     tag.id = id;
     return agfindedge_by_key(g, t, h, tag);
@@ -176,6 +162,7 @@ static void ins(Dict_t * d, Dtlink_t ** set, Agedge_t * e)
 static void del(Dict_t * d, Dtlink_t ** set, Agedge_t * e)
 {
     void *x;
+    (void)x;
     dtrestore(d, *set);
     x = dtdelete(d, e);
     assert(x);
@@ -215,24 +202,24 @@ static Agedge_t *newedge(Agraph_t * g, Agnode_t * t, Agnode_t * h,
 {
     Agedgepair_t *e2;
     Agedge_t *in, *out;
-    int seq;
 
-    (void)agsubnode(g,t,TRUE);
-    (void)agsubnode(g,h,TRUE);
-    e2 = (Agedgepair_t *) agalloc(g, sizeof(Agedgepair_t));
+    (void)agsubnode(g, t, 1);
+    (void)agsubnode(g, h, 1);
+    e2 = agalloc(g, sizeof(Agedgepair_t));
     in = &(e2->in);
     out = &(e2->out);
-    seq = agnextseq(g, AGEDGE);
+    uint64_t seq = agnextseq(g, AGEDGE);
+    assert((seq & SEQ_MASK) == seq && "sequence ID overflow");
     AGTYPE(in) = AGINEDGE;
     AGTYPE(out) = AGOUTEDGE;
     AGID(in) = AGID(out) = id;
-    AGSEQ(in) = AGSEQ(out) = seq;
+    AGSEQ(in) = AGSEQ(out) = seq & SEQ_MASK;
     in->node = t;
     out->node = h;
 
     installedge(g, out);
     if (g->desc.has_attrs) {
-	(void) agbindrec(out, AgDataRecName, sizeof(Agattr_t), FALSE);
+	(void)agbindrec(out, AgDataRecName, sizeof(Agattr_t), false);
 	agedgeattr_init(g, out);
     }
     agmethod_init(g, out);
@@ -240,20 +227,18 @@ static Agedge_t *newedge(Agraph_t * g, Agnode_t * t, Agnode_t * h,
 }
 
 /* edge creation predicate */
-static int ok_to_make_edge(Agraph_t * g, Agnode_t * t, Agnode_t * h)
-{
-    Agtag_t key;
+static bool ok_to_make_edge(Agraph_t *g, Agnode_t *t, Agnode_t *h) {
+    Agtag_t key = {0};
 
     /* protect against self, multi-edges in strict graphs */
     if (agisstrict(g)) {
-	key = Tag;
 	key.objtype = 0;	/* wild card */
 	if (agfindedge_by_key(g, t, h, key))
-	    return FALSE;
+	    return false;
     }
     if (g->desc.no_loop && (t == h)) /* simple graphs */
-	return FALSE;
-    return TRUE;
+	return false;
+    return true;
 }
 
 Agedge_t *agidedge(Agraph_t * g, Agnode_t * t, Agnode_t * h,
@@ -263,11 +248,11 @@ Agedge_t *agidedge(Agraph_t * g, Agnode_t * t, Agnode_t * h,
     Agedge_t *e;
 
     e = agfindedge_by_id(g, t, h, id);
-    if ((e == NILedge) && agisundirected(g))
+    if (e == NULL && agisundirected(g))
 	e = agfindedge_by_id(g, h, t, id);
-    if ((e == NILedge) && cflag && ok_to_make_edge(g, t, h)) {
+    if (e == NULL && cflag && ok_to_make_edge(g, t, h)) {
 	root = agroot(g);
-	if ((g != root) && ((e = agfindedge_by_id(root, t, h, id)))) {
+	if (g != root && ((e = agfindedge_by_id(root, t, h, id)))) {
 	    subedge(g, e);	/* old */
 	} else {
 	    if (agallocid(g, AGEDGE, id)) {
@@ -283,13 +268,11 @@ Agedge_t *agedge(Agraph_t * g, Agnode_t * t, Agnode_t * h, char *name,
 {
     Agedge_t *e;
     IDTYPE my_id;
-    int have_id;
 
-    have_id = agmapnametoid(g, AGEDGE, name, &my_id, FALSE);
-    if (have_id || ((name == NILstr) && (NOT(cflag) || agisstrict(g)))) {
+    int have_id = agmapnametoid(g, AGEDGE, name, &my_id, false);
+    if (have_id || (name == NULL && (!cflag || agisstrict(g)))) {
 	/* probe for pre-existing edge */
-	Agtag_t key;
-	key = Tag;
+	Agtag_t key = {0};
 	if (have_id) {
 	    key.id = my_id;
 	    key.objtype = AGEDGE;
@@ -299,13 +282,13 @@ Agedge_t *agedge(Agraph_t * g, Agnode_t * t, Agnode_t * h, char *name,
 
 	/* might already exist locally */
 	e = agfindedge_by_key(g, t, h, key);
-	if ((e == NILedge) && agisundirected(g))
+	if (e == NULL && agisundirected(g))
 	    e = agfindedge_by_key(g, h, t, key);
 	if (e)
 	    return e;
 	if (cflag) {
 	    e = agfindedge_by_key(agroot(g), t, h, key);
-	    if ((e == NILedge) && agisundirected(g))
+	    if (e == NULL && agisundirected(g))
 		e = agfindedge_by_key(agroot(g), h, t, key);
 	    if (e) {
 		subedge(g,e);
@@ -315,12 +298,12 @@ Agedge_t *agedge(Agraph_t * g, Agnode_t * t, Agnode_t * h, char *name,
     }
 
     if (cflag && ok_to_make_edge(g, t, h)
-	&& agmapnametoid(g, AGEDGE, name, &my_id, TRUE)) { /* reserve id */
+	&& agmapnametoid(g, AGEDGE, name, &my_id, true)) { /* reserve id */
 	e = newedge(g, t, h, my_id);
 	agregister(g, AGEDGE, e); /* register new object in external namespace */
     }
     else
-	e = NILedge;
+	e = NULL;
     return e;
 }
 
@@ -330,7 +313,7 @@ void agdeledgeimage(Agraph_t * g, Agedge_t * e, void *ignored)
     Agnode_t *t, *h;
     Agsubnode_t *sn;
 
-    NOTUSED(ignored);
+    (void)ignored;
     if (AGTYPE(e) == AGINEDGE) {
 	in = e;
 	out = AGIN2OUT(e);
@@ -357,7 +340,7 @@ void agdeledgeimage(Agraph_t * g, Agedge_t * e, void *ignored)
 int agdeledge(Agraph_t * g, Agedge_t * e)
 {
     e = AGMKOUT(e);
-    if (agfindedge_by_key(g, agtail(e), aghead(e), AGTAG(e)) == NILedge)
+    if (agfindedge_by_key(g, agtail(e), aghead(e), AGTAG(e)) == NULL)
 	return FAILURE;
 
     if (g == agroot(g)) {
@@ -367,7 +350,7 @@ int agdeledge(Agraph_t * g, Agedge_t * e)
 	agrecclose((Agobj_t *) e);
 	agfreeid(g, AGEDGE, AGID(e));
     }
-    if (agapply (g, (Agobj_t *) e, (agobjfn_t) agdeledgeimage, NILedge, FALSE) == SUCCESS) {
+    if (agapply(g, (Agobj_t *)e, (agobjfn_t)agdeledgeimage, NULL, false) == SUCCESS) {
 	if (g == agroot(g))
 		agfree(g, e);
 	return SUCCESS;
@@ -380,20 +363,14 @@ Agedge_t *agsubedge(Agraph_t * g, Agedge_t * e, int cflag)
     Agnode_t *t, *h;
     Agedge_t *rv;
 
-    rv = NILedge;
+    rv = NULL;
     t = agsubnode(g, AGTAIL(e), cflag);
     h = agsubnode(g, AGHEAD(e), cflag);
     if (t && h) {
 	rv = agfindedge_by_key(g, t, h, AGTAG(e));
-	if (cflag && (rv == NILedge)) {
-#ifdef OLD_OBSOLETE
-	    rv = agfindedge_by_id(g, t, h, AGID(e));
-	    if (!rv)
-		rv = newedge(g, t, h, AGID(e));
-#else
+	if (cflag && rv == NULL) {
 	installedge(g, e);
 	rv = e;
-#endif
 	}
 	if (rv && (AGTYPE(rv) != AGTYPE(e)))
 	    rv = AGOPP(rv);
@@ -406,15 +383,15 @@ static int agedgeidcmpf(Dict_t * d, void *arg_e0, void *arg_e1, Dtdisc_t * disc)
 {
     Agedge_t *e0, *e1;
 
-    NOTUSED(d);
+    (void)d;
     e0 = arg_e0;
     e1 = arg_e1;
-    NOTUSED(disc);
+    (void)disc;
 
     if (AGID(e0->node) < AGID(e1->node)) return -1;
     if (AGID(e0->node) > AGID(e1->node)) return 1;
     /* same node */
-    if ((AGTYPE(e0) != 0) && (AGTYPE(e1) != 0)) {
+    if (AGTYPE(e0) != 0 && AGTYPE(e1) != 0) {
         if (AGID(e0) < AGID(e1)) return -1;
         if (AGID(e0) > AGID(e1)) return 1;
     }
@@ -426,10 +403,10 @@ static int agedgeseqcmpf(Dict_t * d, void *arg_e0, void *arg_e1, Dtdisc_t * disc
 {
     Agedge_t *e0, *e1;
 
-    NOTUSED(d);
+    (void)d;
     e0 = arg_e0;
     e1 = arg_e1;
-    NOTUSED(disc);
+    (void)disc;
     assert(arg_e0 && arg_e1);
 
     if (e0->node != e1->node) {
@@ -445,52 +422,24 @@ static int agedgeseqcmpf(Dict_t * d, void *arg_e0, void *arg_e1, Dtdisc_t * disc
 
 /* indexing for ordered traversal */
 Dtdisc_t Ag_mainedge_seq_disc = {
-    0,				/* pass object ptr      */
-    0,				/* size (ignored)       */
-    offsetof(Agedge_t,seq_link),/* use internal links	*/
-    NIL(Dtmake_f),
-    NIL(Dtfree_f),
-    agedgeseqcmpf,
-    NIL(Dthash_f),
-    agdictobjmem,
-    NIL(Dtevent_f)
+    .link = offsetof(Agedge_t, seq_link), // use internal links
+    .comparf = agedgeseqcmpf,
 };
 
 Dtdisc_t Ag_subedge_seq_disc = {
-    0,				/* pass object ptr      */
-    0,				/* size (ignored)       */
-    -1,				/* use external holder objects */
-    NIL(Dtmake_f),
-    NIL(Dtfree_f),
-    agedgeseqcmpf,
-    NIL(Dthash_f),
-    agdictobjmem,
-    NIL(Dtevent_f)
+    .link = -1, // use external holder objects
+    .comparf = agedgeseqcmpf,
 };
 
 /* indexing for random search */
 Dtdisc_t Ag_mainedge_id_disc = {
-    0,				/* pass object ptr      */
-    0,				/* size (ignored)       */
-    offsetof(Agedge_t,id_link),	/* use internal links	*/
-    NIL(Dtmake_f),
-    NIL(Dtfree_f),
-    agedgeidcmpf,
-    NIL(Dthash_f),
-    agdictobjmem,
-    NIL(Dtevent_f)
+    .link = offsetof(Agedge_t, id_link), // use internal links
+    .comparf = agedgeidcmpf,
 };
 
 Dtdisc_t Ag_subedge_id_disc = {
-    0,				/* pass object ptr      */
-    0,				/* size (ignored)       */
-    -1,				/* use external holder objects */
-    NIL(Dtmake_f),
-    NIL(Dtfree_f),
-    agedgeidcmpf,
-    NIL(Dthash_f),
-    agdictobjmem,
-    NIL(Dtevent_f)
+    .link = -1, // use external holder objects
+    .comparf = agedgeidcmpf,
 };
 
 /* expose macros as functions for ease of debugging
@@ -542,17 +491,3 @@ CGRAPH_API Agedge_t *agopp(Agedge_t * e)
 {
     return AGOPP(e);
 }
-
-#ifdef NOTDEF
-	/* could be useful if we write relabel_edge */
-static Agedge_t *agfindedge_by_name(Agraph_t * g, Agnode_t * t,
-				    Agnode_t * h, char *name)
-{
-    uint64_t id;
-
-    if (agmapnametoid(agraphof(t), AGEDGE, name, &id, FALSE))
-	return agfindedge_by_id(g, t, h, id);
-    else
-	return NILedge;
-}
-#endif

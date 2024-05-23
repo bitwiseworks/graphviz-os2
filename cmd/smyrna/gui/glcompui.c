@@ -1,34 +1,28 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "glcompui.h"
-#include "glcompbutton.h"
-#include "glcomppanel.h"
-#include "glcomplabel.h"
-#include "glcompimage.h"
+#include <glcomp/glcompbutton.h>
+#include <glcomp/glcomppanel.h>
+#include <glcomp/glcomplabel.h>
+#include <glcomp/glcompimage.h>
 #include "gltemplate.h"
-#include "glutils.h"
+#include <glcomp/glutils.h>
 #include "glmotion.h"
 #include "topfisheyeview.h"
 #include "toolboxcallbacks.h"
 #include "viewportcamera.h"
 #include "selectionfuncs.h"
-
+#include <stdint.h>
 #include "frmobjectui.h"
 
-
-/* static glCompPanel *controlPanel; */
-/* static glCompButton *rotatebutton; */
 static glCompPanel *sel = NULL;
 static glCompButton *to3DBtn;
 static glCompButton *to2DBtn;
@@ -39,36 +33,44 @@ static glCompImage *img3D;
 static glCompButton *panBtn;
 
 
-void menu_click_pan(glCompObj *obj, GLfloat x, GLfloat y,
-			   glMouseButtonType t)
-{
+void menu_click_pan(glCompObj *obj, float x, float y, glMouseButtonType t) {
+        (void)obj;
+        (void)x;
+        (void)y;
+        (void)t;
+
         deselect_all(view->g[view->activeGraph]);
 }
 
-#ifdef UNUSED
-static void menu_click_zoom(void *obj, GLfloat x, GLfloat y,
-			    glMouseButtonType t)
-{
-    switch_Mouse(NULL, MM_ZOOM);
-}
-#endif
-
-
-void menu_click_zoom_minus(glCompObj *obj, GLfloat x, GLfloat y,
+void menu_click_zoom_minus(glCompObj *obj, float x, float y,
 				  glMouseButtonType t)
 {
+    (void)obj;
+    (void)x;
+    (void)y;
+    (void)t;
+
     glmotion_zoom_inc(0);
 }
 
-void menu_click_zoom_plus(glCompObj *obj, GLfloat x, GLfloat y,
-				 glMouseButtonType t)
+void menu_click_zoom_plus(glCompObj *obj, float x, float y, glMouseButtonType t)
 {
+    (void)obj;
+    (void)x;
+    (void)y;
+    (void)t;
+
     glmotion_zoom_inc(1);
 }
 
-static void menu_switch_to_fisheye(glCompObj *obj, GLfloat x, GLfloat y,
+static void menu_switch_to_fisheye(glCompObj *obj, float x, float y,
 				   glMouseButtonType t)
 {
+    (void)obj;
+    (void)x;
+    (void)y;
+    (void)t;
+
     if (!view->Topview->fisheyeParams.active)
 	{
 	    if (!view->Topview->fisheyeParams.h) {
@@ -92,12 +94,13 @@ static void menu_switch_to_fisheye(glCompObj *obj, GLfloat x, GLfloat y,
     }
 }
 
+void menu_click_center(glCompObj *obj, float x, float y, glMouseButtonType t) {
+    (void)obj;
+    (void)x;
+    (void)y;
+    (void)t;
 
-
-void menu_click_center(glCompObj *obj, GLfloat x, GLfloat y,
-			      glMouseButtonType t)
-{
-    if (view->active_camera == -1) {	/*2D mode */
+    if (view->active_camera == SIZE_MAX) { // 2D mode
 	btnToolZoomFit_clicked(NULL, NULL);
     } else {			/*there is active camera , adjust it to look at the center */
 
@@ -107,15 +110,18 @@ void menu_click_center(glCompObj *obj, GLfloat x, GLfloat y,
 
     }
 }
-void switch2D3D(glCompObj *obj, GLfloat x, GLfloat y,
-		       glMouseButtonType t)
-{
+
+void switch2D3D(glCompObj *obj, float x, float y, glMouseButtonType t) {
+    (void)obj;
+    (void)x;
+    (void)y;
+
     if (t == glMouseLeftButton) {
 
-	if (view->active_camera == -1) {
+	if (view->active_camera == SIZE_MAX) {
 
 	    if (view->camera_count == 0) {
-		menu_click_add_camera(obj);
+		menu_click_add_camera();
 	    } else {
 		view->active_camera = 0;	/*set to camera */
 	    }
@@ -124,11 +130,10 @@ void switch2D3D(glCompObj *obj, GLfloat x, GLfloat y,
 	    img3D->common.visible = 1;
 	} else {		/*switch to 2d */
 
-	    view->active_camera = -1;	/*set to camera */
+	    view->active_camera = SIZE_MAX; // set to camera
 	    glCompButtonShow(to3DBtn);
 	    glCompButtonHide(to2DBtn);
-	    panBtn->common.callbacks.click((glCompObj*)panBtn, (GLfloat) 0,
-					   (GLfloat) 0,
+	    panBtn->common.callbacks.click((glCompObj*)panBtn, 0.0f, 0.0f,
 					   (glMouseButtonType) 0);
 	    img3D->common.visible = 0;
 
@@ -137,33 +142,43 @@ void switch2D3D(glCompObj *obj, GLfloat x, GLfloat y,
     }
 }
 
-
-static void CBglCompMouseUp(glCompObj *obj, GLfloat x, GLfloat y, glMouseButtonType t)
+static void CBglCompMouseUp(glCompObj *obj, float x, float y, glMouseButtonType t)
 {
-    /* glCompMouse* m=&((glCompSet*)obj)->mouse; */
+    (void)obj;
+    (void)x;
+    (void)y;
+    (void)t;
+
     sel->common.visible = 0;
     sel->common.pos.x = -5000;
 
 }
 
-
-static void CBglCompMouseRightClick(glCompObj *obj, GLfloat x, GLfloat y,
+static void CBglCompMouseRightClick(glCompObj *obj, float x, float y,
 			     glMouseButtonType t)
 {
+    (void)obj;
+
     if (t == glMouseRightButton) 
 	{
-		GLfloat X, Y, Z = 0;
+		float X, Y, Z = 0;
 		to3D((int) x, (int) y, &X, &Y, &Z);
     }
 }
 
-static void attrList(glCompObj *obj, GLfloat x, GLfloat y, glMouseButtonType t)
-{
-	showAttrsWidget(view->Topview);
+static void attrList(glCompObj *obj, float x, float y, glMouseButtonType t) {
+	(void)obj;
+	(void)x;
+	(void)y;
+	(void)t;
+
+	showAttrsWidget();
 }
 
-static void glCompMouseMove(glCompObj *obj, GLfloat x, GLfloat y)
-{
+static void glCompMouseMove(glCompObj *obj, float x, float y) {
+    (void)x;
+    (void)y;
+
     glCompMouse *m = &((glCompSet *) obj)->mouse;
 
     sel->common.visible = 1;
@@ -178,55 +193,38 @@ static void glCompMouseMove(glCompObj *obj, GLfloat x, GLfloat y)
 	glexpose();
     }
 }
-static void selectedges(glCompObj *obj, GLfloat x, GLfloat y)
-{
+
+static void selectedges(glCompObj *obj, float x, float y) {
+    (void)obj;
+    (void)x;
+    (void)y;
+
     if(view->Topview->sel.selectEdges==0)
 	view->Topview->sel.selectEdges=1;
     else
 	view->Topview->sel.selectEdges=0;
 
 }
-static void selectnodes(glCompObj *obj, GLfloat x, GLfloat y)
-{
+
+static void selectnodes(glCompObj *obj, float x, float y) {
+    (void)obj;
+    (void)x;
+    (void)y;
+
     if(view->Topview->sel.selectNodes==0)
 	view->Topview->sel.selectNodes=1;
     else
 	view->Topview->sel.selectNodes=0;
 }
 
-#if 0
-void testContainer(glCompSet *s)
-{
-    glCompPanel* p;
-
-    p = glCompPanelNew((glCompObj *) s, 100, 100, 500, 500);
-    p = glCompPanelNew((glCompObj *) p, 0, 0, 480, 480);
-    p->common.anchor.leftAnchor=1;
-    p->common.anchor.bottomAnchor=1;
-    p->common.anchor.topAnchor=1;
-    p->common.anchor.rightAnchor=1;
-
-
-    p->common.anchor.left=10;
-    p->common.anchor.bottom=50;
-    p->common.anchor.top=10;
-    p->common.anchor.right=10;
-}
-#endif
-
-
 glCompSet *glcreate_gl_topview_menu(void)
 {
-    /* static char* icondir[512]; */
-    /* int ind=0; */
-    GLfloat y = 5;
-    GLfloat off = 43;
+    float y = 5;
+    float off = 43;
     glCompSet *s = glCompSetNew(view->w, view->h);
     glCompPanel *p = NULL;
     glCompButton *b = NULL;
-    /* glCompLabel *l=NULL; */
     glCompImage *i = NULL;
-    /* glCompLabel* l; */
     glCompColor c;
     s->common.callbacks.click = CBglCompMouseRightClick;
 
@@ -286,18 +284,17 @@ glCompSet *glcreate_gl_topview_menu(void)
     p->common.borderWidth = 1;
     p->shadowwidth = 0;
 
-    c.R = 0.80;
-    c.G = 0.6;
-    c.B = 0.6;
-    c.A = 1.6;
+    c.R = 0.80f;
+    c.G = 0.6f;
+    c.B = 0.6f;
+    c.A = 1.6f;
 
     y = 1;
 
     b = glCompButtonNew((glCompObj *) p, 1, y, 42, 42, "");
     glCompButtonAddPngGlyph(b, smyrnaPath("details.png"));
     b->common.callbacks.click = attrList;
-    copy_glcomp_color(&c, &b->common.color);
-
+    b->common.color = c;
 	
     y = y + off;
 	
@@ -305,14 +302,14 @@ glCompSet *glcreate_gl_topview_menu(void)
     glCompButtonAddPngGlyph(b, smyrnaPath("zoomin.png"));
     b->groupid = 0;
     b->common.callbacks.click = menu_click_zoom_plus;
-    copy_glcomp_color(&c, &b->common.color);
+    b->common.color = c;
     y = y + off;
 
 
     b = glCompButtonNew((glCompObj *) p, 1, y, 42, 42, "");
     glCompButtonAddPngGlyph(b, smyrnaPath("zoomout.png"));
     b->common.callbacks.click = menu_click_zoom_minus;
-    copy_glcomp_color(&c, &b->common.color);
+    b->common.color = c;
 
     y = y + off;
 
@@ -320,18 +317,7 @@ glCompSet *glcreate_gl_topview_menu(void)
     b = glCompButtonNew((glCompObj *) p, 1, y, 42, 42, "");
     glCompButtonAddPngGlyph(b, smyrnaPath("center.png"));
     b->common.callbacks.click = menu_click_center;
-    copy_glcomp_color(&c, &b->common.color);
-
-
-
-	
-	
-
-
-
-
-
-
+    b->common.color = c;
 
     p = glCompPanelNew((glCompObj *) s, -250, 550, 150, 175);
     p->common.borderWidth = 0;
@@ -339,7 +325,7 @@ glCompSet *glcreate_gl_topview_menu(void)
     p->common.color.R = 0;
     p->common.color.G = 0;
     p->common.color.B = 1;
-    p->common.color.A = 0.2;
+    p->common.color.A = 0.2f;
     p->common.visible = 0;
     sel = p;
     s->common.callbacks.mouseover = glCompMouseMove;
@@ -377,19 +363,3 @@ glCompSet *glcreate_gl_topview_menu(void)
 
 
 }
-
-#if 0
-int getIconsDirectory(char *bf)
-{
-#ifdef _WIN32
-    int a = GetCurrentDirectory(512, bf);
-    if ((a > 512) || (a == 0))
-	return 0;
-#else
-    //code *nix implementation to retrieve the icon directory, possibly some /share dir.
-    /* FIXME */
-#endif
-    return 1;
-
-}
-#endif

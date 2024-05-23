@@ -1,19 +1,16 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
-#include "gvplugin_device.h"
+#include <gvc/gvplugin_device.h>
 #include <IL/il.h>
 #include <IL/ilu.h>
 
@@ -37,8 +34,6 @@ Y_inv ( unsigned int width, unsigned int height, char *data)
 static void devil_format(GVJ_t * job)
 {
     ILuint	ImgId;
-    ILenum	Error;
-    ILboolean rc;
 
     // Check if the shared lib's version matches the executable's version.
     if (ilGetInteger(IL_VERSION_NUM) < IL_VERSION ||
@@ -55,19 +50,25 @@ static void devil_format(GVJ_t * job)
     // Bind this image name.
     ilBindImage(ImgId);
 
-    // cairo's inmemory image format needs inverting for DevIL 
+    // cairo's in-memory image format needs inverting for DevIL
     Y_inv ( job->width, job->height, job->imagedata );
     
     // let the DevIL do its thing
-    rc = ilTexImage( job->width, job->height,
+    (void)ilTexImage(job->width, job->height,
     		1,		// Depth
     		4,		// Bpp
     		IL_BGRA,	// Format
     		IL_UNSIGNED_BYTE,// Type
     		job->imagedata);
-    
-    // output to the provided open file handle
-    ilSaveF(job->device.id, job->output_file);
+
+    // check the last step succeeded
+    ILenum Error = ilGetError();
+    if (Error == 0) {
+    	// output to the provided open file handle
+    	ilSaveF((ILenum)job->device.id, job->output_file);
+    } else {
+    	fprintf(stderr, "Error: %s\n", iluErrorString(Error));
+    }
     
     // We're done with the image, so delete it.
     ilDeleteImages(1, &ImgId);

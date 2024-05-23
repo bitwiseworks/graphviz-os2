@@ -1,20 +1,17 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
-#include "gvplugin_device.h"
-#include "gvio.h"
+#include <gvc/gvplugin_device.h>
+#include <gvc/gvio.h>
 
 #ifdef HAVE_WEBP
 #include "webp/encode.h"
@@ -43,7 +40,7 @@ typedef enum {
 } format_type;
 
 static int writer(const uint8_t* data, size_t data_size, const WebPPicture* const pic) {
-    return (gvwrite((GVJ_t *)pic->custom_ptr, (const char *)data, data_size) == data_size) ? 1 : 0;
+    return gvwrite(pic->custom_ptr, (const char *)data, data_size) == data_size ? 1 : 0;
 }
 
 static void webp_format(GVJ_t * job)
@@ -58,51 +55,32 @@ static void webp_format(GVJ_t * job)
 	goto Error;
     }
 
-    picture.width = job->width;
-    picture.height = job->height;
-    stride = 4 * job->width;
+    // if either dimension exceeds the WebP API, map this to one of its errors
+    if ((unsigned)INT_MAX / 4 < job->width || job->height > (unsigned)INT_MAX) {
+	int error = VP8_ENC_ERROR_BAD_DIMENSION;
+	fprintf(stderr, "Error! Cannot encode picture as WebP\n");
+	fprintf(stderr, "Error code: %d (%s)\n", error, kErrorMessages[error]);
+	goto Error;
+    }
+
+    picture.width = (int)job->width;
+    picture.height = (int)job->height;
+    stride = 4 * (int)job->width;
 
     picture.writer = writer;
-    picture.custom_ptr = (void*)job;
+    picture.custom_ptr = job;
 
-#if 0
-    picture.extra_info_type = 0;
-    picture.colorspace = 0;
-
-    config.method = 0;
-    config.quality = 0;
-    config.show_compressed = 0;
-    config.alpha_quality = 0;
-    config.alpha_compression = 0;
-    config.alpha_filtering = 0;
-    config.target_size = 0;
-    config.target_PSNR = 0;
-    config.sns_strength = 0;
-    config.filter_strength = 0;
-    config.autofilter = 0;
-    config.filter_type = 0;
-    config.filter_sharpness = 0;
-    config.pass = 0;
-    config.preprocessing = 0;
-    config.segments = 0;
-    config.partition_limit = 0;
-#endif
-
-#if 1
     preset = WEBP_PRESET_DRAWING;
 
     if (!WebPConfigPreset(&config, preset, config.quality)) {
 	fprintf(stderr, "Error! Could initialize configuration with preset.\n");
 	goto Error;
     }
-#endif
 
-#if 1
     if (!WebPValidateConfig(&config)) {
 	fprintf(stderr, "Error! Invalid configuration.\n");
 	goto Error;
     }
-#endif
 
     if (!WebPPictureAlloc(&picture)) {
 	fprintf(stderr, "Error! Cannot allocate memory\n");

@@ -1,19 +1,19 @@
-
 /*************************************************************************
  * Copyright (c) 2013 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "color_palette.h"
-#include "string.h"
-#include "macros.h"
+#include <sparse/color_palette.h>
+#include <string.h>
+#include <common/macros.h>
+#include <cgraph/streq.h>
 
-int knownColorScheme (char* name)
+int knownColorScheme(const char* name)
 {
   int r, g, b;
 
@@ -34,16 +34,7 @@ char *color_palettes_get(char *color_palette_name){
   return NULL;
 }
 
-void color_palettes_name_print(FILE *fp){
-  int i;
-
-  for (i = 0; i < npalettes; i++){
-    if (i != 0)  fprintf(fp,", ");
-    fprintf(fp,"%s", color_palettes[i][0]);
-  }
-}
-
-int color_palettes_Q(char *color_palette_name){
+int color_palettes_Q(const char *color_palette_name) {
   int i;
   for (i = 0; i < npalettes; i++){
     if (strcmp(color_palette_name, color_palettes[i][0]) == 0){

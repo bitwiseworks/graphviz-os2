@@ -1,38 +1,36 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "digcola.h"
+#include <cgraph/alloc.h>
+#include <neatogen/digcola.h>
 #ifdef DIGCOLA
 #include <math.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
 #include <stdio.h>
 #include <float.h>
-#include "stress.h"
-#include "dijkstra.h"
-#include "bfs.h"
-#include "matrix_ops.h"
-#include "kkutils.h"
-#include "conjgrad.h"
-#include "quad_prog_solver.h"
-#include "matrix_ops.h"
+#include <neatogen/stress.h>
+#include <neatogen/dijkstra.h>
+#include <neatogen/bfs.h>
+#include <neatogen/matrix_ops.h>
+#include <neatogen/kkutils.h>
+#include <neatogen/conjgrad.h>
+#include <neatogen/quad_prog_solver.h>
+#include <neatogen/matrix_ops.h>
 
 #define localConstrMajorIterations 15
 #define levels_sep_tol 1e-1
 
 int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in sparse representation  */
 				       int n,	/* Number of nodes */
-				       int nedges_graph,	/* Number of edges */
 				       double **d_coords,	/* Coordinates of nodes (output layout)  */
 				       node_t ** nodes,	/* Original nodes */
 				       int dim,	/* Dimemsionality of layout */
@@ -49,15 +47,12 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	** This function imposes HIERARCHY CONSTRAINTS  **
 	*************************************************/
 
-    int i, j, k;
-    boolean directionalityExist = FALSE;
+    int i, k;
+    bool directionalityExist = false;
     float *lap1 = NULL;
     float *dist_accumulator = NULL;
     float *tmp_coords = NULL;
     float **b = NULL;
-#ifdef NONCORE
-    FILE *fp = NULL;
-#endif
     double *degrees = NULL;
     float *lap2 = NULL;
     int lap_length;
@@ -65,7 +60,6 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
     float **coords = NULL;
 
     double conj_tol = tolerance_cg;	/* tolerance of Conjugate Gradient */
-    float **unpackedLap = NULL;
     CMajEnv *cMajEnv = NULL;
     double y_0;
     int length;
@@ -78,26 +72,23 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
     double relative_tol = levels_sep_tol;
     int *ordering = NULL, *levels = NULL;
     float constant_term;
-    int count;
     double degree;
     int step;
     float val;
     double old_stress, new_stress;
-    boolean converged;
+    bool converged;
     int len;
     int num_levels;
-    float *hierarchy_boundaries;
 
     if (graph[0].edists != NULL) {
 	for (i = 0; i < n; i++) {
-	    for (j = 1; j < graph[i].nedges; j++) {
-		directionalityExist = directionalityExist
-		    || (graph[i].edists[j] != 0);
+	    for (size_t j = 1; j < graph[i].nedges; j++) {
+		directionalityExist |= graph[i].edists[j] != 0;
 	    }
 	}
     }
     if (!directionalityExist) {
-	return stress_majorization_kD_mkernel(graph, n, nedges_graph,
+	return stress_majorization_kD_mkernel(graph, n,
 					      d_coords, nodes, dim, opts,
 					      model, maxi);
     }
@@ -111,7 +102,7 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	double *y;
 	if (dim > 2) {
 	    /* the dim==2 case is handled below                      */
-	    if (stress_majorization_kD_mkernel(graph, n, nedges_graph,
+	    if (stress_majorization_kD_mkernel(graph, n,
 					   d_coords + 1, nodes, dim - 1,
 					   opts, model, 15) < 0)
 		return -1;
@@ -134,7 +125,8 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	}
 	if (num_levels < 1) {
 	    /* no hierarchy found, use faster algorithm */
-	    return stress_majorization_kD_mkernel(graph, n, nedges_graph,
+	    free(levels);
+	    return stress_majorization_kD_mkernel(graph, n,
 						  d_coords, nodes, dim,
 						  opts, model, maxi);
 	}
@@ -145,12 +137,12 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	    int stop;
 	    for (i = 0; i < num_levels; i++) {
 		displacement +=
-		    MAX((double) 0,
+		    MAX(0.0,
 			levels_gap - (y[ordering[levels[i]]] +
 				      displacement -
 				      y[ordering[levels[i] - 1]]));
 		stop = i < num_levels - 1 ? levels[i + 1] : n;
-		for (j = levels[i]; j < stop; j++) {
+		for (int j = levels[i]; j < stop; j++) {
 		    y[ordering[j]] += displacement;
 		}
 	    }
@@ -162,24 +154,26 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	    }
 	}
     } else {
-	initLayout(graph, n, dim, d_coords, nodes);
+	initLayout(n, dim, d_coords, nodes);
 	if (compute_hierarchy(graph, n, abs_tol, relative_tol, NULL, &ordering,
 			  &levels, &num_levels)) {
 	    iterations = -1;
 	    goto finish;
 	}
     }
-    if (n == 1)
+    if (n == 1) {
+	free(levels);
 	return 0;
-
-    hierarchy_boundaries = N_GNEW(num_levels, float);
+    }
 
 	/****************************************************
 	** Compute the all-pairs-shortest-distances matrix **
 	****************************************************/
 
-    if (maxi == 0)
+    if (maxi == 0) {
+	free(levels);
 	return iterations;
+    }
 
     if (Verbose)
 	start_timer();
@@ -189,11 +183,11 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	/* and perform slower Dijkstra-based computation */
 	if (Verbose)
 	    fprintf(stderr, "Calculating subset model");
-	Dij = compute_apsp_artifical_weights_packed(graph, n);
+	Dij = compute_apsp_artificial_weights_packed(graph, n);
     } else if (model == MODEL_CIRCUIT) {
 	Dij = circuitModel(graph, n);
 	if (!Dij) {
-	    agerr(AGWARN,
+	    agwarningf(
 		  "graph is disconnected. Hence, the circuit model\n");
 	    agerr(AGPREV,
 		  "is undefined. Reverting to the shortest path model.\n");
@@ -227,28 +221,25 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	/* No Jiggling, might conflict with constraints                  */
 	double max = 1;
 	for (i = 0; i < dim; i++) {
-	    for (j = 0; j < n; j++) {
-		if (fabs(d_coords[i][j]) > max) {
-		    max = fabs(d_coords[i][j]);
-		}
+	    for (int j = 0; j < n; j++) {
+		max = fmax(max, fabs(d_coords[i][j]));
 	    }
 	}
 	for (i = 0; i < dim; i++) {
-	    for (j = 0; j < n; j++) {
+	    for (int j = 0; j < n; j++) {
 		d_coords[i][j] *= 10 / max;
 	    }
 	}
     }
 
     if (levels_gap > 0) {
-	int length = n + n * (n - 1) / 2;
 	double sum1, sum2, scale_ratio;
 	int count;
 	sum1 = (float) (n * (n - 1) / 2);
 	sum2 = 0;
 	for (count = 0, i = 0; i < n - 1; i++) {
 	    count++;		// skip self distance
-	    for (j = i + 1; j < n; j++, count++) {
+	    for (int j = i + 1; j < n; j++, count++) {
 		sum2 += distance_kD(d_coords, dim, i, j) / Dij[count];
 	    }
 	}
@@ -273,12 +264,12 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	d_coords[1][i] -= y_0;
     }
 
-    coords = N_GNEW(dim, float *);
-    f_storage = N_GNEW(dim * n, float);
+    coords = gv_calloc(dim, sizeof(float *));
+    f_storage = gv_calloc(dim * n, sizeof(float));
     for (i = 0; i < dim; i++) {
 	coords[i] = f_storage + i * n;
-	for (j = 0; j < n; j++) {
-	    coords[i][j] = (float) (d_coords[i][j]);
+	for (int j = 0; j < n; j++) {
+	    coords[i][j] = (float)d_coords[i][j];
 	}
     }
 
@@ -301,13 +292,13 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
     invert_vec(lap_length, lap2);
 
     /* compute diagonal entries */
-    count = 0;
-    degrees = N_GNEW(n, double);
+    int count = 0;
+    degrees = gv_calloc(n, sizeof(double));
     set_vector_val(n, 0, degrees);
     for (i = 0; i < n - 1; i++) {
 	degree = 0;
 	count++;		// skip main diag entry
-	for (j = 1; j < n - i; j++, count++) {
+	for (int j = 1; j < n - i; j++, count++) {
 	    val = lap2[count];
 	    degree += val;
 	    degrees[i + j] -= val;
@@ -318,61 +309,31 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	lap2[count] = (float) degrees[i];
     }
 
-#ifdef NONCORE
-    fpos_t pos;
-    if (n > max_nodes_in_mem) {
-#define FILENAME "tmp_Dij$$$.bin"
-	fp = fopen(FILENAME, "wb");
-	fwrite(lap2, sizeof(float), lap_length, fp);
-	fclose(fp);
-	fp = NULL;
-    }
-#endif
-
 	/*************************
 	** Layout optimization  **
 	*************************/
 
-    b = N_GNEW(dim, float *);
-    b[0] = N_GNEW(dim * n, float);
+    b = gv_calloc(dim, sizeof(float *));
+    b[0] = gv_calloc(dim * n, sizeof(float));
     for (k = 1; k < dim; k++) {
 	b[k] = b[0] + k * n;
     }
 
-    tmp_coords = N_GNEW(n, float);
-    dist_accumulator = N_GNEW(n, float);
-#ifdef NONCORE
-    if (n <= max_nodes_in_mem) {
-#endif
-	lap1 = N_GNEW(lap_length, float);
-#ifdef NONCORE
-    } else {
-	lap1 = lap2;
-	fp = fopen(FILENAME, "rb");
-	fgetpos(fp, &pos);
-    }
-#endif
+    tmp_coords = gv_calloc(n, sizeof(float));
+    dist_accumulator = gv_calloc(n, sizeof(float));
+    lap1 = gv_calloc(lap_length, sizeof(float));
 
     old_stress = DBL_MAX;	/* at least one iteration */
 
-    unpackedLap = unpackMatrix(lap2, n);
     cMajEnv =
 	initConstrainedMajorization(lap2, n, ordering, levels, num_levels);
 
-    for (converged = FALSE, iterations = 0;
+    for (converged = false, iterations = 0;
 	 iterations < maxi && !converged; iterations++) {
 
 	/* First, construct Laplacian of 1/(d_ij*|p_i-p_j|)  */
 	set_vector_val(n, 0, degrees);
-#ifdef NONCORE
-	if (n <= max_nodes_in_mem) {
-#endif
-	    sqrt_vecf(lap_length, lap2, lap1);
-#ifdef NONCORE
-	} else {
-	    sqrt_vec(lap_length, lap1);
-	}
-#endif
+	sqrt_vecf(lap_length, lap2, lap1);
 	for (count = 0, i = 0; i < n - 1; i++) {
 	    len = n - i - 1;
 	    /* init 'dist_accumulator' with zeros */
@@ -383,26 +344,23 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	     */
 	    for (k = 0; k < dim; k++) {
 		set_vector_valf(len, coords[k][i], tmp_coords);
-		vectors_mult_additionf(len, tmp_coords, -1,
-				       coords[k] + i + 1);
+		vectors_mult_additionf(len, tmp_coords, -1, coords[k] + i + 1);
 		square_vec(len, tmp_coords);
-		vectors_additionf(len, tmp_coords, dist_accumulator,
-				  dist_accumulator);
+		vectors_additionf(len, tmp_coords, dist_accumulator, dist_accumulator);
 	    }
 
 	    /* convert to 1/d_{ij} */
 	    invert_sqrt_vec(len, dist_accumulator);
 	    /* detect overflows */
-	    for (j = 0; j < len; j++) {
-		if (dist_accumulator[j] >= FLT_MAX
-		    || dist_accumulator[j] < 0) {
+	    for (int j = 0; j < len; j++) {
+		if (dist_accumulator[j] >= FLT_MAX || dist_accumulator[j] < 0) {
 		    dist_accumulator[j] = 0;
 		}
 	    }
 
 	    count++;		/* save place for the main diagonal entry */
 	    degree = 0;
-	    for (j = 0; j < len; j++, count++) {
+	    for (int j = 0; j < len; j++, count++) {
 		val = lap1[count] *= dist_accumulator[j];
 		degree += val;
 		degrees[i + j + 1] -= val;
@@ -429,38 +387,16 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	}
 	new_stress *= 2;
 	new_stress += constant_term;	// only after mult by 2              
-#ifdef NONCORE
-	if (n > max_nodes_in_mem) {
-	    /* restore lap2 from disk */
-	    fsetpos(fp, &pos);
-	    fread(lap2, sizeof(float), lap_length, fp);
-	}
-#endif
 	for (k = 0; k < dim; k++) {
 	    right_mult_with_vector_ff(lap2, n, coords[k], tmp_coords);
 	    new_stress -= vectors_inner_productf(n, coords[k], tmp_coords);
 	}
 
-#ifdef ALTERNATIVE_STRESS_CALC
-	{
-	    double mat_stress = new_stress;
-	    double compute_stress(float **coords, float *lap, int dim,
-				  int n);
-	    new_stress = compute_stress(coords, lap2, dim, n);
-	    if (fabs(mat_stress - new_stress) /
-		min(mat_stress, new_stress) > 0.001) {
-		fprintf(stderr,
-			"Diff stress vals: %lf %lf (iteration #%d)\n",
-			mat_stress, new_stress, iterations);
-	    }
-	}
-#endif
 	/* check for convergence */
 	converged =
 	    fabs(new_stress - old_stress) / fabs(old_stress + 1e-10) <
 	    Epsilon;
-	converged = converged || (iterations > 1
-				  && new_stress > old_stress);
+	converged |= iterations > 1 && new_stress > old_stress;
 	/* in first iteration we allowed stress increase, which 
 	 * might result ny imposing constraints
 	 */
@@ -482,9 +418,8 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	    if (k == 1) {
 		/* use quad solver in the y-dimension */
 		constrained_majorization_new_with_gaps(cMajEnv, b[k],
-						       coords, dim, k,
+						       coords, k,
 						       localConstrMajorIterations,
-						       hierarchy_boundaries,
 						       levels_gap);
 
 	    } else {
@@ -497,12 +432,10 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	    }
 	}
     }
-    free(hierarchy_boundaries);
-    deleteCMajEnv(cMajEnv);
 
     if (coords != NULL) {
 	for (i = 0; i < dim; i++) {
-	    for (j = 0; j < n; j++) {
+	    for (int j = 0; j < n; j++) {
 		d_coords[i][j] = coords[i][j];
 	    }
 	}
@@ -510,35 +443,25 @@ int stress_majorization_with_hierarchy(vtx_data * graph,	/* Input graph in spars
 	free(coords);
     }
 
-    if (b) {
-	free(b[0]);
-	free(b);
-    }
     free(tmp_coords);
     free(dist_accumulator);
     free(degrees);
     free(lap2);
 
-
-#ifdef NONCORE
-    if (n <= max_nodes_in_mem) {
-#endif
-	free(lap1);
-#ifdef NONCORE
-    }
-    if (fp)
-	fclose(fp);
-#endif
+    free(lap1);
 
 finish:
+    if (cMajEnv != NULL) {
+	deleteCMajEnv(cMajEnv);
+    }
+    if (b) {
+	free(b[0]);
+	free(b);
+    }
     free(ordering);
 
     free(levels);
 
-    if (unpackedLap) {
-	free(unpackedLap[0]);
-	free(unpackedLap);
-    }
     return iterations;
 }
 #endif				/* DIGCOLA */

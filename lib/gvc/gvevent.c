@@ -1,30 +1,26 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
 #include <string.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <math.h>
 
-#include "gvplugin_layout.h"
-#include "gvcint.h"
-#include "gvcproc.h"
+#include <gvc/gvplugin_layout.h>
+#include <gvc/gvcint.h>
+#include <gvc/gvcproc.h>
+#include <common/utils.h>
 
-extern char *strdup_and_subst_obj(char *str, void * n);
 extern void emit_graph(GVJ_t * job, graph_t * g);
-extern boolean overlap_edge(edge_t *e, boxf b);
-extern boolean overlap_node(node_t *n, boxf b);
 extern int gvLayout(GVC_t *gvc, graph_t *g, const char *engine);
 extern int gvRenderFilename(GVC_t *gvc, graph_t *g, const char *format, const char *filename);
 extern void graph_cleanup(graph_t *g);
@@ -33,136 +29,35 @@ extern void graph_cleanup(graph_t *g);
 #define ZOOMFACTOR 1.1
 #define EPSILON .0001
 
-static char *s_digraph = "digraph";
-static char *s_graph = "graph";
-static char *s_subgraph = "subgraph";
-static char *s_node = "node";
-static char *s_edge = "edge";
 static char *s_tooltip = "tooltip";
 static char *s_href = "href";
 static char *s_URL = "URL";
-static char *s_tailport = "tailport";
-static char *s_headport = "headport";
-static char *s_key = "key";
 
 static void gv_graph_state(GVJ_t *job, graph_t *g)
 {
-    int j;
-    Agsym_t *a;
-    gv_argvlist_t *list;
-
-    list = &(job->selected_obj_type_name);
-    j = 0;
-    if (g == agroot(g)) {
-	if (agisdirected(g))
-            gv_argvlist_set_item(list, j++, s_digraph);
-	else
-            gv_argvlist_set_item(list, j++, s_graph);
-    }
-    else {
-        gv_argvlist_set_item(list, j++, s_subgraph);
-    }
-    gv_argvlist_set_item(list, j++, agnameof(g));
-    list->argc = j;
-
-    list = &(job->selected_obj_attributes);
-    a = NULL;
-    while ((a = agnxtattr(g, AGRAPH, a))) {
-        gv_argvlist_set_item(list, j++, a->name);
-        gv_argvlist_set_item(list, j++, agxget(g, a));
-        gv_argvlist_set_item(list, j++, (char*)GVATTR_STRING);
-    }
-    list->argc = j;
-
-    a = agfindgraphattr(g, s_href);
+    Agsym_t *a = agfindgraphattr(g, s_href);
     if (!a)
 	a = agfindgraphattr(g, s_URL);
     if (a)
-	job->selected_href = strdup_and_subst_obj(agxget(g, a), (void*)g);
+	job->selected_href = strdup_and_subst_obj(agxget(g, a), g);
 }
 
 static void gv_node_state(GVJ_t *job, node_t *n)
 {
-    int j;
-    Agsym_t *a;
-    Agraph_t *g;
-    gv_argvlist_t *list;
-
-    list = &(job->selected_obj_type_name);
-    j = 0;
-    gv_argvlist_set_item(list, j++, s_node);
-    gv_argvlist_set_item(list, j++, agnameof(n));
-    list->argc = j;
-
-    list = &(job->selected_obj_attributes);
-    g = agroot(agraphof(n));
-    a = NULL;
-    while ((a = agnxtattr(g, AGNODE, a))) {
-        gv_argvlist_set_item(list, j++, a->name);
-        gv_argvlist_set_item(list, j++, agxget(n, a));
-    }
-    list->argc = j;
-
-    a = agfindnodeattr(agraphof(n), s_href);
+    Agsym_t *a = agfindnodeattr(agraphof(n), s_href);
     if (!a)
         a = agfindnodeattr(agraphof(n), s_URL);
     if (a)
-	job->selected_href = strdup_and_subst_obj(agxget(n, a), (void*)n);
+	job->selected_href = strdup_and_subst_obj(agxget(n, a), n);
 }
 
 static void gv_edge_state(GVJ_t *job, edge_t *e)
 {
-    int j;
-    Agsym_t *a;
-    Agraph_t *g;
-    gv_argvlist_t *nlist, *alist;
-
-    nlist = &(job->selected_obj_type_name);
-
-    /* only tail, head, and key are strictly identifying properties,
-     * but we commonly also use edge kind (e.g. "->") and tailport,headport
-     * in edge names */
-    j = 0;
-    gv_argvlist_set_item(nlist, j++, s_edge);
-    gv_argvlist_set_item(nlist, j++, agnameof(agtail(e)));
-    j++; /* skip tailport slot for now */
-    gv_argvlist_set_item(nlist, j++, agisdirected(agraphof(agtail(e)))?"->":"--");
-    gv_argvlist_set_item(nlist, j++, agnameof(aghead(e)));
-    j++; /* skip headport slot for now */
-    j++; /* skip key slot for now */
-    nlist->argc = j;
-
-    alist = &(job->selected_obj_attributes);
-    g = agroot(agraphof(aghead(e)));
-    a = NULL;
-    while ((a = agnxtattr(g, AGEDGE, a))) {
-
-	/* tailport and headport can be shown as part of the name, but they
-	 * are not identifying properties of the edge so we 
-	 * also list them as modifyable attributes. */
-        if (strcmp(a->name,s_tailport) == 0)
-	    gv_argvlist_set_item(nlist, 2, agxget(e, a));
-	else if (strcmp(a->name,s_headport) == 0)
-	    gv_argvlist_set_item(nlist, 5, agxget(e, a));
-
-	/* key is strictly an identifying property to distinguish multiple
-	 * edges between the same node pair.   Its non-writable, so
-	 * no need to list it as an attribute as well. */
-	else if (strcmp(a->name,s_key) == 0) {
-	    gv_argvlist_set_item(nlist, 6, agxget(e, a));
-	    continue;
-	}
-
-        gv_argvlist_set_item(alist, j++, a->name);
-        gv_argvlist_set_item(alist, j++, agxget(e, a));
-    }
-    alist->argc = j;
-
-    a = agfindedgeattr(agraphof(aghead(e)), s_href);
+    Agsym_t *a = agfindedgeattr(agraphof(aghead(e)), s_href);
     if (!a)
 	a = agfindedgeattr(agraphof(aghead(e)), s_URL);
     if (a)
-	job->selected_href = strdup_and_subst_obj(agxget(e, a), (void*)e);
+	job->selected_href = strdup_and_subst_obj(agxget(e, a), e);
 }
 
 static void gvevent_refresh(GVJ_t * job)
@@ -175,7 +70,7 @@ static void gvevent_refresh(GVJ_t * job)
 	gv_graph_state(job, g);
     }
     emit_graph(job, g);
-    job->has_been_rendered = TRUE;
+    job->has_been_rendered = true;
 }
 
 /* recursively find innermost cluster containing the point */
@@ -188,7 +83,7 @@ static graph_t *gvevent_find_cluster(graph_t *g, boxf b)
     for (i = 1; i <= GD_n_cluster(g); i++) {
 	sg = gvevent_find_cluster(GD_clust(g)[i], b);
 	if (sg)
-	    return(sg);
+	    return sg;
     }
     B2BF(GD_bb(g), bb);
     if (OVERLAP(b, bb))
@@ -206,18 +101,18 @@ static void * gvevent_find_obj(graph_t *g, boxf b)
     for (n = agfstnode(g); n; n = agnxtnode(g, n))
 	for (e = agfstout(g, n); e; e = agnxtout(g, e))
 	    if (overlap_edge(e, b))
-	        return (void *)e;
+	        return e;
     /* search graph backwards to get topmost node, in case of overlap */
     for (n = aglstnode(g); n; n = agprvnode(g, n))
 	if (overlap_node(n, b))
-	    return (void *)n;
+	    return n;
     /* search for innermost cluster */
     sg = gvevent_find_cluster(g, b);
     if (sg)
-	return (void *)sg;
+	return sg;
 
     /* otherwise - we're always in the graph */
-    return (void *)g;
+    return g;
 }
 
 static void gvevent_leave_obj(GVJ_t * job)
@@ -227,13 +122,13 @@ static void gvevent_leave_obj(GVJ_t * job)
     if (obj) {
         switch (agobjkind(obj)) {
         case AGRAPH:
-	    GD_gui_state((graph_t*)obj) &= ~GUI_STATE_ACTIVE;
+	    GD_gui_state(obj) &= (unsigned char)~GUI_STATE_ACTIVE;
 	    break;
         case AGNODE:
-	    ND_gui_state((node_t*)obj) &= ~GUI_STATE_ACTIVE;
+	    ND_gui_state(obj) &= (unsigned char)~GUI_STATE_ACTIVE;
 	    break;
         case AGEDGE:
-	    ED_gui_state((edge_t*)obj) &= ~GUI_STATE_ACTIVE;
+	    ED_gui_state(obj) &= (unsigned char)~GUI_STATE_ACTIVE;
 	    break;
         }
     }
@@ -248,29 +143,27 @@ static void gvevent_enter_obj(GVJ_t * job)
     node_t *n;
     Agsym_t *a;
 
-    if (job->active_tooltip) {
-	free(job->active_tooltip);
-	job->active_tooltip = NULL;
-    }
+    free(job->active_tooltip);
+    job->active_tooltip = NULL;
     obj = job->current_obj;
     if (obj) {
         switch (agobjkind(obj)) {
         case AGRAPH:
-	    g = (graph_t*)obj;
+	    g = obj;
 	    GD_gui_state(g) |= GUI_STATE_ACTIVE;
 	    a = agfindgraphattr(g, s_tooltip);
 	    if (a)
 		job->active_tooltip = strdup_and_subst_obj(agxget(g, a), obj);
 	    break;
         case AGNODE:
-	    n = (node_t*)obj;
+	    n = obj;
 	    ND_gui_state(n) |= GUI_STATE_ACTIVE;
 	    a = agfindnodeattr(agraphof(n), s_tooltip);
 	    if (a)
 		job->active_tooltip = strdup_and_subst_obj(agxget(n, a), obj);
 	    break;
         case AGEDGE:
-	    e = (edge_t*)obj;
+	    e = obj;
 	    ED_gui_state(e) |= GUI_STATE_ACTIVE;
 	    a = agfindedgeattr(agraphof(aghead(e)), s_tooltip);
 	    if (a)
@@ -321,7 +214,7 @@ static void gvevent_find_current_obj(GVJ_t * job, pointf pointer)
 	gvevent_leave_obj(job);
 	job->current_obj = obj;
 	gvevent_enter_obj(job);
-	job->needs_refresh = 1;
+	job->needs_refresh = true;
     }
 }
 
@@ -333,51 +226,40 @@ static void gvevent_select_current_obj(GVJ_t * job)
     if (obj) {
         switch (agobjkind(obj)) {
         case AGRAPH:
-	    GD_gui_state((graph_t*)obj) |= GUI_STATE_VISITED;
-	    GD_gui_state((graph_t*)obj) &= ~GUI_STATE_SELECTED;
+	    GD_gui_state(obj) |= GUI_STATE_VISITED;
+	    GD_gui_state(obj) &= (unsigned char)~GUI_STATE_SELECTED;
 	    break;
         case AGNODE:
-	    ND_gui_state((node_t*)obj) |= GUI_STATE_VISITED;
-	    ND_gui_state((node_t*)obj) &= ~GUI_STATE_SELECTED;
+	    ND_gui_state(obj) |= GUI_STATE_VISITED;
+	    ND_gui_state(obj) &= (unsigned char)~GUI_STATE_SELECTED;
 	    break;
         case AGEDGE:
-	    ED_gui_state((edge_t*)obj) |= GUI_STATE_VISITED;
-	    ED_gui_state((edge_t*)obj) &= ~GUI_STATE_SELECTED;
+	    ED_gui_state(obj) |= GUI_STATE_VISITED;
+	    ED_gui_state(obj) &= (unsigned char)~GUI_STATE_SELECTED;
 	    break;
         }
     }
 
-    if (job->selected_href) {
-	free(job->selected_href);
-        job->selected_href = NULL;
-    }
+    free(job->selected_href);
+    job->selected_href = NULL;
 
     obj = job->selected_obj = job->current_obj;
     if (obj) {
         switch (agobjkind(obj)) {
         case AGRAPH:
-	    GD_gui_state((graph_t*)obj) |= GUI_STATE_SELECTED;
-	    gv_graph_state(job, (graph_t*)obj);
+	    GD_gui_state(obj) |= GUI_STATE_SELECTED;
+	    gv_graph_state(job, obj);
 	    break;
         case AGNODE:
-	    ND_gui_state((node_t*)obj) |= GUI_STATE_SELECTED;
-	    gv_node_state(job, (node_t*)obj);
+	    ND_gui_state(obj) |= GUI_STATE_SELECTED;
+	    gv_node_state(job, obj);
 	    break;
         case AGEDGE:
-	    ED_gui_state((edge_t*)obj) |= GUI_STATE_SELECTED;
-	    gv_edge_state(job, (edge_t*)obj);
+	    ED_gui_state(obj) |= GUI_STATE_SELECTED;
+	    gv_edge_state(job, obj);
 	    break;
         }
     }
-
-#if 0
-for (i = 0; i < job->selected_obj_type_name.argc; i++)
-    fprintf(stderr,"%s%s", job->selected_obj_type_name.argv[i],
-	(i==(job->selected_obj_type_name.argc - 1))?"\n":" ");
-for (i = 0; i < job->selected_obj_attributes.argc; i++)
-    fprintf(stderr,"%s%s", job->selected_obj_attributes.argv[i], (i%2)?"\n":" = ");
-fprintf(stderr,"\n");
-#endif
 }
 
 static void gvevent_button_press(GVJ_t * job, int button, pointf pointer)
@@ -386,25 +268,25 @@ static void gvevent_button_press(GVJ_t * job, int button, pointf pointer)
     case 1: /* select / create in edit mode */
 	gvevent_find_current_obj(job, pointer);
 	gvevent_select_current_obj(job);
-        job->click = 1;
-	job->button = button;
-	job->needs_refresh = 1;
+        job->click = true;
+	job->button = (unsigned char)button;
+	job->needs_refresh = true;
 	break;
     case 2: /* pan */
-        job->click = 1;
-	job->button = button;
-	job->needs_refresh = 1;
+        job->click = true;
+	job->button = (unsigned char)button;
+	job->needs_refresh = true;
 	break;
     case 3: /* insert node or edge */
 	gvevent_find_current_obj(job, pointer);
-        job->click = 1;
-	job->button = button;
-	job->needs_refresh = 1;
+        job->click = true;
+	job->button = (unsigned char)button;
+	job->needs_refresh = true;
 	break;
     case 4:
         /* scrollwheel zoom in at current mouse x,y */
 /* FIXME - should code window 0,0 point as feature with Y_GOES_DOWN */
-        job->fit_mode = 0;
+        job->fit_mode = false;
         if (job->rotation) {
             job->focus.x -= (pointer.y - job->height / 2.)
                     * (ZOOMFACTOR - 1.) / (job->zoom * job->devscale.y);
@@ -418,10 +300,10 @@ static void gvevent_button_press(GVJ_t * job, int button, pointf pointer)
                     * (ZOOMFACTOR - 1.) / (job->zoom * job->devscale.y);
         }
         job->zoom *= ZOOMFACTOR;
-        job->needs_refresh = 1;
+        job->needs_refresh = true;
         break;
     case 5: /* scrollwheel zoom out at current mouse x,y */
-        job->fit_mode = 0;
+        job->fit_mode = false;
         job->zoom /= ZOOMFACTOR;
         if (job->rotation) {
             job->focus.x += (pointer.y - job->height / 2.)
@@ -435,7 +317,7 @@ static void gvevent_button_press(GVJ_t * job, int button, pointf pointer)
             job->focus.y -= (pointer.y - job->height / 2.)
                     * (ZOOMFACTOR - 1.) / (job->zoom * job->devscale.y);
         }
-        job->needs_refresh = 1;
+        job->needs_refresh = true;
         break;
     }
     job->oldpointer = pointer;
@@ -443,8 +325,11 @@ static void gvevent_button_press(GVJ_t * job, int button, pointf pointer)
 
 static void gvevent_button_release(GVJ_t *job, int button, pointf pointer)
 {
-    job->click = 0;
-    job->button = 0;
+    (void)button;
+    (void)pointer;
+
+    job->click = false;
+    job->button = false;
 }
 
 static void gvevent_motion(GVJ_t * job, pointf pointer)
@@ -472,7 +357,7 @@ static void gvevent_motion(GVJ_t * job, pointf pointer)
 	    job->focus.x -= dx / job->zoom;
 	    job->focus.y -= dy / job->zoom;
 	}
-	job->needs_refresh = 1;
+	job->needs_refresh = true;
 	break;
     case 3: /* drag with button 3 - drag inserted node or uncompleted edge */
 	break;
@@ -482,54 +367,56 @@ static void gvevent_motion(GVJ_t * job, pointf pointer)
 
 static int quit_cb(GVJ_t * job)
 {
+    (void)job;
+
     return 1;
 }
 
 static int left_cb(GVJ_t * job)
 {
-    job->fit_mode = 0;
+    job->fit_mode = false;
     job->focus.x += PANFACTOR / job->zoom;
-    job->needs_refresh = 1;
+    job->needs_refresh = true;
     return 0;
 }
 
 static int right_cb(GVJ_t * job)
 {
-    job->fit_mode = 0;
+    job->fit_mode = false;
     job->focus.x -= PANFACTOR / job->zoom;
-    job->needs_refresh = 1;
+    job->needs_refresh = true;
     return 0;
 }
 
 static int up_cb(GVJ_t * job)
 {
-    job->fit_mode = 0;
+    job->fit_mode = false;
     job->focus.y += -(PANFACTOR / job->zoom);
-    job->needs_refresh = 1;
+    job->needs_refresh = true;
     return 0;
 }
 
 static int down_cb(GVJ_t * job)
 {
-    job->fit_mode = 0;
+    job->fit_mode = false;
     job->focus.y -= -(PANFACTOR / job->zoom);
-    job->needs_refresh = 1;
+    job->needs_refresh = true;
     return 0;
 }
 
 static int zoom_in_cb(GVJ_t * job)
 {
-    job->fit_mode = 0;
+    job->fit_mode = false;
     job->zoom *= ZOOMFACTOR;
-    job->needs_refresh = 1;
+    job->needs_refresh = true;
     return 0;
 }
 
 static int zoom_out_cb(GVJ_t * job)
 {
-    job->fit_mode = 0;
+    job->fit_mode = false;
     job->zoom /= ZOOMFACTOR;
-    job->needs_refresh = 1;
+    job->needs_refresh = true;
     return 0;
 }
 
@@ -552,19 +439,9 @@ static int toggle_fit_cb(GVJ_t * job)
 		(double) job->height / (double) dflt_height);
 	job->focus.x = 0.0;
 	job->focus.y = 0.0;
-	job->needs_refresh = 1;
+	job->needs_refresh = true;
     }
     return 0;
-}
-
-static void gvevent_modify (GVJ_t * job, const char *name, const char *value)
-{
-    /* FIXME */
-}
-
-static void gvevent_delete (GVJ_t * job)
-{
-    /* FIXME */
 }
 
 static void gvevent_read (GVJ_t * job, const char *filename, const char *layout)
@@ -576,13 +453,13 @@ static void gvevent_read (GVJ_t * job, const char *filename, const char *layout)
 
     gvc = job->gvc;
     if (!filename) {
-	g = agread(stdin,NIL(Agdisc_t *));  // continue processing stdin
+	g = agread(stdin,NULL);  // continue processing stdin
     }
     else {
 	f = fopen(filename, "r");
 	if (!f)
 	   return;   /* FIXME - need some error handling */
-	g = agread(f,NIL(Agdisc_t *));
+	g = agread(f,NULL);
 	fclose(f);
     }
 
@@ -597,16 +474,16 @@ static void gvevent_read (GVJ_t * job, const char *filename, const char *layout)
 	agclose(gvc->g);
     }
 
-    aginit (g, AGRAPH, "Agraphinfo_t", sizeof(Agraphinfo_t), TRUE);
-    aginit (g, AGNODE, "Agnodeinfo_t", sizeof(Agnodeinfo_t), TRUE);
-    aginit (g, AGEDGE, "Agedgeinfo_t", sizeof(Agedgeinfo_t), TRUE);
+    aginit (g, AGRAPH, "Agraphinfo_t", sizeof(Agraphinfo_t), true);
+    aginit (g, AGNODE, "Agnodeinfo_t", sizeof(Agnodeinfo_t), true);
+    aginit (g, AGEDGE, "Agedgeinfo_t", sizeof(Agedgeinfo_t), true);
     gvc->g = g;
     GD_gvc(g) = gvc;
     if (gvLayout(gvc, g, layout) == -1)
 	return;   /* FIXME - need some error handling */
     job->selected_obj = NULL;
     job->current_obj = NULL;
-    job->needs_refresh = 1;
+    job->needs_refresh = true;
 }
 
 static void gvevent_layout (GVJ_t * job, const char *layout)
@@ -658,15 +535,16 @@ gvevent_key_binding_t gvevent_key_binding[] = {
     {"F", toggle_fit_cb},
 };
 
-int gvevent_key_binding_size = ARRAY_SIZE(gvevent_key_binding);
+const size_t gvevent_key_binding_size =
+  sizeof(gvevent_key_binding) / sizeof(gvevent_key_binding[0]);
 
 gvdevice_callbacks_t gvdevice_callbacks = {
     gvevent_refresh,
     gvevent_button_press,
     gvevent_button_release,
     gvevent_motion,
-    gvevent_modify,
-    gvevent_delete,
+    NULL, // modify
+    NULL, // del
     gvevent_read,
     gvevent_layout,
     gvevent_render,

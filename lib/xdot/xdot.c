@@ -1,92 +1,21 @@
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include <xdot.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/prisize_t.h>
+#include <cgraph/unreachable.h>
+#include <xdot/xdot.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-
-#define NEW(t)           (t*)calloc(1, sizeof(t))
-#define N_NEW(n,t)       (t*)calloc((n), sizeof(t))
-
-typedef struct {
-    unsigned char *buf;		/* start of buffer */
-    unsigned char *ptr;		/* next place to write */
-    unsigned char *eptr;	/* end of buffer */
-    int dyna;			/* true if buffer is malloc'ed */
-} agxbuf;
-
-#define agxbputc(X,C) ((((X)->ptr >= (X)->eptr) ? agxbmore(X,1) : 0), \
-          (void)(*(X)->ptr++ = ((unsigned char)C)))
-#define agxbuse(X) (agxbputc(X,'\0'),(char*)((X)->ptr = (X)->buf))
-
-static void agxbinit(agxbuf * xb, unsigned int hint, unsigned char *init)
-{
-    if (init) {
-	xb->buf = init;
-	xb->dyna = 0;
-    } else {
-	if (hint == 0)
-	    hint = BUFSIZ;
-	xb->dyna = 1;
-	xb->buf = N_NEW(hint, unsigned char);
-    }
-    xb->eptr = xb->buf + hint;
-    xb->ptr = xb->buf;
-    *xb->ptr = '\0';
-}
-static int agxbmore(agxbuf * xb, unsigned int ssz)
-{
-    int cnt;			/* current no. of characters in buffer */
-    int size;			/* current buffer size */
-    int nsize;			/* new buffer size */
-    unsigned char *nbuf;	/* new buffer */
-
-    size = xb->eptr - xb->buf;
-    nsize = 2 * size;
-    if (size + ssz > nsize)
-	nsize = size + ssz;
-    cnt = xb->ptr - xb->buf;
-    if (xb->dyna) {
-	nbuf = realloc(xb->buf, nsize);
-    } else {
-	nbuf = N_NEW(nsize, unsigned char);
-	memcpy(nbuf, xb->buf, cnt);
-	xb->dyna = 1;
-    }
-    xb->buf = nbuf;
-    xb->ptr = xb->buf + cnt;
-    xb->eptr = xb->buf + nsize;
-    return 0;
-}
-
-static int agxbput(char *s, agxbuf * xb)
-{
-    unsigned int ssz = strlen(s);
-    if (xb->ptr + ssz > xb->eptr)
-	agxbmore(xb, ssz);
-    memcpy(xb->ptr, s, ssz);
-    xb->ptr += ssz;
-    return ssz;
-}
-
-/* agxbfree:
- * Free any malloced resources.
- */
-static void agxbfree(agxbuf * xb)
-{
-    if (xb->dyna)
-	free(xb->buf);
-}
 
 /* the parse functions should return NULL on error */
 static char *parseReal(char *s, double *fp)
@@ -106,12 +35,6 @@ static char *parseInt(char *s, int *ip)
 {
     char* endp;
 
-#ifdef UNUSED
-    r = sscanf(s, "%d%n", ip, &sz);
-    if (r != 1) return 0;
-    else return (s + sz);
-#endif
-
     *ip = (int)strtol (s, &endp, 10);
     if (s == endp)
 	return 0;
@@ -130,27 +53,9 @@ static char *parseUInt(char *s, unsigned int *ip)
 	return endp;
 }
 
-#ifdef UNUSED
-static char *parsePoint(char *s, xdot_point * pp)
-{
-    int r, sz;
-    r = sscanf(s, "%lf %lf%n", &(pp->x), &(pp->y), &sz);
-    if (r != 2) return 0;
-    pp->z = 0;
-    return (s + sz);
-}
-#endif
-
 static char *parseRect(char *s, xdot_rect * rp)
 {
     char* endp;
-#ifdef UNUSED
-    int r, sz;
-    r = sscanf(s, "%lf %lf %lf %lf%n", &(rp->x), &(rp->y), &(rp->w),
-	       &(rp->h), &sz);
-    if (r != 4) return 0;
-    else return (s + sz);
-#endif
 
     rp->x = strtod (s, &endp);
     if (s == endp)
@@ -181,27 +86,27 @@ static char *parseRect(char *s, xdot_rect * rp)
 
 static char *parsePolyline(char *s, xdot_polyline * pp)
 {
-    int i;
+    unsigned i;
     xdot_point *pts;
     xdot_point *ps;
     char* endp;
 
-    s = parseInt(s, &i);
-    if (!s) return s;
-    pts = ps = N_NEW(i, xdot_point);
+    s = parseUInt(s, &i);
+    if (!s) return NULL;
+    pts = ps = gv_calloc(i, sizeof(ps[0]));
     pp->cnt = i;
     for (i = 0; i < pp->cnt; i++) {
 	ps->x = strtod (s, &endp);
 	if (s == endp) {
 	    free (pts);
-	    return 0;
+	    return NULL;
 	}
 	else
 	    s = endp;
 	ps->y = strtod (s, &endp);
 	if (s == endp) {
 	    free (pts);
-	    return 0;
+	    return NULL;
 	}
 	else
 	    s = endp;
@@ -215,29 +120,34 @@ static char *parsePolyline(char *s, xdot_polyline * pp)
 static char *parseString(char *s, char **sp)
 {
     int i;
-    char *c;
-    char *p;
     s = parseInt(s, &i);
-    if (!s || (i <= 0)) return 0;
-    while (*s && (*s != '-')) s++;
+    if (!s || i <= 0) return 0;
+    while (*s && *s != '-') s++;
     if (*s) s++;
     else {
 	return 0;
     }
-    c = N_NEW(i + 1, char);
-    p = c;
-    while ((i > 0) && *s) {
-	*p++ = *s++;
-	i--;
-    }
-    if (i > 0) {
-	free (c);
-	return 0;
+
+    // The leading number we just read indicates the count of originating
+    // characters in the upcoming string. But the string may contain \-escaped
+    // characters. So the count alone does not tell us how many bytes we need to
+    // now read.
+    agxbuf c = {0};
+    int j = 0;
+    for (int accounted = 0; accounted < i; ++j) {
+	if (s[j] == '\0') {
+	    agxbfree(&c);
+	    return 0;
+	}
+	agxbputc(&c, s[j]);
+	// only count this character if it was not an escape prefix
+	if (s[j] != '\\' || (j > 0 && s[j - 1] == '\\')) {
+	    ++accounted;
+	}
     }
 
-    *p = '\0';
-    *sp = c;
-    return s;
+    *sp = agxbdisown(&c);
+    return s + j;
 }
 
 static char *parseAlign(char *s, xdot_align * ap)
@@ -262,7 +172,7 @@ static char *parseOp(xdot_op * op, char *s, drawfunc_t ops[], int* error)
     xdot_color clr;
 
     *error = 0;
-    while (isspace(*s))
+    while (gv_isspace(*s))
 	s++;
     switch (*s++) {
     case 'E':
@@ -430,53 +340,48 @@ static char *parseOp(xdot_op * op, char *s, drawfunc_t ops[], int* error)
  * Parse and append additional xops onto a given xdot object.
  * Return x.
  */ 
-xdot *parseXDotFOn (char *s, drawfunc_t fns[], int sz, xdot* x)
-{
+xdot *parseXDotFOn(char *s, drawfunc_t fns[], size_t sz, xdot *x) {
     xdot_op op;
     char *ops;
-    int oldsz, bufsz;
+    size_t oldsz, bufsz;
     int error;
-    int initcnt;
 
     if (!s)
 	return x;
 
     if (!x) {
-	x = NEW(xdot);
+	x = gv_alloc(sizeof(*x));
 	if (sz <= sizeof(xdot_op))
 	    sz = sizeof(xdot_op);
 
-	/* cnt, freefunc, ops, flags zeroed by NEW */
+	/* cnt, freefunc, ops, flags zeroed by gv_alloc */
 	x->sz = sz;
     }
-    initcnt = x->cnt;
+    size_t initcnt = x->cnt;
     sz = x->sz;
 
     if (initcnt == 0) {
 	bufsz = XDBSIZE;
-	ops = (char *) calloc(XDBSIZE, sz);
+	ops = gv_calloc(XDBSIZE, sz);
     }
     else {
-	ops = (char*)(x->ops);
 	bufsz = initcnt + XDBSIZE;
-	ops = (char *) realloc(ops, bufsz * sz);
-	memset(ops + (initcnt*sz), '\0', (bufsz - initcnt)*sz);
+	ops = gv_recalloc(x->ops, initcnt, bufsz, sz);
     }
 
     while ((s = parseOp(&op, s, fns, &error))) {
 	if (x->cnt == bufsz) {
 	    oldsz = bufsz;
 	    bufsz *= 2;
-	    ops = (char *) realloc(ops, bufsz * sz);
-	    memset(ops + (oldsz*sz), '\0', (bufsz - oldsz)*sz);
+	    ops = gv_recalloc(ops, oldsz, bufsz, sz);
 	}
-	*(xdot_op *) (ops + (x->cnt * sz)) = op;
+	*(xdot_op *) (ops + x->cnt * sz) = op;
 	x->cnt++;
     }
     if (error)
 	x->flags |= XDOT_PARSE_ERROR;
     if (x->cnt) {
-	x->ops = (xdot_op *) realloc(ops, x->cnt * sz);
+	x->ops = gv_recalloc(ops, bufsz, x->cnt, sz);
     }
     else {
 	free (ops);
@@ -488,8 +393,7 @@ xdot *parseXDotFOn (char *s, drawfunc_t fns[], int sz, xdot* x)
 
 }
 
-xdot *parseXDotF(char *s, drawfunc_t fns[], int sz)
-{
+xdot *parseXDotF(char *s, drawfunc_t fns[], size_t sz) {
     return parseXDotFOn (s, fns, sz, NULL);
 }
 
@@ -498,111 +402,75 @@ xdot *parseXDot(char *s)
     return parseXDotF(s, 0, 0);
 }
 
-typedef void (*pf) (char *, void *);
-
-/* trim:
- * Trailing zeros are removed and decimal point, if possible.
- */
-static void trim (char* buf)
-{
-    char* dotp;
-    char* p;
-
-    if ((dotp = strchr (buf,'.'))) {
-        p = dotp+1;
-        while (*p) p++;  // find end of string
-        p--;
-        while (*p == '0') *p-- = '\0';
-        if (*p == '.')        // If all decimals were zeros, remove ".".
-            *p = '\0';
-        else
-            p++;
-    }
-}
+typedef int (*pf)(void*, char*, ...);
 
 static void printRect(xdot_rect * r, pf print, void *info)
 {
-    char buf[128];
+    agxbuf buf = {0};
 
-    sprintf(buf, " %.02f", r->x);
-    trim(buf);
-    print(buf, info);
-    sprintf(buf, " %.02f", r->y);
-    trim(buf);
-    print(buf, info);
-    sprintf(buf, " %.02f", r->w);
-    trim(buf);
-    print(buf, info);
-    sprintf(buf, " %.02f", r->h);
-    trim(buf);
-    print(buf, info);
+    agxbprint(&buf, " %.02f", r->x);
+    agxbuf_trim_zeros(&buf);
+    print(info, "%s", agxbuse(&buf));
+    agxbprint(&buf, " %.02f", r->y);
+    agxbuf_trim_zeros(&buf);
+    print(info, "%s", agxbuse(&buf));
+    agxbprint(&buf, " %.02f", r->w);
+    agxbuf_trim_zeros(&buf);
+    print(info, "%s", agxbuse(&buf));
+    agxbprint(&buf, " %.02f", r->h);
+    agxbuf_trim_zeros(&buf);
+    print(info, "%s", agxbuse(&buf));
+    agxbfree(&buf);
 }
 
 static void printPolyline(xdot_polyline * p, pf print, void *info)
 {
-    int i;
-    char buf[512];
+    agxbuf buf = {0};
 
-    sprintf(buf, " %d", p->cnt);
-    print(buf, info);
-    for (i = 0; i < p->cnt; i++) {
-	sprintf(buf, " %.02f", p->pts[i].x);
-	trim(buf);
-	print(buf, info);
-	sprintf(buf, " %.02f", p->pts[i].y);
-	trim(buf);
-	print(buf, info);
+    print(info, " %" PRISIZE_T, p->cnt);
+    for (size_t i = 0; i < p->cnt; i++) {
+	agxbprint(&buf, " %.02f", p->pts[i].x);
+	agxbuf_trim_zeros(&buf);
+	print(info, "%s", agxbuse(&buf));
+	agxbprint(&buf, " %.02f", p->pts[i].y);
+	agxbuf_trim_zeros(&buf);
+	print(info, "%s", agxbuse(&buf));
     }
+    agxbfree(&buf);
 }
 
 static void printString(char *p, pf print, void *info)
 {
-    char buf[30];
-
-    sprintf(buf, " %d -", (int) strlen(p));
-    print(buf, info);
-    print(p, info);
+    print(info, " %" PRISIZE_T " -%s", strlen(p), p);
 }
 
-static void printInt(int i, pf print, void *info)
-{
-    char buf[30];
-
-    sprintf(buf, " %d", i);
-    print(buf, info);
-}
-
-static void printFloat(float f, pf print, void *info, int space)
-{
-    char buf[128];
+static void printFloat(double f, pf print, void *info, int space) {
+    agxbuf buf = {0};
 
     if (space)
-	sprintf(buf, " %.02f", f);
+	agxbprint(&buf, " %.02f", f);
     else
-	sprintf(buf, "%.02f", f);
-    trim (buf);
-    print(buf, info);
+	agxbprint(&buf, "%.02f", f);
+    agxbuf_trim_zeros(&buf);
+    print(info, "%s", agxbuse(&buf));
+    agxbfree(&buf);
 }
 
 static void printAlign(xdot_align a, pf print, void *info)
 {
     switch (a) {
     case xd_left:
-	print(" -1", info);
+	print(info, " -1");
 	break;
     case xd_right:
-	print(" 1", info);
+	print(info, " 1");
 	break;
     case xd_center:
-	print(" 0", info);
+	print(info, " 0");
 	break;
+    default:
+	UNREACHABLE();
     }
-}
-
-static void
-gradprint (char* s, void* v)
-{
-    agxbput(s, (agxbuf*)v);
 }
 
 static void
@@ -613,28 +481,28 @@ toGradString (agxbuf* xb, xdot_color* cp)
 
     if (cp->type == xd_linear) {
 	agxbputc (xb, '[');
-	printFloat (cp->u.ling.x0, gradprint, xb, 0);
-	printFloat (cp->u.ling.y0, gradprint, xb, 1);
-	printFloat (cp->u.ling.x1, gradprint, xb, 1);
-	printFloat (cp->u.ling.y1, gradprint, xb, 1);
+	printFloat (cp->u.ling.x0, (pf)agxbprint, xb, 0);
+	printFloat (cp->u.ling.y0, (pf)agxbprint, xb, 1);
+	printFloat (cp->u.ling.x1, (pf)agxbprint, xb, 1);
+	printFloat (cp->u.ling.y1, (pf)agxbprint, xb, 1);
 	n_stops = cp->u.ling.n_stops;
 	stops = cp->u.ling.stops;
     }
     else {
 	agxbputc (xb, '(');
-	printFloat (cp->u.ring.x0, gradprint, xb, 0);
-	printFloat (cp->u.ring.y0, gradprint, xb, 1);
-	printFloat (cp->u.ring.r0, gradprint, xb, 1);
-	printFloat (cp->u.ring.x1, gradprint, xb, 1);
-	printFloat (cp->u.ring.y1, gradprint, xb, 1);
-	printFloat (cp->u.ring.r1, gradprint, xb, 1);
+	printFloat (cp->u.ring.x0, (pf)agxbprint, xb, 0);
+	printFloat (cp->u.ring.y0, (pf)agxbprint, xb, 1);
+	printFloat (cp->u.ring.r0, (pf)agxbprint, xb, 1);
+	printFloat (cp->u.ring.x1, (pf)agxbprint, xb, 1);
+	printFloat (cp->u.ring.y1, (pf)agxbprint, xb, 1);
+	printFloat (cp->u.ring.r1, (pf)agxbprint, xb, 1);
 	n_stops = cp->u.ring.n_stops;
 	stops = cp->u.ring.stops;
     }
-    printInt (n_stops, gradprint, xb);
+    agxbprint(xb, " %d", n_stops);
     for (i = 0; i < n_stops; i++) {
-	printFloat (stops[i].frac, gradprint, xb, 1);
-	printString (stops[i].color, gradprint, xb);
+	printFloat (stops[i].frac, (pf)agxbprint, xb, 1);
+	printString (stops[i].color, (pf)agxbprint, xb);
     }
 
     if (cp->type == xd_linear)
@@ -647,259 +515,228 @@ typedef void (*print_op)(xdot_op * op, pf print, void *info, int more);
 
 static void printXDot_Op(xdot_op * op, pf print, void *info, int more)
 {
-    agxbuf xb;
-    unsigned char buf[BUFSIZ];
-
-    agxbinit (&xb, BUFSIZ, buf);
+    agxbuf xb = {0};
     switch (op->kind) {
     case xd_filled_ellipse:
-	print("E", info);
+	print(info, "E");
 	printRect(&op->u.ellipse, print, info);
 	break;
     case xd_unfilled_ellipse:
-	print("e", info);
+	print(info, "e");
 	printRect(&op->u.ellipse, print, info);
 	break;
     case xd_filled_polygon:
-	print("P", info);
+	print(info, "P");
 	printPolyline(&op->u.polygon, print, info);
 	break;
     case xd_unfilled_polygon:
-	print("p", info);
+	print(info, "p");
 	printPolyline(&op->u.polygon, print, info);
 	break;
     case xd_filled_bezier:
-	print("b", info);
+	print(info, "b");
 	printPolyline(&op->u.bezier, print, info);
 	break;
     case xd_unfilled_bezier:
-	print("B", info);
+	print(info, "B");
 	printPolyline(&op->u.bezier, print, info);
 	break;
     case xd_pen_color:
-	print("c", info);
+	print(info, "c");
 	printString(op->u.color, print, info);
 	break;
     case xd_grad_pen_color:
-	print("c", info);
+	print(info, "c");
 	toGradString (&xb, &op->u.grad_color);
 	printString(agxbuse(&xb), print, info);
 	break;
     case xd_fill_color:
-	print("C", info);
+	print(info, "C");
 	printString(op->u.color, print, info);
 	break;
     case xd_grad_fill_color:
-	print("C", info);
+	print(info, "C");
 	toGradString (&xb, &op->u.grad_color);
 	printString(agxbuse(&xb), print, info);
 	break;
     case xd_polyline:
-	print("L", info);
+	print(info, "L");
 	printPolyline(&op->u.polyline, print, info);
 	break;
     case xd_text:
-	print("T", info);
-	printInt(op->u.text.x, print, info);
-	printInt(op->u.text.y, print, info);
+	print(info, "T %.f %.f", op->u.text.x, op->u.text.y);
 	printAlign(op->u.text.align, print, info);
-	printInt(op->u.text.width, print, info);
+	print(info, " %.f", op->u.text.width);
 	printString(op->u.text.text, print, info);
 	break;
     case xd_font:
-	print("F", info);
+	print(info, "F");
 	printFloat(op->u.font.size, print, info, 1);
 	printString(op->u.font.name, print, info);
 	break;
     case xd_fontchar:
-	print("t", info);
-	printInt(op->u.fontchar, print, info);
+	print(info, "t %u", op->u.fontchar);
 	break;
     case xd_style:
-	print("S", info);
+	print(info, "S");
 	printString(op->u.style, print, info);
 	break;
     case xd_image:
-	print("I", info);
+	print(info, "I");
 	printRect(&op->u.image.pos, print, info);
 	printString(op->u.image.name, print, info);
 	break;
+    default: // invalid type; ignore
+	break;
     }
     if (more)
-	print(" ", info);
+	print(info, " ");
     agxbfree (&xb);
 }
 
 static void jsonRect(xdot_rect * r, pf print, void *info)
 {
-    char buf[128];
-
-    sprintf(buf, "[%.06f,%.06f,%.06f,%.06f]", r->x, r->y, r->w, r->h);
-    print(buf, info);
+  print(info, "[%.06f,%.06f,%.06f,%.06f]", r->x, r->y, r->w, r->h);
 }
 
 static void jsonPolyline(xdot_polyline * p, pf print, void *info)
 {
-    int i;
-    char buf[128];
-
-    print("[", info);
-    for (i = 0; i < p->cnt; i++) {
-	sprintf(buf, "%.06f,%.06f", p->pts[i].x, p->pts[i].y);
-	print(buf, info);
-	if (i < p->cnt-1) print(",", info);
+    print(info, "[");
+    for (size_t i = 0; i < p->cnt; i++) {
+	print(info, "%.06f,%.06f", p->pts[i].x, p->pts[i].y);
+	if (i < p->cnt-1) print(info, ",");
     }
-    print("]", info);
+    print(info, "]");
 }
 
 static void jsonString(char *p, pf print, void *info)
 {
-    unsigned char c, buf[BUFSIZ];
-    agxbuf xb;
+    char c;
 
-    agxbinit(&xb, BUFSIZ, buf);
-    agxbputc(&xb, '"');
+    print(info, "\"");
     while ((c = *p++)) {
-	if (c == '"') agxbput("\\\"", &xb);
-	else if (c == '\\') agxbput("\\\\", &xb);
-	/* else if (c > 127) handle UTF-8 */
-	else agxbputc(&xb, c);
+	if (c == '"') print(info, "\\\"");
+	else if (c == '\\') print(info, "\\\\");
+	else print(info, "%c", c);
     }
-    agxbputc(&xb, '"');
-    print(agxbuse(&xb), info);
-    agxbfree(&xb);
+    print(info, "\"");
 }
 
 static void jsonXDot_Op(xdot_op * op, pf print, void *info, int more)
 {
-    agxbuf xb;
-    unsigned char buf[BUFSIZ];
-
-    agxbinit (&xb, BUFSIZ, buf);
+    agxbuf xb = {0};
     switch (op->kind) {
     case xd_filled_ellipse:
-	print("{E : ", info);
+	print(info, "{\"E\" : ");
 	jsonRect(&op->u.ellipse, print, info);
 	break;
     case xd_unfilled_ellipse:
-	print("{e : ", info);
+	print(info, "{\"e\" : ");
 	jsonRect(&op->u.ellipse, print, info);
 	break;
     case xd_filled_polygon:
-	print("{P : ", info);
+	print(info, "{\"P\" : ");
 	jsonPolyline(&op->u.polygon, print, info);
 	break;
     case xd_unfilled_polygon:
-	print("{p : ", info);
+	print(info, "{\"p\" : ");
 	jsonPolyline(&op->u.polygon, print, info);
 	break;
     case xd_filled_bezier:
-	print("{b : ", info);
+	print(info, "{\"b\" : ");
 	jsonPolyline(&op->u.bezier, print, info);
 	break;
     case xd_unfilled_bezier:
-	print("{B : ", info);
+	print(info, "{\"B\" : ");
 	jsonPolyline(&op->u.bezier, print, info);
 	break;
     case xd_pen_color:
-	print("{c : ", info);
+	print(info, "{\"c\" : ");
 	jsonString(op->u.color, print, info);
 	break;
     case xd_grad_pen_color:
-	print("{c : ", info);
+	print(info, "{\"c\" : ");
 	toGradString (&xb, &op->u.grad_color);
 	jsonString(agxbuse(&xb), print, info);
 	break;
     case xd_fill_color:
-	print("{C : ", info);
+	print(info, "{\"C\" : ");
 	jsonString(op->u.color, print, info);
 	break;
     case xd_grad_fill_color:
-	print("{C : ", info);
+	print(info, "{\"C\" : ");
 	toGradString (&xb, &op->u.grad_color);
 	jsonString(agxbuse(&xb), print, info);
 	break;
     case xd_polyline:
-	print("{L :", info);
+	print(info, "{\"L\" :");
 	jsonPolyline(&op->u.polyline, print, info);
 	break;
     case xd_text:
-	print("{T : [", info);
-	printInt(op->u.text.x, print, info);
-	print(",", info);
-	printInt(op->u.text.y, print, info);
-	print(",", info);
+	print(info, "{\"T\" : [ %.f, %.f,", op->u.text.x, op->u.text.y);
 	printAlign(op->u.text.align, print, info);
-	print(",", info);
-	printInt(op->u.text.width, print, info);
-	print(",", info);
+	print(info, ", %.f,", op->u.text.width);
 	jsonString(op->u.text.text, print, info);
-	print("]", info);
+	print(info, "]");
 	break;
     case xd_font:
-	print("{F : [", info);
+	print(info, "{\"F\" : [");
 	op->kind = xd_font;
 	printFloat(op->u.font.size, print, info, 1);
-	print(",", info);
+	print(info, ",");
 	jsonString(op->u.font.name, print, info);
-	print("]", info);
+	print(info, "]");
 	break;
     case xd_fontchar:
-	print("{t : ", info);
-	printInt(op->u.fontchar, print, info);
+	print(info, "{\"t\" :  %u", op->u.fontchar);
 	break;
     case xd_style:
-	print("{S : ", info);
+	print(info, "{\"S\" : ");
 	jsonString(op->u.style, print, info);
 	break;
     case xd_image:
-	print("{I : [", info);
+	print(info, "{\"I\" : [");
 	jsonRect(&op->u.image.pos, print, info);
-	print(",", info);
+	print(info, ",");
 	jsonString(op->u.image.name, print, info);
-	print("]", info);
+	print(info, "]");
+	break;
+    default: // invalid type; ignore
 	break;
     }
     if (more)
-	print("},\n", info);
+	print(info, "},\n");
     else
-	print("}\n", info);
+	print(info, "}\n");
     agxbfree (&xb);
 }
 
 static void _printXDot(xdot * x, pf print, void *info, print_op ofn)
 {
-    int i;
     xdot_op *op;
     char *base = (char *) (x->ops);
-    for (i = 0; i < x->cnt; i++) {
+    for (size_t i = 0; i < x->cnt; i++) {
 	op = (xdot_op *) (base + i * x->sz);
-	ofn(op, print, info, (i < x->cnt - 1));
+	ofn(op, print, info, i < x->cnt - 1);
     }
 }
 
 char *sprintXDot(xdot * x)
 {
-    char *s;
-    unsigned char buf[BUFSIZ];
-    agxbuf xb;
-    agxbinit(&xb, BUFSIZ, buf);
-    _printXDot(x, (pf) agxbput, &xb, printXDot_Op);
-    s = strdup(agxbuse(&xb));
-    agxbfree(&xb);
-
-    return s;
+    agxbuf xb = {0};
+    _printXDot(x, (pf)agxbprint, &xb, printXDot_Op);
+    return agxbdisown(&xb);
 }
 
 void fprintXDot(FILE * fp, xdot * x)
 {
-    _printXDot(x, (pf) fputs, fp, printXDot_Op);
+    _printXDot(x, (pf)fprintf, fp, printXDot_Op);
 }
 
 void jsonXDot(FILE * fp, xdot * x)
 {
     fputs ("[\n", fp);
-    _printXDot(x, (pf) fputs, fp, jsonXDot_Op);
+    _printXDot(x, (pf)fprintf, fp, jsonXDot_Op);
     fputs ("]\n", fp);
 }
 
@@ -944,14 +781,13 @@ static void freeXOpData(xdot_op * x)
 
 void freeXDot (xdot * x)
 {
-    int i;
     xdot_op *op;
     char *base;
     freefunc_t ff = x->freefunc;
 
     if (!x) return;
     base = (char *) (x->ops);
-    for (i = 0; i < x->cnt; i++) {
+    for (size_t i = 0; i < x->cnt; i++) {
 	op = (xdot_op *) (base + i * x->sz);
 	if (ff) ff (op);
 	freeXOpData(op);
@@ -962,7 +798,6 @@ void freeXDot (xdot * x)
 
 int statXDot (xdot* x, xdot_stats* sp)
 {
-    int i;
     xdot_op *op;
     char *base;
 
@@ -970,7 +805,7 @@ int statXDot (xdot* x, xdot_stats* sp)
     memset(sp, 0, sizeof(xdot_stats));
     sp->cnt = x->cnt;
     base = (char *) (x->ops);
-    for (i = 0; i < x->cnt; i++) {
+    for (size_t i = 0; i < x->cnt; i++) {
 	op = (xdot_op *) (base + i * x->sz);
  	switch (op->kind) {
 	case xd_filled_ellipse:
@@ -1022,25 +857,6 @@ int statXDot (xdot* x, xdot_stats* sp)
     return 0;
 }
 
-xdot_grad_type 
-colorType (char* cp)
-{
-    xdot_grad_type rv;
-
-    switch (*cp) {
-    case '[' :
-	rv = xd_linear;
-	break;
-    case '(' :
-	rv = xd_radial;
-	break;
-    default :
-	rv = xd_none;
-	break;
-    }
-    return rv;
-}
-
 #define CHK1(s) if(!s){free(stops);return NULL;}
 
 /* radGradient:
@@ -1071,7 +887,7 @@ radGradient (char* cp, xdot_color* clr)
     s = parseInt(s, &clr->u.ring.n_stops);
     CHK1(s);
 
-    stops = N_NEW(clr->u.ring.n_stops,xdot_color_stop);
+    stops = gv_calloc(clr->u.ring.n_stops, sizeof(stops[0]));
     for (i = 0; i < clr->u.ring.n_stops; i++) {
 	s = parseReal(s, &d);
 	CHK1(s);
@@ -1108,7 +924,7 @@ linGradient (char* cp, xdot_color* clr)
     s = parseInt(s, &clr->u.ling.n_stops);
     CHK1(s);
 
-    stops = N_NEW(clr->u.ling.n_stops,xdot_color_stop);
+    stops = gv_calloc(clr->u.ling.n_stops, sizeof(stops[0]));
     for (i = 0; i < clr->u.ling.n_stops; i++) {
 	s = parseReal(s, &d);
 	CHK1(s);
@@ -1145,7 +961,7 @@ parseXDotColor (char* cp, xdot_color* clr)
 	return cp;
 	break;
     default :
-	if (isalnum(c)) {
+	if (gv_isalnum(c)) {
 	    clr->type = xd_none; 
 	    clr->u.clr = cp;
 	    return cp;
@@ -1173,9 +989,10 @@ void freeXDotColor (xdot_color* cp)
     }
 }
 
-#if 0
-static void execOp(xdot_op * op, int param)
-{
-    op->drawfunc(op, param);
-}
-#endif
+/**
+ * @dir lib/xdot
+ * @brief parsing and deparsing of xdot operations, API xdot.h
+ *
+ * [man 3 xdot](https://graphviz.org/pdf/xdot.3.pdf)
+ *
+ */

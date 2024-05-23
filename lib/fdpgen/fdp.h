@@ -1,20 +1,16 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef FDP_H
-#define FDP_H
+#pragma once
 
-#include <render.h>
+#include <common/render.h>
 
 #ifdef FDP_PRIVATE
 
@@ -51,25 +47,6 @@ typedef struct {
 #define GPARENT(g)  (GDATA(g)->parent)
 #ifdef DEBUG
 #define GORIG(g)    (GDATA(g)->orig)
-#endif
-
-#if 0
-/* ndata is attached to nodes in real graphs.
- * Real nodes also use "builtin" fields:
- *   pos   - position information
- *   width,height     - node dimensions
- *   xsize,ysize      - node dimensions in points
- */
-typedef struct {
-    node_t *dn;			/* points to corresponding derived node,
-				 * which may represent the node or its
-				 * containing cluster. */
-    graph_t *parent;		/* smallest containing cluster */
-} ndata;
-
-#define NDATA(n) ((ndata*)(ND_alg(n)))
-#define DNODE(n) (NDATA(n)->dn)
-#define PARENT(n) (NDATA(n)->parent)
 #endif
 
 /* 
@@ -133,5 +110,4 @@ typedef struct fdpParms_s fdpParms_t;
 
 #ifdef __cplusplus
 }
-#endif
 #endif

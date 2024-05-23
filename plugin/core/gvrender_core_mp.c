@@ -1,39 +1,37 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /* FIXME - incomplete replacement for codegen */
 
 #include "config.h"
-
+#include <math.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 #ifdef _WIN32
 #include <io.h>
-#include "compat.h"
 #endif
 
-#include "macros.h"
-#include "const.h"
+#include <cgraph/prisize_t.h>
+#include <cgraph/streq.h>
+#include <cgraph/unreachable.h>
+#include <common/macros.h>
+#include <common/const.h>
 
-#include "gvplugin_render.h"
-#include "gvplugin_device.h"
-#include "gvio.h"
-#include "agxbuf.h"
-#include "utils.h"
-#include "color.h"
+#include <gvc/gvplugin_render.h>
+#include <gvc/gvplugin_device.h>
+#include <gvc/gvio.h>
+#include <cgraph/agxbuf.h>
+#include <common/utils.h>
+#include <common/color.h>
 
 /* Number of points to split splines into */
 #define BEZIERSUBDIVISION 6
@@ -42,12 +40,10 @@ typedef enum { FORMAT_MP, } format_type;
 
 static int Depth;
 
-static void mpptarray(GVJ_t *job, pointf * A, int n, int close)
-{
-    int i;
+static void mpptarray(GVJ_t *job, pointf *A, size_t n, int close) {
     point p;
 
-    for (i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
 	PF2P(A[i],p);
         gvprintf(job, " %d %d", p.x, p.y);
     }
@@ -58,45 +54,8 @@ static void mpptarray(GVJ_t *job, pointf * A, int n, int close)
     gvputs(job, "\n");
 }
 
-static char *mp_string(char *s)
-{
-    static char *buf = NULL;
-    static int bufsize = 0;
-    int pos = 0;
-    char *p;
-    unsigned char c;
-
-    if (!buf) {
-        bufsize = 64;
-        buf = malloc(bufsize * sizeof(char));
-    }
-
-    p = buf;
-    while ((c = *s++)) {
-        if (pos > (bufsize - 8)) {
-            bufsize *= 2;
-            buf = realloc(buf, bufsize * sizeof(char));
-            p = buf + pos;
-        }
-        if (isascii(c)) {
-            if (c == '\\') {
-                *p++ = '\\';
-                pos++;
-            }
-            *p++ = c;
-            pos++;
-        } else {
-            *p++ = '\\';
-            sprintf(p, "%03o", c);
-            p += 3;
-            pos += 4;
-        }
-    }
-    *p = '\0';
-    return buf;
-}
-
-static int mpColorResolve(int *new, int r, int g, int b)
+static int mpColorResolve(int *new, unsigned char r, unsigned char g,
+  unsigned char b)
 {
 #define maxColors 256
     static int top = 0;
@@ -130,9 +89,8 @@ static int mpColorResolve(int *new, int r, int g, int b)
 }
 
 /* this table is in xfig color index order */
-static char *mpcolor[] = {
-    "black", "blue", "green", "cyan", "red", "magenta", "yellow", "white", (char *) NULL
-};
+static const char *mpcolor[] = {"black", "blue",    "green",  "cyan",
+                                "red",   "magenta", "yellow", "white"};
 
 static void mp_resolve_color(GVJ_t *job, gvcolor_t * color)
 {
@@ -141,7 +99,7 @@ static void mp_resolve_color(GVJ_t *job, gvcolor_t * color)
 
     switch (color->type) {
 	case COLOR_STRING:
-	    for (i = 0; mpcolor[i]; i++) {
+	    for (i = 0; i < (int)(sizeof(mpcolor) / sizeof(mpcolor[0])); i++) {
 		if (streq(mpcolor[i], color->u.string)) {
 		    color->u.index = i;
 		    break;
@@ -165,7 +123,7 @@ static void mp_resolve_color(GVJ_t *job, gvcolor_t * color)
 	    color->u.index = 0;
             break;
 	default:
-	    assert(0);	/* internal error */
+	    UNREACHABLE(); // internal error
     }
 
     color->type = COLOR_INDEX;
@@ -222,26 +180,36 @@ static void mp_end_graph(GVJ_t * job)
 
 static void mp_begin_page(GVJ_t * job)
 {
+    (void)job;
+
     Depth = 2;
 }
 
 static void mp_begin_node(GVJ_t * job)
 {
+    (void)job;
+
     Depth = 1;
 }
 
 static void mp_end_node(GVJ_t * job)
 {
+    (void)job;
+
     Depth = 2;
 }
 
 static void mp_begin_edge(GVJ_t * job)
 {
+    (void)job;
+
     Depth = 0;
 }
 
 static void mp_end_edge(GVJ_t * job)
 {
+    (void)job;
+
     Depth = 2;
 }
 
@@ -278,10 +246,12 @@ static void mp_textspan(GVJ_t * job, pointf p, textspan_t * span)
     }
 
     gvprintf(job,
-            "%d %d %d %d %d %d %.1f %.4f %d %.1f %.1f %d %d %s\\001\n",
+            "%d %d %d %d %d %d %.1f %.4f %d %.1f %.1f %.0f %.0f",
             object_code, sub_type, color, depth, pen_style, font,
-            font_size, angle, font_flags, height, length, ROUND(p.x), ROUND(p.y),
-            mp_string(span->str));
+            font_size, angle, font_flags, height, length, round(p.x),
+            round(p.y));
+    gvputs_nonascii(job, span->str);
+    gvputs(job, "\\001\n");
 }
 
 static void mp_ellipse(GVJ_t * job, pointf * A, int filled)
@@ -291,7 +261,7 @@ static void mp_ellipse(GVJ_t * job, pointf * A, int filled)
     int object_code = 1;        /* always 1 for ellipse */
     int sub_type = 1;           /* ellipse defined by radii */
     int line_style;		/* solid, dotted, dashed */
-    int thickness = obj->penwidth;
+    double thickness = round(obj->penwidth);
     int pen_color = obj->pencolor.u.index;
     int fill_color = obj->fillcolor.u.index;
     int depth = Depth;
@@ -300,35 +270,33 @@ static void mp_ellipse(GVJ_t * job, pointf * A, int filled)
     double style_val;
     int direction = 0;
     double angle = 0.0;
-    int center_x, center_y, radius_x, radius_y;
-    int start_x, start_y, end_x, end_y;
+    double center_x, center_y;
 
     mp_line_style(obj, &line_style, &style_val);
 
-    start_x = center_x = ROUND(A[0].x);
-    start_y = center_y = ROUND(A[0].y);
-    radius_x = ROUND(A[1].x - A[0].x);
-    radius_y = ROUND(A[1].y - A[0].y);
-    end_x = ROUND(A[1].x);
-    end_y = ROUND(A[1].y);
+    const double start_x = center_x = round(A[0].x);
+    const double start_y = center_y = round(A[0].y);
+    const double radius_x = round(A[1].x - A[0].x);
+    const double radius_y = round(A[1].y - A[0].y);
+    const double end_x = round(A[1].x);
+    const double end_y = round(A[1].y);
 
     gvprintf(job,
-            "%d %d %d %d %d %d %d %d %d %.3f %d %.4f %d %d %d %d %d %d %d %d\n",
+            "%d %d %d %.0f %d %d %d %d %d %.3f %d %.4f %.0f %.0f %.0f %.0f "
+            "%.0f %.0f %.0f %.0f\n",
             object_code, sub_type, line_style, thickness, pen_color,
             fill_color, depth, pen_style, area_fill, style_val, direction,
             angle, center_x, center_y, radius_x, radius_y, start_x,
             start_y, end_x, end_y);
 }
 
-static void mp_bezier(GVJ_t * job, pointf * A, int n, int arrow_at_start,
-	      int arrow_at_end, int filled)
-{
+static void mp_bezier(GVJ_t *job, pointf *A, size_t n, int filled) {
     obj_state_t *obj = job->obj;
 
     int object_code = 3;        /* always 3 for spline */
     int sub_type;
     int line_style;		/* solid, dotted, dashed */
-    int thickness = obj->penwidth;
+    double thickness = round(obj->penwidth);
     int pen_color = obj->pencolor.u.index;
     int fill_color = obj->fillcolor.u.index;
     int depth = Depth;
@@ -338,21 +306,13 @@ static void mp_bezier(GVJ_t * job, pointf * A, int n, int arrow_at_start,
     int cap_style = 0;
     int forward_arrow = 0;
     int backward_arrow = 0;
-    int npoints = n;
-    int i;
 
     pointf pf, V[4];
     point p;
-    int j, step;
+    int step;
     int count = 0;
-    int size;
 
-    char *buffer;
-    char *buf;
-    buffer =
-        malloc((npoints + 1) * (BEZIERSUBDIVISION +
-                                1) * 20 * sizeof(char));
-    buf = buffer;
+    agxbuf buf = {0};
 
     mp_line_style(obj, &line_style, &style_val);
 
@@ -371,25 +331,23 @@ static void mp_bezier(GVJ_t * job, pointf * A, int n, int arrow_at_start,
     /* Write first point in line */
     count++;
     PF2P(A[0], p);
-    size = sprintf(buf, " %d %d", p.x, p.y);
-    buf += size;
+    agxbprint(&buf, " %d %d", p.x, p.y);
     /* write subsequent points */
-    for (i = 0; i + 3 < n; i += 3) {
+    for (size_t i = 0; i + 3 < n; i += 3) {
         V[0] = V[3];
-        for (j = 1; j <= 3; j++) {
+        for (size_t j = 1; j <= 3; j++) {
             V[j].x = A[i + j].x;
             V[j].y = A[i + j].y;
         }
         for (step = 1; step <= BEZIERSUBDIVISION; step++) {
             count++;
-            pf = Bezier (V, 3, (double) step / BEZIERSUBDIVISION, NULL, NULL);
+            pf = Bezier(V, (double)step / BEZIERSUBDIVISION, NULL, NULL);
 	    PF2P(pf, p);
-            size = sprintf(buf, " %d %d", p.x, p.y);
-            buf += size;
+            agxbprint(&buf, " %d %d", p.x, p.y);
         }
     }
 
-    gvprintf(job, "%d %d %d %d %d %d %d %d %d %.1f %d %d %d %d\n",
+    gvprintf(job, "%d %d %d %.0f %d %d %d %d %d %.1f %d %d %d %d\n",
             object_code,
             sub_type,
             line_style,
@@ -401,22 +359,21 @@ static void mp_bezier(GVJ_t * job, pointf * A, int n, int arrow_at_start,
             area_fill,
             style_val, cap_style, forward_arrow, backward_arrow, count);
 
-    gvprintf(job, " %s\n", buffer);      /* print points */
-    free(buffer);
-    for (i = 0; i < count; i++) {
+    gvprintf(job, " %s\n", agxbuse(&buf));      /* print points */
+    agxbfree(&buf);
+    for (int i = 0; i < count; i++) {
         gvprintf(job, " %d", i % (count + 1) ? 1 : 0);   /* -1 on all */
     }
     gvputs(job, "\n");
 }
 
-static void mp_polygon(GVJ_t * job, pointf * A, int n, int filled)
-{
+static void mp_polygon(GVJ_t *job, pointf *A, size_t n, int filled) {
     obj_state_t *obj = job->obj;
 
     int object_code = 2;        /* always 2 for polyline */
     int sub_type = 3;           /* always 3 for polygon */
     int line_style;		/* solid, dotted, dashed */
-    int thickness = obj->penwidth;
+    double thickness = round(obj->penwidth);
     int pen_color = obj->pencolor.u.index;
     int fill_color = obj->fillcolor.u.index;
     int depth = Depth;
@@ -428,26 +385,25 @@ static void mp_polygon(GVJ_t * job, pointf * A, int n, int filled)
     int radius = 0;
     int forward_arrow = 0;
     int backward_arrow = 0;
-    int npoints = n + 1;
+    const size_t npoints = n + 1;
 
     mp_line_style(obj, &line_style, &style_val);
 
     gvprintf(job,
-            "%d %d %d %d %d %d %d %d %d %.1f %d %d %d %d %d %d\n",
+            "%d %d %d %.0f %d %d %d %d %d %.1f %d %d %d %d %d %" PRISIZE_T "\n",
             object_code, sub_type, line_style, thickness, pen_color,
             fill_color, depth, pen_style, area_fill, style_val, join_style,
             cap_style, radius, forward_arrow, backward_arrow, npoints);
-    mpptarray(job, A, n, 1);        /* closed shape */
+    mpptarray(job, A, n, 1); // closed shape
 }
 
-static void mp_polyline(GVJ_t * job, pointf * A, int n)
-{
+static void mp_polyline(GVJ_t *job, pointf *A, size_t n) {
     obj_state_t *obj = job->obj;
 
     int object_code = 2;        /* always 2 for polyline */
     int sub_type = 1;           /* always 1 for polyline */
     int line_style;		/* solid, dotted, dashed */
-    int thickness = obj->penwidth;
+    double thickness = round(obj->penwidth);
     int pen_color = obj->pencolor.u.index;
     int fill_color = 0;
     int depth = Depth;
@@ -459,16 +415,16 @@ static void mp_polyline(GVJ_t * job, pointf * A, int n)
     int radius = 0;
     int forward_arrow = 0;
     int backward_arrow = 0;
-    int npoints = n;
+    const size_t npoints = n;
 
     mp_line_style(obj, &line_style, &style_val);
 
     gvprintf(job,
-            "%d %d %d %d %d %d %d %d %d %.1f %d %d %d %d %d %d\n",
+            "%d %d %d %.0f %d %d %d %d %d %.1f %d %d %d %d %d %" PRISIZE_T "\n",
             object_code, sub_type, line_style, thickness, pen_color,
             fill_color, depth, pen_style, area_fill, style_val, join_style,
             cap_style, radius, forward_arrow, backward_arrow, npoints);
-    mpptarray(job, A, n, 0);        /* open shape */
+    mpptarray(job, A, n, 0); // open shape
 }
 
 gvrender_engine_t mp_engine = {

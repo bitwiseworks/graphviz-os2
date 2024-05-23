@@ -1,17 +1,20 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup cgraph_core
+/// @ingroup cgraph_node
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include <cghdr.h>
+#include <assert.h>
+#include <cgraph/cghdr.h>
+#include <stddef.h>
+#include <stdbool.h>
 
 Agnode_t *agfindnode_by_id(Agraph_t * g, IDTYPE id)
 {
@@ -21,48 +24,48 @@ Agnode_t *agfindnode_by_id(Agraph_t * g, IDTYPE id)
 
     dummy.base.tag.id = id;
     template.node = &dummy;
-    sn = (Agsubnode_t *) dtsearch(g->n_id, &template);
-    return sn ? sn->node : NILnode;
+    sn = dtsearch(g->n_id, &template);
+    return sn ? sn->node : NULL;
 }
 
 static Agnode_t *agfindnode_by_name(Agraph_t * g, char *name)
 {
     IDTYPE id;
 
-    if (agmapnametoid(g, AGNODE, name, &id, FALSE))
+    if (agmapnametoid(g, AGNODE, name, &id, false))
 	return agfindnode_by_id(g, id);
     else
-	return NILnode;
+	return NULL;
 }
 
 Agnode_t *agfstnode(Agraph_t * g)
 {
     Agsubnode_t *sn;
-    sn = (Agsubnode_t *) dtfirst(g->n_seq);
-    return sn ? sn->node : NILnode;
+    sn = dtfirst(g->n_seq);
+    return sn ? sn->node : NULL;
 }
 
 Agnode_t *agnxtnode(Agraph_t * g, Agnode_t * n)
 {
     Agsubnode_t *sn;
     sn = agsubrep(g, n);
-    if (sn) sn = ((Agsubnode_t *) dtnext(g->n_seq, sn));
-    return sn ? sn->node : NILnode;
+    if (sn) sn = dtnext(g->n_seq, sn);
+    return sn ? sn->node : NULL;
 }
 
 Agnode_t *aglstnode(Agraph_t * g)
 {
     Agsubnode_t *sn;
-    sn = (Agsubnode_t *) dtlast(g->n_seq);
-    return sn ? sn->node : NILnode;
+    sn = dtlast(g->n_seq);
+    return sn ? sn->node : NULL;
 }
 
 Agnode_t *agprvnode(Agraph_t * g, Agnode_t * n)
 {
     Agsubnode_t *sn;
     sn = agsubrep(g, n);
-    if (sn) sn = ((Agsubnode_t *) dtprev(g->n_seq, sn));
-    return sn ? sn->node : NILnode;
+    if (sn) sn = dtprev(g->n_seq, sn);
+    return sn ? sn->node : NULL;
 }
 
 
@@ -71,13 +74,15 @@ static Agnode_t *newnode(Agraph_t * g, IDTYPE id, uint64_t seq)
 {
     Agnode_t *n;
 
+    assert((seq & SEQ_MASK) == seq && "sequence ID overflow");
+
     n = agalloc(g, sizeof(Agnode_t));
     AGTYPE(n) = AGNODE;
     AGID(n) = id;
-    AGSEQ(n) = seq;
+    AGSEQ(n) = seq & SEQ_MASK;
     n->root = agroot(g);
     if (agroot(g)->desc.has_attrs)
-	(void) agbindrec(n, AgDataRecName, sizeof(Agattr_t), FALSE);
+	(void)agbindrec(n, AgDataRecName, sizeof(Agattr_t), false);
     /* nodeattr_init and method_init will be called later, from the
      * subgraph where the node was actually created, but first it has
      * to be installed in all the (sub)graphs up to root. */
@@ -88,6 +93,7 @@ static void installnode(Agraph_t * g, Agnode_t * n)
 {
     Agsubnode_t *sn;
     int osize;
+    (void)osize;
 
     assert(dtsize(g->n_id) == dtsize(g->n_seq));
     osize = dtsize(g->n_id);
@@ -122,17 +128,17 @@ Agnode_t *agidnode(Agraph_t * g, IDTYPE id, int cflag)
     Agnode_t *n;
 
     n = agfindnode_by_id(g, id);
-    if ((n == NILnode) && cflag) {
+    if (n == NULL && cflag) {
 	root = agroot(g);
 	if ((g != root) && ((n = agfindnode_by_id(root, id))))	/*old */
-	    agsubnode(g, n, TRUE);	/* insert locally */
+	    agsubnode(g, n, 1);	/* insert locally */
 	else {
 	    if (agallocid(g, AGNODE, id)) {	/* new */
 		n = newnode(g, id, agnextseq(g, AGNODE));
 		installnodetoroot(g, n);
 		initnode(g, n);
 	    } else
-		n = NILnode;	/* allocid for new node failed */
+		n = NULL;	/* allocid for new node failed */
 	}
     }
     /* else return probe result */
@@ -147,17 +153,17 @@ Agnode_t *agnode(Agraph_t * g, char *name, int cflag)
 
     root = agroot(g);
     /* probe for existing node */
-    if (agmapnametoid(g, AGNODE, name, &id, FALSE)) {
+    if (agmapnametoid(g, AGNODE, name, &id, false)) {
 	if ((n = agfindnode_by_id(g, id)))
 	    return n;
 
 	/* might already exist globally, but need to insert locally */
 	if (cflag && (g != root) && ((n = agfindnode_by_id(root, id)))) {
-	    return agsubnode(g, n, TRUE);
+	    return agsubnode(g, n, 1);
 	}
     }
 
-    if (cflag && agmapnametoid(g, AGNODE, name, &id, TRUE)) {	/* reserve id */
+    if (cflag && agmapnametoid(g, AGNODE, name, &id, true)) {	/* reserve id */
 	n = newnode(g, id, agnextseq(g, AGNODE));
 	installnodetoroot(g, n);
 	initnode(g, n);
@@ -166,7 +172,7 @@ Agnode_t *agnode(Agraph_t * g, char *name, int cflag)
 	return n;
     }
 
-    return NILnode;
+    return NULL;
 }
 
 /* removes image of node and its edges from graph.
@@ -177,7 +183,7 @@ void agdelnodeimage(Agraph_t * g, Agnode_t * n, void *ignored)
     static Agsubnode_t template;
     template.node = n;
 
-    NOTUSED(ignored);
+    (void)ignored;
     for (e = agfstedge(g, n); e; e = f) {
 	f = agnxtedge(g, e, n);
 	agdeledgeimage(g, e, 0);
@@ -206,7 +212,7 @@ int agdelnode(Agraph_t * g, Agnode_t * n)
 	agrecclose((Agobj_t *) n);
 	agfreeid(g, AGNODE, AGID(n));
     }
-    if (agapply (g, (Agobj_t *) n, (agobjfn_t) agdelnodeimage, NILnode, FALSE) == SUCCESS) {
+    if (agapply(g, (Agobj_t *)n, (agobjfn_t)agdelnodeimage, NULL, false) == SUCCESS) {
 	if (g == agroot(g))
 	    agfree(g, n);
 	return SUCCESS;
@@ -214,8 +220,9 @@ int agdelnode(Agraph_t * g, Agnode_t * n)
 	return FAILURE;
 }
 
-static void dict_relabel(Agnode_t * n, void *arg)
-{
+static void dict_relabel(Agraph_t *ignored, Agnode_t *n, void *arg) {
+    (void)ignored;
+
     Agraph_t *g;
     uint64_t new_id;
 
@@ -236,11 +243,10 @@ int agrelabel_node(Agnode_t * n, char *newname)
     g = agroot(agraphof(n));
     if (agfindnode_by_name(g, newname))
 	return FAILURE;
-    if (agmapnametoid(g, AGNODE, newname, &new_id, TRUE)) {
-	if (agfindnode_by_id(agroot(g), new_id) == NILnode) {
+    if (agmapnametoid(g, AGNODE, newname, &new_id, true)) {
+	if (agfindnode_by_id(agroot(g), new_id) == NULL) {
 	    agfreeid(g, AGNODE, AGID(n));
-	    agapply(g, (Agobj_t *) n, (agobjfn_t) dict_relabel,
-		    (void *) &new_id, FALSE);
+	    agapply(g, (Agobj_t*)n, (agobjfn_t)dict_relabel, &new_id, false);
 	    return SUCCESS;
 	} else {
 	    agfreeid(g, AGNODE, new_id);	/* couldn't use it after all */
@@ -257,9 +263,9 @@ Agnode_t *agsubnode(Agraph_t * g, Agnode_t * n0, int cflag)
     Agnode_t *n;
 
     if (agroot(g) != n0->root)
-	return NILnode;
+	return NULL;
     n = agfindnode_by_id(g, AGID(n0));
-    if ((n == NILnode) && cflag) {
+    if (n == NULL && cflag) {
 	if ((par = agparent(g))) {
 	    n = agsubnode(par, n0, cflag);
 	    installnode(g, n);
@@ -273,10 +279,11 @@ Agnode_t *agsubnode(Agraph_t * g, Agnode_t * n0, int cflag)
 
 static int agsubnodeidcmpf(Dict_t * d, void *arg0, void *arg1, Dtdisc_t * disc)
 {
-    Agsubnode_t *sn0, *sn1;
+    (void)d; /* unused */
+    (void)disc; /* unused */
 
-    sn0 = (Agsubnode_t *) arg0;
-    sn1 = (Agsubnode_t *) arg1;
+    Agsubnode_t *sn0 = arg0;
+    Agsubnode_t *sn1 = arg1;
     
     if (AGID(sn0->node) < AGID(sn1->node)) return -1;
     if (AGID(sn0->node) > AGID(sn1->node)) return 1;
@@ -285,10 +292,11 @@ static int agsubnodeidcmpf(Dict_t * d, void *arg0, void *arg1, Dtdisc_t * disc)
 
 static int agsubnodeseqcmpf(Dict_t * d, void *arg0, void *arg1, Dtdisc_t * disc)
 {
-    Agsubnode_t *sn0, *sn1;
+    (void)d; /* unused */
+    (void)disc; /* unused */
 
-    sn0 = (Agsubnode_t *) arg0;
-    sn1 = (Agsubnode_t *) arg1;
+    Agsubnode_t *sn0 = arg0;
+    Agsubnode_t *sn1 = arg1;
 
     if (AGSEQ(sn0->node) < AGSEQ(sn1->node)) return -1;
     if (AGSEQ(sn0->node) > AGSEQ(sn1->node)) return 1;
@@ -303,36 +311,21 @@ static int agsubnodeseqcmpf(Dict_t * d, void *arg0, void *arg1, Dtdisc_t * disc)
  * dictionaries use the same subnode object, so only one
  * should do the deletion.
  */
-static void
-free_subnode (Dt_t* d, Agsubnode_t* sn, Dtdisc_t * disc)
-{
-
+static void free_subnode(Agsubnode_t *sn, Dtdisc_t *disc) {
+   (void)disc; /* unused */
    if (!AGSNMAIN(sn)) 
 	agfree (sn->node->root, sn);
 }
 
 Dtdisc_t Ag_subnode_id_disc = {
-    0,				/* pass object ptr  */
-    0,				/* size (ignored)   */
-    offsetof(Agsubnode_t, id_link),	/* link offset */
-    NIL(Dtmake_f),
-    NIL(Dtfree_f),
-    agsubnodeidcmpf,
-    NIL(Dthash_f),
-    agdictobjmem,
-    NIL(Dtevent_f)
+    .link = offsetof(Agsubnode_t, id_link), // link offset
+    .comparf = agsubnodeidcmpf,
 };
 
 Dtdisc_t Ag_subnode_seq_disc = {
-    0,				/* pass object ptr  */
-    0,				/* size (ignored)   */
-    offsetof(Agsubnode_t, seq_link),	/* link offset */
-    NIL(Dtmake_f),
-    (Dtfree_f)free_subnode,
-    agsubnodeseqcmpf,
-    NIL(Dthash_f),
-    agdictobjmem,
-    NIL(Dtevent_f)
+    .link = offsetof(Agsubnode_t, seq_link), // link offset
+    .freef = (Dtfree_f)free_subnode,
+    .comparf = agsubnodeseqcmpf,
 };
 
 static void agnodesetfinger(Agraph_t * g, Agnode_t * n, void *ignored)
@@ -340,14 +333,14 @@ static void agnodesetfinger(Agraph_t * g, Agnode_t * n, void *ignored)
     static Agsubnode_t template;
 	template.node = n;
 	dtsearch(g->n_seq,&template);
-    NOTUSED(ignored);
+    (void)ignored;
 }
 
 static void agnoderenew(Agraph_t * g, Agnode_t * n, void *ignored)
 {
     dtrenew(g->n_seq, dtfinger(g->n_seq));
-    NOTUSED(n);
-    NOTUSED(ignored);
+    (void)n;
+    (void)ignored;
 }
 
 int agnodebefore(Agnode_t *fst, Agnode_t *snd)
@@ -361,20 +354,39 @@ int agnodebefore(Agnode_t *fst, Agnode_t *snd)
 
 	/* move snd out of the way somewhere */
 	n = snd;
-	if (agapply (g, (Agobj_t *) n, (agobjfn_t) agnodesetfinger, n, FALSE) != SUCCESS) return FAILURE;
-	AGSEQ(snd) = (g->clos->seq[AGNODE] + 2);
-	if (agapply (g, (Agobj_t *) n, (agobjfn_t) agnoderenew, n, FALSE) != SUCCESS) return FAILURE;
+	if (agapply (g,(Agobj_t *)n, (agobjfn_t)agnodesetfinger, n, false) != SUCCESS) {
+		return FAILURE;
+	}
+	{
+		uint64_t seq = g->clos->seq[AGNODE] + 2;
+		assert((seq & SEQ_MASK) == seq && "sequence ID overflow");
+		AGSEQ(snd) = seq & SEQ_MASK;
+	}
+	if (agapply(g, (Agobj_t *)n, (agobjfn_t)agnoderenew, n, false) != SUCCESS) {
+		return FAILURE;
+	}
 	n = agprvnode(g,snd);
 	do {
 		nxt = agprvnode(g,n);
-		if (agapply (g, (Agobj_t *) n, (agobjfn_t) agnodesetfinger, n, FALSE) != SUCCESS) return FAILURE;
-		AGSEQ(n) = AGSEQ(n) + 1;
-		if (agapply (g, (Agobj_t *) n, (agobjfn_t) agnoderenew, n, FALSE) != SUCCESS) return FAILURE;
+		if (agapply(g, (Agobj_t *)n, (agobjfn_t)agnodesetfinger, n, false) != SUCCESS) {
+		  return FAILURE;
+		}
+		uint64_t seq = AGSEQ(n) + 1;
+		assert((seq & SEQ_MASK) == seq && "sequence ID overflow");
+		AGSEQ(n) = seq & SEQ_MASK;
+		if (agapply(g, (Agobj_t *)n, (agobjfn_t)agnoderenew, n, false) != SUCCESS) {
+		  return FAILURE;
+		}
 		if (n == fst) break;
 		n = nxt;
 	} while (n);
-	if (agapply (g, (Agobj_t *) snd, (agobjfn_t) agnodesetfinger, n, FALSE) != SUCCESS) return FAILURE;
-	AGSEQ(snd) = AGSEQ(fst) - 1;
-	if (agapply (g, (Agobj_t *) snd, (agobjfn_t) agnoderenew, snd, FALSE) != SUCCESS) return FAILURE;
+	if (agapply(g, (Agobj_t *)snd, (agobjfn_t)agnodesetfinger, n, false) != SUCCESS) {
+		return FAILURE;
+	}
+	assert(AGSEQ(fst) != 0 && "sequence ID overflow");
+	AGSEQ(snd) = (AGSEQ(fst) - 1) & SEQ_MASK;
+	if (agapply(g, (Agobj_t *)snd, (agobjfn_t)agnoderenew, snd, false) != SUCCESS) {
+		return FAILURE;
+	}
 	return SUCCESS;
 } 

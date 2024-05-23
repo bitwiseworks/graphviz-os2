@@ -1,19 +1,19 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
-
+#include <cgraph/alloc.h>
+#include <cgraph/exit.h>
+#include <cgraph/list.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
@@ -170,40 +170,32 @@ makeSquareGrid(int dim1, int dim2, int connect_corners, int partial, edgefn ef)
 	for (j = 0; j < dim2; j++) {
 	    // write the neighbors of the node i*dim2+j+1
 	    tl = i * dim2 + j + 1;
-	    if (j > 0
-		&& (!partial || j <= 2 * dim2 / 6 || j > 4 * dim2 / 6
-		    || i <= 2 * dim1 / 6 || i > 4 * dim1 / 6)) {
-		OUTE(i * dim2 + j);
-	    }
 	    if (j < dim2 - 1
 		&& (!partial || j < 2 * dim2 / 6 || j >= 4 * dim2 / 6
 		    || i <= 2 * dim1 / 6 || i > 4 * dim1 / 6)) {
-		OUTE(i * dim2 + j + 2);
-	    }
-	    if (i > 0) {
-		OUTE((i - 1) * dim2 + j + 1);
+		ef(tl, i * dim2 + j + 2);
 	    }
 	    if (i < dim1 - 1) {
-		OUTE((i + 1) * dim2 + j + 1);
+		ef(tl, (i + 1) * dim2 + j + 1);
 	    }
 	    if (connect_corners == 1) {
 		if (i == 0 && j == 0) {	// upper left
 		    OUTE((dim1 - 1) * dim2 + dim2);
-		} else if (i == (dim1 - 1) && j == 0) {	// lower left
+		} else if (i == dim1 - 1 && j == 0) {	// lower left
 		    OUTE(dim2);
-		} else if (i == 0 && j == (dim2 - 1)) {	// upper right
+		} else if (i == 0 && j == dim2 - 1) {	// upper right
 		    OUTE((dim1 - 1) * dim2 + 1);
-		} else if (i == (dim1 - 1) && j == (dim2 - 1)) {	// lower right
+		} else if (i == dim1 - 1 && j == dim2 - 1) {	// lower right
 		    OUTE(1);
 		}
 	    } else if (connect_corners == 2) {
 		if (i == 0 && j == 0) {	// upper left
 		    OUTE(dim2);
-		} else if (i == (dim1 - 1) && j == 0) {	// lower left
+		} else if (i == dim1 - 1 && j == 0) {	// lower left
 		    OUTE((dim1 - 1) * dim2 + dim2);
-		} else if (i == 0 && j == (dim2 - 1)) {	// upper right
+		} else if (i == 0 && j == dim2 - 1) {	// upper right
 		    OUTE(1);
-		} else if (i == (dim1 - 1) && j == (dim2 - 1)) {	// lower right
+		} else if (i == dim1 - 1 && j == dim2 - 1) {	// lower right
 		    OUTE((dim1 - 1) * dim2 + 1);
 		}
 	    }
@@ -225,12 +217,11 @@ ipow (int base, int power)
 
 void makeTree(int depth, int nary, edgefn ef)
 {
-    unsigned int i, j;
-    unsigned int n = (ipow(nary,depth)-1)/(nary-1); /* no. of non-leaf nodes */
-    unsigned int idx = 2;
+    int n = (ipow(nary, depth) - 1) / (nary - 1); // no. of non-leaf nodes
+    int idx = 2;
 
-    for (i = 1; i <= n; i++) {
-	for (j = 0; j < nary; j++) {
+    for (int i = 1; i <= n; i++) {
+	for (int j = 0; j < nary; j++) {
 	    ef (i, idx++);
 	}
     }
@@ -238,8 +229,8 @@ void makeTree(int depth, int nary, edgefn ef)
 
 void makeBinaryTree(int depth, edgefn ef)
 {
-    unsigned int i;
-    unsigned int n = (1 << depth) - 1;
+    int i;
+    int n = (1 << depth) - 1;
 
     for (i = 1; i <= n; i++) {
 	ef( i, 2 * i);
@@ -290,24 +281,18 @@ constructSierpinski(int v1, int v2, int v3, int depth, vtx_data* graph)
 
 }
 
-#define NEW(t)           (t*)calloc((1),sizeof(t))
-#define N_NEW(n,t)       (t*)calloc((n),sizeof(t))
-
 void makeSierpinski(int depth, edgefn ef)
 {
     vtx_data* graph;
     int* edges;
     int n;
-    int nedges;
     int i, j;
 
     depth--;
     n = 3 * (1 + ((int) (pow(3.0, (double) depth) + 0.5) - 1) / 2);
 
-    nedges = (int) (pow(3.0, depth + 1.0) + 0.5);
-
-    graph = N_NEW(n + 1, vtx_data);
-    edges = N_NEW(4 * n, int);
+    graph = gv_calloc(n + 1, sizeof(vtx_data));
+    edges = gv_calloc(4 * n, sizeof(int));
 
     for (i = 1; i <= n; i++) {
 	graph[i].edges = edges;
@@ -385,16 +370,13 @@ void makeTetrix(int depth, edgefn ef)
     vtx_data* graph;
     int* edges;
     int n;
-    int nedges;
     int i, j;
 
     depth--;
     n = 4 + 2 * (((int) (pow(4.0, (double) depth) + 0.5) - 1));
 
-    nedges = 6 * (int) (pow(4.0, depth) + 0.5);
-
-    graph = N_NEW(n + 1, vtx_data);
-    edges = N_NEW(6 * n, int);
+    graph = gv_calloc(n + 1, sizeof(vtx_data));
+    edges = gv_calloc(6 * n, sizeof(int));
 
     for (i = 1; i <= n; i++) {
         graph[i].edges = edges;
@@ -481,20 +463,17 @@ void makeRandom(int h, int w, edgefn ef)
 {
     int i, j, type, size, depth;
 
-    srand(time(0));
-    if (rand()%2==1)
-	type = 1;
-    else
-	type = 0;
+    srand((unsigned)time(0));
+    type = rand() % 2;
 
     size = depth = 0;
     while (size <= h) {
-	size += ipow(2,depth);
+	size += 1 << depth;
 	depth++;
     }
     depth--;
     if (size > h) {
-	size -= ipow(2,depth);
+	size -= 1 << depth;
 	depth--;
     }
 
@@ -506,7 +485,7 @@ void makeRandom(int h, int w, edgefn ef)
     for (i=3; i<=size; i++) {
 	for (j=1; j<i-1; j++) {
 	    int th = rand()%(size*size);
-	    if (((th<=(w*w))&&((i<5)||((i>h-4)&&(j>h-4)))) || (th<=w))
+	    if ((th <= w * w && (i < 5 || (i > h - 4 && j > h - 4))) || th <= w)
 		ef(j,i);
 	}
     }
@@ -557,10 +536,10 @@ typedef struct {
 static tree_t*
 mkTree (int sz)
 {
-    tree_t* tp = NEW(tree_t);
+    tree_t* tp = gv_alloc(sizeof(tree_t));
     tp->root = 0;
     tp->top = 0;
-    tp->p = N_NEW(sz,int);
+    tp->p = gv_calloc(sz, sizeof(int));
     return tp;
 }
 
@@ -593,13 +572,13 @@ prevRoot (tree_t* tp)
 static int
 treeSize (tree_t* tp)
 {
-    return (tp->top - tp->root + 1);
+    return tp->top - tp->root + 1;
 }
 
 static int
 treeTop (tree_t* tp)
 {
-    return (tp->top);
+    return tp->top;
 }
 
 static void
@@ -633,46 +612,20 @@ treeDup (tree_t* tp, int J)
 
 /*****************/
 
-typedef struct {
-    int top;
-    pair* v;
-} stack;
+DEFINE_LIST(int_stack, int)
 
-static stack*
-mkStack (int sz)
-{
-    stack* sp = NEW(stack);
-    sp->top = 0;
-    sp->v = N_NEW(sz,pair);
-    return sp;
+static void push(int_stack_t *sp, int j, int d) {
+  int_stack_push(sp, j);
+  int_stack_push(sp, d);
 }
 
-static void
-freeStack (stack* sp)
-{
-    free (sp->v);
-    free (sp);
-}
+static pair pop(int_stack_t *sp) {
 
-static void
-resetStack (stack* sp)
-{
-    sp->top = 0;
-}
+  // extract ints in the opposite order in which they were pushed
+  int d = int_stack_pop(sp);
+  int j = int_stack_pop(sp);
 
-static void
-push(stack* sp, int j, int d)
-{
-    sp->top++;
-    sp->v[sp->top].j = j;
-    sp->v[sp->top].d = d;
-}
-
-static pair
-pop (stack* sp)
-{
-    sp->top--;
-    return sp->v[sp->top+1];
+  return (pair){j, d};
 }
 
 /*****************/
@@ -680,7 +633,7 @@ pop (stack* sp)
 static int*
 genCnt(int NN)
 {
-    int* T = N_NEW(NN+1,int);
+    int* T = gv_calloc(NN + 1, sizeof(int));
     int D, I, J, TD;
     int SUM;
     int NLAST = 1;
@@ -711,9 +664,7 @@ drand(void)
     return d;
 }
 
-static void
-genTree (int NN, int* T, stack* stack, tree_t* TREE)
-{
+static void genTree(int NN, int *T, int_stack_t *stack, tree_t *TREE) {
     double v;
     pair p;
     int Z, D, N, J, TD, M, more;
@@ -771,29 +722,29 @@ writeTree (tree_t* tp, edgefn ef)
 struct treegen_s {
     int N;
     int* T;
-    stack* sp;
+    int_stack_t sp;
     tree_t* tp;
 };
 
 treegen_t* 
 makeTreeGen (int N)
 {
-    treegen_t* tg = NEW(treegen_t);
+    treegen_t* tg = gv_alloc(sizeof(treegen_t));
 
     tg->N = N;
     tg->T = genCnt(N);
-    tg->sp = mkStack(N+1);
+    tg->sp = (int_stack_t){0};
     tg->tp = mkTree(N+1);
-    srand(time(0));
+    srand((unsigned)time(0));
 
     return tg;
 }
 
 void makeRandomTree (treegen_t* tg, edgefn ef)
 {
-    resetStack(tg->sp);
+    int_stack_clear(&tg->sp);
     resetTree(tg->tp);
-    genTree (tg->N, tg->T, tg->sp, tg->tp);
+    genTree(tg->N, tg->T, &tg->sp, tg->tp);
     writeTree (tg->tp, ef);
 }
 
@@ -801,7 +752,7 @@ void
 freeTreeGen(treegen_t* tg)
 {
     free (tg->T);
-    freeStack (tg->sp);
+    int_stack_free(&tg->sp);
     freeTree (tg->tp);
     free (tg);
 }

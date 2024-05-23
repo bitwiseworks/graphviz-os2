@@ -1,41 +1,38 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
-
+#include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#include <ctype.h>
 
-#include "gvplugin_render.h"
-#include "gvplugin_device.h"
-#include "gvio.h"
-#include "agxbuf.h"
-#include "utils.h"
-#include "color.h"
-#include "colorprocs.h"
+#include <gvc/gvplugin_render.h>
+#include <gvc/gvplugin_device.h>
+#include <gvc/gvio.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/strview.h>
+#include <common/utils.h>
+#include <common/color.h>
+#include <common/colorprocs.h>
 
-#include "const.h"
+#include <common/const.h>
 
 /* Number of points to split splines into */
 #define BEZIERSUBDIVISION 6
 
-#define PIC_COORDS_PER_LINE (16)        /* to avoid stdio BUF overflow */
+enum {FORMAT_PIC};
 
-typedef enum { FORMAT_PIC, } format_type;
-
-static int onetime = TRUE;
+static bool onetime = true;
 static double Fontscale;
 
 /* There are a couple of ways to generate output: 
@@ -59,12 +56,13 @@ static double Fontscale;
   The first approach is used here.
 */
 
-static const char *EscComment = ".\\\" ";       /* troff comment */
+static const char pic_comments[] = "# ";       /* PIC comment */
+static const char troff_comments[] = ".\\\" "; /* troff comment */
 static const char picgen_msghdr[] = "dot pic plugin: ";
 
 static void unsupported(char *s)
 {
-    agerr(AGWARN, "%s%s unsupported\n", picgen_msghdr, s);
+    agwarningf("%s%s unsupported\n", picgen_msghdr, s);
 }
 
 /* troff font mapping */
@@ -72,7 +70,7 @@ typedef struct {
     char trname[3], *psname;
 } fontinfo;
 
-static fontinfo fonttab[] = {
+static const fontinfo fonttab[] = {
     {"AB", "AvantGarde-Demi"},
     {"AI", "AvantGarde-BookOblique"},
     {"AR", "AvantGarde-Book"},
@@ -106,107 +104,60 @@ static fontinfo fonttab[] = {
     {"R ", "Times-Roman"},
     {"S ", "Symbol"},
     {"ZD", "ZapfDingbats"},
-    {"\000\000", (char *) 0}
 };
+static const size_t fonttab_size = sizeof(fonttab) / sizeof(fonttab[0]);
 
-static char *picfontname(char *psname)
-{
-    char *rv;
-    fontinfo *p;
-
-    for (p = fonttab; p->psname; p++)
-        if (strcmp(p->psname, psname) == 0)
-            break;
-    if (p->psname)
-        rv = p->trname;
-    else {
-        agerr(AGERR, "%s%s is not a troff font\n", picgen_msghdr, psname);
-        /* try base font names, e.g. Helvetica-Outline-Oblique -> Helvetica-Outline -> Helvetica */
-        if ((rv = strrchr(psname, '-'))) {
-            *rv = '\0';         /* psname is not specified as const ... */
-            rv = picfontname(psname);
-        } else
-            rv = "R";
+#ifdef HAVE_MEMRCHR
+void *memrchr(const void *s, int c, size_t n);
+#else
+static const void *memrchr(const void *s, int c, size_t n) {
+  const char *str = s;
+  for (size_t i = n - 1; i != SIZE_MAX; --i) {
+    if (str[i] == c) {
+      return &str[i];
     }
-    return rv;
+  }
+  return NULL;
+}
+#endif
+
+static const char *picfontname(strview_t psname) {
+    for (size_t i = 0; i < fonttab_size; ++i)
+        if (strview_str_eq(psname, fonttab[i].psname))
+            return fonttab[i].trname;
+    agerrorf("%s%.*s is not a troff font\n", picgen_msghdr,
+          (int)psname.size, psname.data);
+    /* try base font names, e.g. Helvetica-Outline-Oblique -> Helvetica-Outline -> Helvetica */
+    const char *dash = memrchr(psname.data, '-', psname.size);
+    if (dash != NULL) {
+        strview_t prefix = {.data = psname.data,
+                            .size = (size_t)(dash - psname.data)};
+        return picfontname(prefix);
+    }
+    return "R";
 }
 
-static void picptarray(GVJ_t *job, pointf * A, int n, int close)
-{
-    int i;
+static void picptarray(GVJ_t *job, pointf *A, size_t n, int close) {
     point p;
 
-    for (i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
 	PF2P(A[i],p);
-        gvprintf(job, " %d %d", p.x, p.y);
+        if (i == 0) {
+            gvprintf(job, "move to (%d, %d)", p.x, p.y);
+        } else {
+            gvprintf(job, "; line to (%d, %d)", p.x, p.y);
+        }
     }
     if (close) {
 	PF2P(A[0],p);
-        gvprintf(job, " %d %d", p.x, p.y);
+        gvprintf(job, "; line to (%d, %d)", p.x, p.y);
     }
     gvputs(job, "\n");
 }
 
-static char *pic_string(char *s)
-{
-    static char *buf = NULL;
-    static int bufsize = 0;
-    int pos = 0;
-    char *p;
-    unsigned char c;
-
-    if (!buf) {
-        bufsize = 64;
-        buf = malloc(bufsize * sizeof(char));
-    }
-
-    p = buf;
-    while ((c = *s++)) {
-        if (pos > (bufsize - 8)) {
-            bufsize *= 2;
-            buf = realloc(buf, bufsize * sizeof(char));
-            p = buf + pos;
-        }
-        if (isascii(c)) {
-            if (c == '\\') {
-                *p++ = '\\';
-                pos++;
-            }
-            *p++ = c;
-            pos++;
-        } else {
-            *p++ = '\\';
-            sprintf(p, "%03o", c);
-            p += 3;
-            pos += 4;
-        }
-    }
-    *p = '\0';
-    return buf;
-}
-
-static void pic_line_style(obj_state_t *obj, int *line_style, double *style_val)
-{
-    switch (obj->pen) {
-	case PEN_DASHED: 
-	    *line_style = 1;
-	    *style_val = 10.;
-	    break;
-	case PEN_DOTTED:
-	    *line_style = 2;
-	    *style_val = 10.;
-	    break;
-	case PEN_SOLID:
-	default:
-	    *line_style = 0;
-	    *style_val = 0.;
-	    break;
-    }
-}
-
 static void pic_comment(GVJ_t *job, char *str)
 {
-    gvprintf(job, "%s %s\n", EscComment, str);
+    gvprintf(job, "%s %s\n", pic_comments, str);
 }
 
 static void pic_begin_graph(GVJ_t * job)
@@ -214,31 +165,30 @@ static void pic_begin_graph(GVJ_t * job)
     obj_state_t *obj = job->obj;
 
     gvprintf(job, "%s Creator: %s version %s (%s)\n",
-	EscComment, job->common->info[0], job->common->info[1], job->common->info[2]);
-    gvprintf(job, "%s Title: %s\n", EscComment, agnameof(obj->u.g));
+	troff_comments, job->common->info[0], job->common->info[1], job->common->info[2]);
+    gvprintf(job, "%s Title: %s\n", troff_comments, agnameof(obj->u.g));
     gvprintf(job,
             "%s save point size and font\n.nr .S \\n(.s\n.nr DF \\n(.f\n",
-            EscComment);
+            troff_comments);
 }
 
 static void pic_end_graph(GVJ_t * job)
 {
     gvprintf(job,
             "%s restore point size and font\n.ps \\n(.S\n.ft \\n(DF\n",
-            EscComment);
+            troff_comments);
 }
 
 static void pic_begin_page(GVJ_t * job)
 {
     box pbr = job->pageBoundingBox;
-    double height, width;
 
-    if (onetime && job->rotation && (job->rotation != 90)) {
+    if (onetime && job->rotation && job->rotation != 90) {
         unsupported("rotation");
-        onetime = FALSE;
+        onetime = false;
     }
-    height = PS2INCH((double) (pbr.UR.y) - (double) (pbr.LL.y));
-    width = PS2INCH((double) (pbr.UR.x) - (double) (pbr.LL.x));
+    double height = PS2INCH((double)pbr.UR.y - (double)pbr.LL.y);
+    double width = PS2INCH((double)pbr.UR.x - (double)pbr.LL.x);
     if (job->rotation == 90) {
         double temp = width;
         width = height;
@@ -247,7 +197,7 @@ static void pic_begin_page(GVJ_t * job)
     gvprintf(job, ".PS %.5f %.5f\n", width, height);
     gvprintf(job,
             "%s to change drawing size, multiply the width and height on the .PS line above and the number on the two lines below (rounded to the nearest integer) by a scale factor\n",
-            EscComment);
+            pic_comments);
     if (width > 0.0) {
         Fontscale = log10(width);
         Fontscale += 3.0 - (int) Fontscale;     /* between 3.0 and 4.0 */
@@ -258,79 +208,79 @@ static void pic_begin_page(GVJ_t * job)
             Fontscale);
     gvprintf(job,
             "%s don't change anything below this line in this drawing\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s non-fatal run-time pic version determination, version 2\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "boxrad=2.0 %s will be reset to 0.0 by gpic only\n",
-            EscComment);
+            pic_comments);
     gvprintf(job, "scale=1.0 %s required for comparisons\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s boxrad is now 0.0 in gpic, else it remains 2.0\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s dashwid is 0.1 in 10th Edition, 0.05 in DWB 2 and in gpic\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s fillval is 0.3 in 10th Edition (fill 0 means black), 0.5 in gpic (fill 0 means white), undefined in DWB 2\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s fill has no meaning in DWB 2, gpic can use fill or filled, 10th Edition uses fill only\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s DWB 2 doesn't use fill and doesn't define fillval\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s reset works in gpic and 10th edition, but isn't defined in DWB 2\n",
-            EscComment);
+            pic_comments);
     gvprintf(job, "%s DWB 2 compatibility definitions\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "if boxrad > 1.0 && dashwid < 0.075 then X\n\tfillval = 1;\n\tdefine fill Y Y;\n\tdefine solid Y Y;\n\tdefine reset Y scale=1.0 Y;\nX\n");
-    gvprintf(job, "reset %s set to known state\n", EscComment);
+    gvprintf(job, "reset %s set to known state\n", pic_comments);
     gvprintf(job, "%s GNU pic vs. 10th Edition d\\(e'tente\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "if fillval > 0.4 then X\n\tdefine setfillval Y fillval = 1 - Y;\n\tdefine bold Y thickness 2 Y;\n");
     gvprintf(job,
             "\t%s if you use gpic and it barfs on encountering \"solid\",\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "\t%s\tinstall a more recent version of gpic or switch to DWB or 10th Edition pic;\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "\t%s\tsorry, the groff folks changed gpic; send any complaint to them;\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "X else Z\n\tdefine setfillval Y fillval = Y;\n\tdefine bold Y Y;\n\tdefine filled Y fill Y;\nZ\n");
     gvprintf(job,
             "%s arrowhead has no meaning in DWB 2, arrowhead = 7 makes filled arrowheads in gpic and in 10th Edition\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s arrowhead is undefined in DWB 2, initially 1 in gpic, 2 in 10th Edition\n",
-            EscComment);
+            pic_comments);
     gvprintf(job, "arrowhead = 7 %s not used by graphviz\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s GNU pic supports a boxrad variable to draw boxes with rounded corners; DWB and 10th Ed. do not\n",
-            EscComment);
+            pic_comments);
     gvprintf(job, "boxrad = 0 %s no rounded corners in graphviz\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s GNU pic supports a linethick variable to set line thickness; DWB and 10th Ed. do not\n",
-            EscComment);
+            pic_comments);
     gvprintf(job, "linethick = 0; oldlinethick = linethick\n");
     gvprintf(job,
             "%s .PS w/o args causes GNU pic to scale drawing to fit 8.5x11 paper; DWB does not\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s maxpsht and maxpswid have no meaning in DWB 2.0, set page boundaries in gpic and in 10th Edition\n",
-            EscComment);
+            pic_comments);
     gvprintf(job,
             "%s maxpsht and maxpswid are predefined to 11.0 and 8.5 in gpic\n",
-            EscComment);
+            pic_comments);
     gvprintf(job, "maxpsht = %f\nmaxpswid = %f\n", height, width);
     gvprintf(job, "Dot: [\n");
     gvprintf(job,
@@ -346,8 +296,7 @@ static void pic_end_page(GVJ_t * job)
 static void pic_textspan(GVJ_t * job, pointf p, textspan_t * span)
 {
     static char *lastname;
-    static int lastsize;
-    int sz;
+    static double lastsize;
 
     switch (span->just) {
     case 'l': 
@@ -364,18 +313,18 @@ static void pic_textspan(GVJ_t * job, pointf p, textspan_t * span)
     p.y += span->font->size / (3.0 * POINTS_PER_INCH);
     p.x += span->size.x / (2.0 * POINTS_PER_INCH);
 
-    if (span->font->name && (!(lastname) || strcmp(lastname, span->font->name))) {
-        gvprintf(job, ".ft %s\n", picfontname(span->font->name));
+    if (span->font->name && (!lastname || strcmp(lastname, span->font->name))) {
+        gvprintf(job, ".ft %s\n", picfontname(strview(span->font->name, '\0')));
 	lastname = span->font->name;
     }
-    if ((sz = (int)span->font->size) < 1)
-        sz = 1;
-    if (sz != lastsize) {
-        gvprintf(job, ".ps %d*\\n(SFu/%.0fu\n", sz, Fontscale);
+    double sz = fmax(span->font->size, 1);
+    if (fabs(sz - lastsize) > 0.5) {
+        gvprintf(job, ".ps %.0f*\\n(SFu/%.0fu\n", sz, Fontscale);
 	lastsize = sz;
     }
-    gvprintf(job, "\"%s\" at (%.5f,%.5f);\n",
-            pic_string(span->str), p.x, p.y);
+    gvputc(job, '"');
+    gvputs_nonascii(job, span->str);
+    gvprintf(job, "\" at (%.5f,%.5f);\n", p.x, p.y);
 }
 
 static void pic_ellipse(GVJ_t * job, pointf * A, int filled)
@@ -383,7 +332,7 @@ static void pic_ellipse(GVJ_t * job, pointf * A, int filled)
     /* A[] contains 2 points: the center and corner. */
 
     gvprintf(job,
-		"ellipse attrs%d %swid %.5f ht %.5f at (%.5f,%.5f);\n", 1,
+		"ellipse attrs0 %swid %.5f ht %.5f at (%.5f,%.5f);\n",
 		filled ? "fill " : "",
 		PS2INCH(2*(A[1].x - A[0].x)),
 		PS2INCH(2*(A[1].y - A[0].y)),
@@ -391,153 +340,41 @@ static void pic_ellipse(GVJ_t * job, pointf * A, int filled)
 		PS2INCH(A[0].y));
 }
 
-static void pic_bezier(GVJ_t * job, pointf * A, int n, int arrow_at_start,
-//            start_y, end_x, end_y);
-	      int arrow_at_end, int filled)
-{
-    obj_state_t *obj = job->obj;
+static void pic_bezier(GVJ_t *job, pointf *A, size_t n, int filled) {
+    (void)filled;
 
-//  int object_code = 3;        /* always 3 for spline */
-    int sub_type;
-    int line_style;		/* solid, dotted, dashed */
-//  int thickness = obj->penwidth;
-//  int pen_color = obj->pencolor.u.index;
-    int fill_color = obj->fillcolor.u.index;
-//  int pen_style = 0;          /* not used */
-    int area_fill;
-    double style_val;
-//  int cap_style = 0;
-//  int forward_arrow = 0;
-//  int backward_arrow = 0;
-    int npoints = n;
-    int i;
-
-    pointf pf, V[4];
+    pointf V[4];
     point p;
-    int j, step;
-    int count = 0;
-    int size;
 
-    char *buffer;
-    char *buf;
-    buffer =
-        malloc((npoints + 1) * (BEZIERSUBDIVISION +
-                                1) * 20 * sizeof(char));
-    buf = buffer;
-
-    pic_line_style(obj, &line_style, &style_val);
-
-    if (filled) {
-        sub_type = 5;     /* closed X-spline */
-        area_fill = 20;   /* fully saturated color */
-        fill_color = job->obj->fillcolor.u.index;
-    }
-    else {
-        sub_type = 4;     /* opened X-spline */
-        area_fill = -1;
-        fill_color = 0;
-    }
     V[3].x = A[0].x;
     V[3].y = A[0].y;
     /* Write first point in line */
-    count++;
     PF2P(A[0], p);
-    size = sprintf(buf, " %d %d", p.x, p.y);
-    buf += size;
+    gvprintf(job, "move to (%d, %d)", p.x, p.y);
     /* write subsequent points */
-    for (i = 0; i + 3 < n; i += 3) {
+    for (size_t i = 0; i + 3 < n; i += 3) {
         V[0] = V[3];
-        for (j = 1; j <= 3; j++) {
+        for (size_t j = 1; j <= 3; j++) {
             V[j].x = A[i + j].x;
             V[j].y = A[i + j].y;
         }
-        for (step = 1; step <= BEZIERSUBDIVISION; step++) {
-            count++;
-            pf = Bezier (V, 3, (double) step / BEZIERSUBDIVISION, NULL, NULL);
+        for (int step = 1; step <= BEZIERSUBDIVISION; step++) {
+            pointf pf = Bezier(V, (double)step / BEZIERSUBDIVISION, NULL, NULL);
 	    PF2P(pf, p);
-            size = sprintf(buf, " %d %d", p.x, p.y);
-            buf += size;
+            gvprintf(job, "; spline to (%d, %d)", p.x, p.y);
         }
     }
 
-//    gvprintf(job, "%d %d %d %d %d %d %d %d %d %.1f %d %d %d %d\n",
-//            object_code,
-//            sub_type,
-//            line_style,
-//            thickness,
-//            pen_color,
-//            fill_color,
-//            depth,
-//            pen_style,
-//            area_fill,
-//            style_val, cap_style, forward_arrow, backward_arrow, count);
-
-    gvprintf(job, " %s\n", buffer);      /* print points */
-    free(buffer);
-    for (i = 0; i < count; i++) {
-        gvprintf(job, " %d", i % (count + 1) ? 1 : 0);   /* -1 on all */
-    }
     gvputs(job, "\n");
 }
 
-static void pic_polygon(GVJ_t * job, pointf * A, int n, int filled)
-{
-    obj_state_t *obj = job->obj;
-
-//  int object_code = 2;        /* always 2 for polyline */
-//  int sub_type = 3;           /* always 3 for polygon */
-    int line_style;		/* solid, dotted, dashed */
-//  int thickness = obj->penwidth;
-//  int pen_color = obj->pencolor.u.index;
-//  int fill_color = obj->fillcolor.u.index;
-//  int pen_style = 0;          /* not used */
-//  int area_fill = filled ? 20 : -1;
-    double style_val;
-//  int join_style = 0;
-//  int cap_style = 0;
-//  int radius = 0;
-//  int forward_arrow = 0;
-//  int backward_arrow = 0;
-//  int npoints = n + 1;
-
-    pic_line_style(obj, &line_style, &style_val);
-
-//    gvprintf(job,
-//            "%d %d %d %d %d %d %d %d %d %.1f %d %d %d %d %d %d\n",
-//            object_code, sub_type, line_style, thickness, pen_color,
-//            fill_color, depth, pen_style, area_fill, style_val, join_style,
-//            cap_style, radius, forward_arrow, backward_arrow, npoints);
-    picptarray(job, A, n, 1);        /* closed shape */
+static void pic_polygon(GVJ_t *job, pointf *A, size_t n, int filled) {
+    (void)filled;
+    picptarray(job, A, n, 1); // closed shape
 }
 
-static void pic_polyline(GVJ_t * job, pointf * A, int n)
-{
-    obj_state_t *obj = job->obj;
-
-//  int object_code = 2;        /* always 2 for polyline */
-//  int sub_type = 1;           /* always 1 for polyline */
-    int line_style;		/* solid, dotted, dashed */
-//  int thickness = obj->penwidth;
-//  int pen_color = obj->pencolor.u.index;
-//  int fill_color = 0;
-//  int pen_style = 0;          /* not used */
-//  int area_fill = 0;
-    double style_val;
-//  int join_style = 0;
-//  int cap_style = 0;
-//  int radius = 0;
-//  int forward_arrow = 0;
-//  int backward_arrow = 0;
-//  int npoints = n;
-
-    pic_line_style(obj, &line_style, &style_val);
-
-//    gvprintf(job,
-//            "%d %d %d %d %d %d %d %d %d %.1f %d %d %d %d %d %d\n",
-//            object_code, sub_type, line_style, thickness, pen_color,
-//            fill_color, depth, pen_style, area_fill, style_val, join_style,
-//            cap_style, radius, forward_arrow, backward_arrow, npoints);
-    picptarray(job, A, n, 0);        /* open shape */
+static void pic_polyline(GVJ_t *job, pointf *A, size_t n) {
+  picptarray(job, A, n, 0); // open shape
 }
 
 gvrender_engine_t pic_engine = {

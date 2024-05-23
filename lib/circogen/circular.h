@@ -1,27 +1,22 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef CIRCULAR_H
-#define CIRCULAR_H
+#pragma once
 
 #include "render.h"
-#include "block.h"
+#include <circogen/block.h>
 
 typedef struct {
     blocklist_t bl;
     int orderCount;
     int blockCount;
-    attrsym_t *N_artpos;
     attrsym_t *N_root;
     char *rootname;
     double min_dist;
@@ -72,14 +67,12 @@ typedef struct {
 
 typedef struct {
     int order;
-    Agedge_t* next;
 } edata;
 
 #define NDATA(n) ((ndata*)(ND_alg(n)))
 #define DNODE(n)	(NDATA(n)->dnode)
 
 #define EDGEDATA(e)  ((edata*)(ED_alg(e)))
-#define ENEXT(e)     (EDGEDATA(e)->next)
 #define EDGEORDER(e) (EDGEDATA(e)->order)
 
 #define DATA(n) ((cdata*)(ND_alg(n)))
@@ -124,7 +117,7 @@ typedef struct {
 
 #define DEGREE(n) (ND_order(n))
 
-#include <circo.h>
+#include <circogen/circo.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -134,9 +127,8 @@ extern "C" {
     extern void prData(Agnode_t * n, int pass);
 #endif
 
-    extern void circularLayout(Agraph_t * sg, Agraph_t* rg);
+void circularLayout(Agraph_t *sg, Agraph_t *rg, int *blockCount);
 
 #ifdef __cplusplus
 }
-#endif
 #endif

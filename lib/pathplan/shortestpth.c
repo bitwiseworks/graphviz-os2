@@ -1,18 +1,15 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include "vis.h"
+#include <cgraph/alloc.h>
+#include <pathplan/vis.h>
 
 static COORD unseen = (double) INT_MAX;
 
@@ -30,15 +27,13 @@ static COORD unseen = (double) INT_MAX;
  */
 static int *shortestPath(int root, int target, int V, array2 wadj)
 {
-    int *dad;
-    COORD *vl;
     COORD *val;
     int min;
     int k, t;
 
     /* allocate arrays */
-    dad = (int *) malloc(V * sizeof(int));
-    vl = (COORD *) malloc((V + 1) * sizeof(COORD));	/* One extra for sentinel */
+    int *dad = gv_calloc(V, sizeof(int));
+    COORD *vl = gv_calloc(V + 1, sizeof(COORD)); // One extra for sentinel
     val = vl + 1;
 
     /* initialize arrays */
@@ -99,7 +94,7 @@ int *makePath(Ppoint_t p, int pp, COORD * pvis,
     int V = conf->N;
 
     if (directVis(p, pp, q, qp, conf)) {
-	int *dad = (int *) malloc(sizeof(int) * (V + 2));
+	int *dad = gv_calloc(V + 2, sizeof(int));
 	dad[V] = V + 1;
 	dad[V + 1] = -1;
 	return dad;

@@ -1,79 +1,81 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
 #include <stdlib.h>
 
-#include "gvplugin_render.h"
-#include "gvplugin_device.h"
-#include "gvio.h"
-
-extern char *xml_string(char *str);
-extern char *xml_url_string(char *str);
+#include <cgraph/unreachable.h>
+#include <common/types.h>
+#include <common/utils.h>
+#include <gvc/gvplugin_render.h>
+#include <gvc/gvplugin_device.h>
+#include <gvc/gvio.h>
 
 typedef enum { FORMAT_IMAP, FORMAT_ISMAP, FORMAT_CMAP, FORMAT_CMAPX, } format_type;
 
-static void map_output_shape (GVJ_t *job, map_shape_t map_shape, pointf * AF, int nump,
+// wrapper around `xml_escape` to set flags for URL escaping
+static void xml_url_puts(GVJ_t *job, const char *s) {
+  const xml_flags_t flags = {0};
+  (void)xml_escape(s, flags, (int(*)(void*, const char*))gvputs, job);
+}
+
+static void map_output_shape(GVJ_t *job, map_shape_t map_shape, pointf *AF, size_t nump,
                 char* url, char *tooltip, char *target, char *id)
 {
-    int i;
-
-    static point *A;
-    static int size_A;
-
     if (!AF || !nump)
 	return;
 
-    if (size_A < nump) {
-	size_A = nump + 10;
-	A = realloc(A, size_A * sizeof(point));
-    }
-    for (i = 0; i < nump; i++)
-	PF2P(AF[i], A[i]);
-
     if (job->render.id == FORMAT_IMAP && url && url[0]) {
         switch (map_shape) {
-        case MAP_RECTANGLE:
+        case MAP_RECTANGLE: {
+            point A, B;
+            PF2P(AF[0], A);
+            PF2P(AF[1], B);
 	    /* Y_GOES_DOWN so need UL to LR */
-            gvprintf(job, "rect %s %d,%d %d,%d\n", url,
-                A[0].x, A[1].y, A[1].x, A[0].y);
+            gvprintf(job, "rect %s %d,%d %d,%d\n", url, A.x, B.y, B.x, A.y);
             break;
-        case MAP_CIRCLE:
-            gvprintf(job, "circle %s %d,%d,%d\n", url,
-                A[0].x, A[0].y, A[1].x-A[0].x);
+        }
+        case MAP_CIRCLE: {
+            point A, B;
+            PF2P(AF[0], A);
+            PF2P(AF[1], B);
+            gvprintf(job, "circle %s %d,%d,%d\n", url, A.x, A.y, B.x - A.x);
             break;
+        }
         case MAP_POLYGON:
             gvprintf(job, "poly %s", url);
-            for (i = 0; i < nump; i++)
-                gvprintf(job, " %d,%d", A[i].x, A[i].y);
+            for (size_t i = 0; i < nump; i++) {
+                point A;
+                PF2P(AF[i], A);
+                gvprintf(job, " %d,%d", A.x, A.y);
+            }
             gvputs(job, "\n");
             break;
         default:
-            assert(0);
-            break;
+            UNREACHABLE();
         }
 
     } else if (job->render.id == FORMAT_ISMAP && url && url[0]) {
         switch (map_shape) {
-        case MAP_RECTANGLE:
+        case MAP_RECTANGLE: {
+            point A, B;
+            PF2P(AF[0], A);
+            PF2P(AF[1], B);
 	    /* Y_GOES_DOWN so need UL to LR */
             gvprintf(job, "rectangle (%d,%d) (%d,%d) %s %s\n",
-                A[0].x, A[1].y, A[1].x, A[0].y, url, tooltip);
+                A.x, B.y, B.x, A.y, url, tooltip);
 	    break;
+        }
         default:
-            assert(0);
-            break;
+            UNREACHABLE();
         }
 
     } else if (job->render.id == FORMAT_CMAP || job->render.id == FORMAT_CMAPX) {
@@ -88,27 +90,26 @@ static void map_output_shape (GVJ_t *job, map_shape_t map_shape, pointf * AF, in
             gvputs(job, "<area shape=\"poly\"");
             break;
         default:
-            assert(0);
-            break;
+            UNREACHABLE();
         }
         if (id && id[0]) {
             gvputs(job, " id=\"");
-	    gvputs(job, xml_url_string(id));
+	    xml_url_puts(job, id);
 	    gvputs(job, "\"");
 	}
         if (url && url[0]) {
             gvputs(job, " href=\"");
-	    gvputs(job, xml_url_string(url));
+	    xml_url_puts(job, url);
 	    gvputs(job, "\"");
 	}
         if (target && target[0]) {
             gvputs(job, " target=\"");
-	    gvputs(job, xml_string(target));
+	    gvputs_xml(job, target);
 	    gvputs(job, "\"");
 	}
         if (tooltip && tooltip[0]) {
             gvputs(job, " title=\"");
-	    gvputs(job, xml_string(tooltip));
+	    gvputs_xml(job, tooltip);
 	    gvputs(job, "\"");
 	}
         /*
@@ -125,18 +126,31 @@ static void map_output_shape (GVJ_t *job, map_shape_t map_shape, pointf * AF, in
 
         gvputs(job, " coords=\"");
         switch (map_shape) {
-        case MAP_CIRCLE:
-            gvprintf(job, "%d,%d,%d", A[0].x, A[0].y, A[1].x-A[0].x);
+        case MAP_CIRCLE: {
+            point A, B;
+            PF2P(AF[0], A);
+            PF2P(AF[1], B);
+            gvprintf(job, "%d,%d,%d", A.x, A.y, B.x - A.x);
             break;
-        case MAP_RECTANGLE:
+        }
+        case MAP_RECTANGLE: {
+            point A, B;
+            PF2P(AF[0], A);
+            PF2P(AF[1], B);
 	    /* Y_GOES_DOWN so need UL to LR */
-            gvprintf(job, "%d,%d,%d,%d", A[0].x, A[1].y, A[1].x, A[0].y);  
+            gvprintf(job, "%d,%d,%d,%d", A.x, B.y, B.x, A.y);
             break;
-        case MAP_POLYGON:
-            gvprintf(job, "%d,%d", A[0].x, A[0].y);
-            for (i = 1; i < nump; i++)
-                gvprintf(job, ",%d,%d", A[i].x, A[i].y);
+        }
+        case MAP_POLYGON: {
+            point A;
+            PF2P(AF[0], A);
+            gvprintf(job, "%d,%d", A.x, A.y);
+            for (size_t i = 1; i < nump; i++) {
+                PF2P(AF[i], A);
+                gvprintf(job, ",%d,%d", A.x, A.y);
+            }
             break;
+        }
         default:
             break;
         }
@@ -150,32 +164,30 @@ static void map_output_shape (GVJ_t *job, map_shape_t map_shape, pointf * AF, in
 static void map_begin_page(GVJ_t * job)
 {
     obj_state_t *obj = job->obj;
-    char *s;
 
     switch (job->render.id) {
     case FORMAT_IMAP:
         gvputs(job, "base referer\n");
         if (obj->url && obj->url[0]) {
 	    gvputs(job, "default ");
-	    gvputs(job, xml_string(obj->url));
+	    gvputs_xml(job, obj->url);
 	    gvputs(job, "\n");
 	}
         break;
     case FORMAT_ISMAP:
         if (obj->url && obj->url[0]) {
 	    gvputs(job, "default ");
-	    gvputs(job, xml_string(obj->url));
+	    gvputs_xml(job, obj->url);
 	    gvputs(job, " ");
-	    gvputs(job, xml_string(agnameof(obj->u.g)));
+	    gvputs_xml(job, agnameof(obj->u.g));
 	    gvputs(job, "\n");
 	}
         break;
     case FORMAT_CMAPX:
-	s = xml_string(agnameof(obj->u.g));
 	gvputs(job, "<map id=\"");
-	gvputs(job, s);
+	gvputs_xml(job, agnameof(obj->u.g));
 	gvputs(job, "\" name=\"");
-	gvputs(job, s);
+	gvputs_xml(job, agnameof(obj->u.g));
 	gvputs(job, "\">\n");
         break;
     default:
@@ -203,50 +215,6 @@ static void map_end_page(GVJ_t * job)
 	break;
     }
 }
-
-#if 0
-static void map_begin_cluster(GVJ_t * job)
-{
-    obj_state_t *obj = job->obj;
-
-    gvprintf(job, "%% %s\n", obj->u.sg->name);
-
-    map_output_shape(job, obj->url_map_shape, obj->url_map_p, obj->url_map_n,
-	        obj->url, obj->tooltip, obj->target);
-}
-
-static void map_begin_node(GVJ_t * job)
-{
-    obj_state_t *obj = job->obj;
-
-    map_output_shape(job, obj->url_map_shape, obj->url_map_p,obj->url_map_n,
-	        obj->url, obj->tooltip, obj->target);
-}
-
-static void
-map_begin_edge(GVJ_t * job)
-{
-    obj_state_t *obj = job->obj;
-    int i, j = 0;
-
-    map_output_shape(job, obj->url_map_shape, obj->url_map_p, obj->url_map_n,
-	        obj->url, obj->tooltip, obj->target);
-    map_output_shape(job, MAP_RECTANGLE, obj->tailurl_map_p, 2,
-	        obj->tailurl, obj->tailtooltip, obj->tailtarget);
-    map_output_shape(job, MAP_RECTANGLE, obj->headurl_map_p, 2,
-	        obj->headurl, obj->headtooltip, obj->headtarget);
-    map_output_shape(job, MAP_RECTANGLE, obj->tailendurl_map_p,2, 
-	        obj->url, obj->tooltip, obj->target);
-    map_output_shape(job, MAP_RECTANGLE, obj->headendurl_map_p, 2,
-	        obj->url, obj->tooltip, obj->target);
-    for (i = 0; i < obj->url_bsplinemap_poly_n; i++) {
-        map_output_shape(job, MAP_POLYGON,
-		obj->url_bsplinemap_p+j, obj->url_bsplinemap_n[i],
-		obj->url, obj->tooltip, obj->target);
-	j += obj->url_bsplinemap_n[i];
-    }
-}
-#endif
 
 static void map_begin_anchor(GVJ_t * job, char *url, char *tooltip, char *target, char *id)
 {

@@ -1,143 +1,96 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup common_utils
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "render.h"
-#include "agxbuf.h"
-#include "htmltable.h"
-#include "entities.h"
-#include "logic.h"
-#include "gvc.h"
+#include <common/render.h>
+#include <cgraph/alloc.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/gv_math.h>
+#include <cgraph/strview.h>
+#include <cgraph/tokenize.h>
+#include <common/htmltable.h>
+#include <common/entities.h>
+#include <limits.h>
+#include <math.h>
+#include <gvc/gvc.h>
+#include <cgraph/startswith.h>
+#include <cgraph/strcasecmp.h>
+#include <cgraph/streq.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <unistd.h>
 
-#ifdef _WIN32
-#define R_OK 4
-#endif
-
-#ifdef HAVE_UNISTD_H
-#   include <unistd.h>
-#endif // HAVE_UNISTD_H
-
-#include <ctype.h>
-
-/*
- *  a queue of nodes
- */
-nodequeue *new_queue(int sz)
-{
-    nodequeue *q = NEW(nodequeue);
-
-    if (sz <= 1)
-	sz = 2;
-    q->head = q->tail = q->store = N_NEW(sz, node_t *);
-    q->limit = q->store + sz;
-    return q;
-}
-
-void free_queue(nodequeue * q)
-{
-    free(q->store);
-    free(q);
-}
-
-void enqueue(nodequeue * q, node_t * n)
-{
-    *(q->tail++) = n;
-    if (q->tail >= q->limit)
-	q->tail = q->store;
-}
-
-node_t *dequeue(nodequeue * q)
-{
-    node_t *n;
-    if (q->head == q->tail)
-	n = NULL;
-    else {
-	n = *(q->head++);
-	if (q->head >= q->limit)
-	    q->head = q->store;
-    }
-    return n;
-}
-
-int late_int(void *obj, attrsym_t * attr, int def, int low)
-{
-    char *p;
-    char *endp;
-    int rv;
+int late_int(void *obj, attrsym_t *attr, int defaultValue, int minimum) {
     if (attr == NULL)
-	return def;
-    p = ag_xget(obj, attr);
+        return defaultValue;
+    char *p = ag_xget(obj, attr);
     if (!p || p[0] == '\0')
-	return def;
-    rv = strtol (p, &endp, 10);
-    if (p == endp) return def;  /* invalid int format */
-    if (rv < low) return low;
-    else return rv;
-}
-
-double late_double(void *obj, attrsym_t * attr, double def, double low)
-{
-    char *p;
+        return defaultValue;
     char *endp;
-    double rv;
-
-    if (!attr || !obj)
-	return def;
-    p = ag_xget(obj, attr);
-    if (!p || p[0] == '\0')
-	return def;
-    rv = strtod (p, &endp);
-    if (p == endp) return def;  /* invalid double format */
-    if (rv < low) return low;
-    else return rv;
+    long rv = strtol(p, &endp, 10);
+    if (p == endp || rv > INT_MAX)
+        return defaultValue; /* invalid int format */
+    if (rv < minimum)
+        return minimum;
+    return (int)rv;
 }
 
-/* get_inputscale:
- * Return value for PSinputscale. If this is > 0, it has been set on the
+double late_double(void *obj, attrsym_t *attr, double defaultValue,
+                   double minimum) {
+    if (!attr || !obj)
+        return defaultValue;
+    char *p = ag_xget(obj, attr);
+    if (!p || p[0] == '\0')
+        return defaultValue;
+    char *endp;
+    double rv = strtod(p, &endp);
+    if (p == endp)
+        return defaultValue; /* invalid double format */
+    if (rv < minimum)
+        return minimum;
+    return rv;
+}
+
+/** Return value for PSinputscale. If this is > 0, it has been set on the
  * command line and this value is used.
  * Otherwise, we check the graph's inputscale attribute. If this is not set
  * or has a bad value, we return -1.
  * If the value is 0, we return the default. Otherwise, we return the value.
  * Set but negative values are treated like 0.
  */
-double get_inputscale (graph_t* g)
-{
-    double d;
-
+double get_inputscale(graph_t *g) {
     if (PSinputscale > 0) return PSinputscale;  /* command line flag prevails */
-    d = late_double(g, agfindgraphattr(g, "inputscale"), -1, 0);
-    if (d == 0) return POINTS_PER_INCH;
-    else return d;
+    double d = late_double(g, agfindgraphattr(g, "inputscale"), -1, 0);
+    if (is_exactly_zero(d)) return POINTS_PER_INCH;
+    return d;
 }
 
-char *late_string(void *obj, attrsym_t * attr, char *def)
-{
+char *late_string(void *obj, attrsym_t *attr, char *defaultValue) {
     if (!attr || !obj)
-	return def;
+        return defaultValue;
     return agxget(obj, attr);
 }
 
-char *late_nnstring(void *obj, attrsym_t * attr, char *def)
-{
-    char *rv = late_string(obj, attr, def);
+char *late_nnstring(void *obj, attrsym_t *attr, char *defaultValue) {
+    char *rv = late_string(obj, attr, defaultValue);
     if (!rv || (rv[0] == '\0'))
-	rv = def;
+        return defaultValue;
     return rv;
 }
 
-boolean late_bool(void *obj, attrsym_t * attr, int def)
-{
+bool late_bool(void *obj, attrsym_t *attr, bool defaultValue) {
     if (attr == NULL)
-	return def;
+        return defaultValue;
 
     return mapbool(agxget(obj, attr));
 }
@@ -145,7 +98,7 @@ boolean late_bool(void *obj, attrsym_t * attr, int def)
 /* union-find */
 node_t *UF_find(node_t * n)
 {
-    while (ND_UF_parent(n) && (ND_UF_parent(n) != n)) {
+    while (ND_UF_parent(n) && ND_UF_parent(n) != n) {
 	if (ND_UF_parent(ND_UF_parent(n)))
 	    ND_UF_parent(n) = ND_UF_parent(ND_UF_parent(n));
 	n = ND_UF_parent(n);
@@ -181,13 +134,6 @@ node_t *UF_union(node_t * u, node_t * v)
     return v;
 }
 
-void UF_remove(node_t * u, node_t * v)
-{
-    assert(ND_UF_size(u) == 1);
-    ND_UF_parent(u) = u;
-    ND_UF_size(v) -= ND_UF_size(u);
-}
-
 void UF_singleton(node_t * u)
 {
     ND_UF_size(u) = 1;
@@ -215,14 +161,13 @@ pointf coord(node_t * n)
 #define W_DEGREE 5
 
 /*
- *  Bezier :
  *	Evaluate a Bezier curve at a particular parameter value
  *      Fill in control points for resulting sub-curves if "Left" and
  *	"Right" are non-null.
  *
  */
-pointf Bezier(pointf * V, int degree, double t, pointf * Left, pointf * Right)
-{
+pointf Bezier(pointf *V, double t, pointf *Left, pointf *Right) {
+    const int degree = 3;
     int i, j;			/* Index variables      */
     pointf Vtemp[W_DEGREE + 1][W_DEGREE + 1];
 
@@ -248,7 +193,7 @@ pointf Bezier(pointf * V, int degree, double t, pointf * Left, pointf * Right)
 	for (j = 0; j <= degree; j++)
 	    Right[j] = Vtemp[degree - j][j];
 
-    return (Vtemp[degree][0]);
+    return Vtemp[degree][0];
 }
 
 #ifdef DEBUG
@@ -259,70 +204,18 @@ edge_t *debug_getedge(graph_t * g, char *s0, char *s1)
     n1 = agfindnode(g, s1);
     if (n0 && n1)
 	return agfindedge(g, n0, n1);
-    else
-	return NULL;
+    return NULL;
 }
 Agraphinfo_t* GD_info(graph_t * g) { return ((Agraphinfo_t*)AGDATA(g));}
 Agnodeinfo_t* ND_info(node_t * n) { return ((Agnodeinfo_t*)AGDATA(n));}
 #endif
-
-#if !defined(_WIN32)
-#include	<pwd.h>
-
-#if 0
-static void cleanup(void)
-{
-    agxbfree(&xb);
-}
-#endif
-#endif
-
-/* Fgets:
- * Read a complete line.
- * Return pointer to line,
- * or 0 on EOF
- */
-char *Fgets(FILE * fp)
-{
-    static int bsize = 0;
-    static char *buf;
-    char *lp;
-    int len;
-
-    len = 0;
-    do {
-	if (bsize - len < BUFSIZ) {
-	    bsize += BUFSIZ;
-	    buf = grealloc(buf, bsize);
-	}
-	lp = fgets(buf + len, bsize - len, fp);
-	if (lp == 0)
-	    break;
-	len += strlen(lp);	/* since lp != NULL, len > 0 */
-    } while (buf[len - 1] != '\n');
-
-    if (len > 0)
-	return buf;
-    else
-	return 0;
-}
 
 /* safefile:
  * Check to make sure it is okay to read in files.
  * It returns NULL if the filename is trivial.
  *
  * If the application has set the SERVER_NAME environment variable,
- * this indicates it is web-active. In this case, it requires that the GV_FILE_PATH
- * environment variable be set. This gives the legal directories
- * from which files may be read. safefile then derives the rightmost component
- * of filename, where components are separated by a slash, backslash or colon,
- * It then checks for the existence of a file consisting of a directory from
- * GV_FILE_PATH followed by the rightmost component of filename. It returns the
- * first such found, or NULL otherwise.
- * The filename returned is thus
- * Gvfilepath concatenated with the last component of filename,
- * where a component is determined by a slash, backslash or colon
- * character.
+ * this indicates it is web-active.
  *
  * If filename contains multiple components, the user is
  * warned, once, that everything to the left is ignored.
@@ -339,163 +232,131 @@ char *Fgets(FILE * fp)
 #define PATHSEP ":"
 #endif
 
-static char** mkDirlist (const char* list, int* maxdirlen)
-{
-    int cnt = 0;
-    char* s = strdup (list);
-    char* dir;
-    char** dirs = NULL;
-    int maxlen = 0;
+static strview_t *mkDirlist(const char *list) {
+    size_t cnt = 0;
+    strview_t *dirs = gv_calloc(1, sizeof(strview_t));
 
-    for (dir = strtok (s, PATHSEP); dir; dir = strtok (NULL, PATHSEP)) {
-	dirs = ALLOC (cnt+2,dirs,char*);
-	dirs[cnt++] = dir;
-	maxlen = MAX(maxlen, strlen (dir));
+    for (tok_t t = tok(list, PATHSEP); !tok_end(&t); tok_next(&t)) {
+        strview_t dir = tok_get(&t);
+        dirs = gv_recalloc(dirs, cnt + 1, cnt + 2, sizeof(strview_t));
+        dirs[cnt++] = dir;
     }
-    dirs[cnt] = NULL;
-    *maxdirlen = maxlen;
     return dirs;
 }
 
-static char* findPath (char** dirs, int maxdirlen, const char* str)
-{
-    static char *safefilename = NULL;
-    char** dp;
+static char *findPath(const strview_t *dirs, const char *str) {
+    static agxbuf safefilename;
 
-	/* allocate a buffer that we are sure is big enough
-         * +1 for null character.
-         * +1 for directory separator character.
-         */
-    safefilename = realloc(safefilename, (maxdirlen + strlen(str) + 2));
-
-    for (dp = dirs; *dp; dp++) {
-	sprintf (safefilename, "%s%s%s", *dp, DIRSEP, str);
-	if (access (safefilename, R_OK) == 0)
-	    return safefilename;
+    for (const strview_t *dp = dirs; dp != NULL && dp->data != NULL; dp++) {
+	agxbprint(&safefilename, "%.*s%s%s", (int)dp->size, dp->data, DIRSEP, str);
+	char *filename = agxbuse(&safefilename);
+	if (access(filename, R_OK) == 0)
+	    return filename;
     }
     return NULL;
 }
 
 const char *safefile(const char *filename)
 {
-    static boolean onetime = TRUE;
+    static bool onetime = true;
     static char *pathlist = NULL;
-    static int maxdirlen;
-    static char** dirs;
-    const char *str, *p;
+    static strview_t *dirs;
 
     if (!filename || !filename[0])
 	return NULL;
 
     if (HTTPServerEnVar) {   /* If used as a server */
-	/*
-	 * If we are running in an http server we allow
-	 * files only from the directory specified in
-	 * the GV_FILE_PATH environment variable.
-	 */
-	if (!Gvfilepath || (*Gvfilepath == '\0')) {
-	    if (onetime) {
-		agerr(AGWARN,
-		      "file loading is disabled because the environment contains SERVER_NAME=\"%s\"\n"
-		      "and the GV_FILE_PATH variable is unset or empty.\n",
+	if (onetime) {
+	    agwarningf(
+		      "file loading is disabled because the environment contains SERVER_NAME=\"%s\"\n",
 		      HTTPServerEnVar);
-		onetime = FALSE;
-	    }
-	    return NULL;
+	    onetime = false;
 	}
-	if (!pathlist) {
-	    dirs = mkDirlist (Gvfilepath, &maxdirlen);
+	return NULL;
+    }
+
+    if (Gvfilepath != NULL) {
+	if (pathlist == NULL) {
+	    free(dirs);
 	    pathlist = Gvfilepath;
+	    dirs = mkDirlist(pathlist);
 	}
 
-	str = filename;
-	if ((p = strrchr(str, '/')))
-	    str = ++p;
-	if ((p = strrchr(str, '\\')))
-	    str = ++p;
-	if ((p = strrchr(str, ':')))
-	    str = ++p;
-
-	if (onetime && str != filename) {
-	    agerr(AGWARN, "Path provided to file: \"%s\" has been ignored"
-		  " because files are only permitted to be loaded from the directories in \"%s\""
-		  " when running in an http server.\n", filename, Gvfilepath);
-	    onetime = FALSE;
+	const char *str = filename;
+	for (const char *sep = "/\\:"; *sep != '\0'; ++sep) {
+	    const char *p = strrchr(str, *sep);
+	    if (p != NULL) {
+	        str = ++p;
+	    }
 	}
 
-	return findPath (dirs, maxdirlen, str);
+	return findPath(dirs, str);
     }
 
     if (pathlist != Gvimagepath) {
-	if (dirs) {
-	    free (dirs[0]);
-	    free (dirs);
-	    dirs = NULL;
-	}
+	free (dirs);
+	dirs = NULL;
 	pathlist = Gvimagepath;
 	if (pathlist && *pathlist)
-	    dirs = mkDirlist (pathlist, &maxdirlen);
+	    dirs = mkDirlist(pathlist);
     }
 
-    if ((*filename == DIRSEP[0]) || !dirs)
+    if (*filename == DIRSEP[0] || !dirs)
 	return filename;
 
-    return findPath (dirs, maxdirlen, filename);
+    return findPath(dirs, filename);
 }
 
-int maptoken(char *p, char **name, int *val)
-{
-    int i;
+int maptoken(char *p, char **name, int *val) {
     char *q;
 
-    for (i = 0; (q = name[i]) != 0; i++)
-	if (p && streq(p, q))
-	    break;
+    int i = 0;
+    for (; (q = name[i]) != 0; i++)
+        if (p && streq(p, q))
+            break;
     return val[i];
 }
 
-boolean mapBool(char *p, boolean dflt)
-{
-    if (!p || (*p == '\0'))
-	return dflt;
+bool mapBool(const char *p, bool defaultValue) {
+    if (!p || *p == '\0')
+        return defaultValue;
     if (!strcasecmp(p, "false"))
-	return FALSE;
+	return false;
     if (!strcasecmp(p, "no"))
-	return FALSE;
+	return false;
     if (!strcasecmp(p, "true"))
-	return TRUE;
+	return true;
     if (!strcasecmp(p, "yes"))
-	return TRUE;
-    if (isdigit(*p))
-	return atoi(p);
-    else
-	return dflt;
+	return true;
+    if (gv_isdigit(*p))
+	return atoi(p) != 0;
+    return defaultValue;
 }
 
-boolean mapbool(char *p)
+bool mapbool(const char *p)
 {
-    return mapBool (p, FALSE);
+    return mapBool(p, false);
 }
 
 pointf dotneato_closest(splines * spl, pointf pt)
 {
-    int i, j, k, besti, bestj;
     double bestdist2, d2, dlow2, dhigh2; /* squares of distances */
     double low, high, t;
     pointf c[4], pt2;
     bezier bz;
 
-    besti = bestj = -1;
+    size_t besti = SIZE_MAX;
+    size_t bestj = SIZE_MAX;
     bestdist2 = 1e+38;
-    for (i = 0; i < spl->size; i++) {
+    for (size_t i = 0; i < spl->size; i++) {
 	bz = spl->list[i];
-	for (j = 0; j < bz.size; j++) {
+	for (size_t j = 0; j < bz.size; j++) {
 	    pointf b;
 
 	    b.x = bz.list[j].x;
 	    b.y = bz.list[j].y;
 	    d2 = DIST2(b, pt);
-	    if ((bestj == -1) || (d2 < bestdist2)) {
+	    if (bestj == SIZE_MAX || d2 < bestdist2) {
 		besti = i;
 		bestj = j;
 		bestdist2 = d2;
@@ -510,8 +371,8 @@ pointf dotneato_closest(splines * spl, pointf pt)
      */
     if (bestj == bz.size-1)
 	bestj--;
-    j = 3*(bestj / 3);
-    for (k = 0; k < 4; k++) {
+    const size_t j = 3 * (bestj / 3);
+    for (size_t k = 0; k < 4; k++) {
 	c[k].x = bz.list[j + k].x;
 	c[k].y = bz.list[j + k].y;
     }
@@ -521,7 +382,7 @@ pointf dotneato_closest(splines * spl, pointf pt)
     dhigh2 = DIST2(c[3], pt);
     do {
 	t = (low + high) / 2.0;
-	pt2 = Bezier(c, 3, t, NULL, NULL);
+	pt2 = Bezier(c, t, NULL, NULL);
 	if (fabs(dlow2 - dhigh2) < 1.0)
 	    break;
 	if (fabs(high - low) < .00001)
@@ -537,88 +398,17 @@ pointf dotneato_closest(splines * spl, pointf pt)
     return pt2;
 }
 
-pointf spline_at_y(splines * spl, double y)
-{
-    int i, j;
-    double low, high, d, t;
-    pointf c[4], p;
-    static bezier bz;
-
-/* this caching seems to prevent p.x from getting set from bz.list[0].x
-	- optimizer problem ? */
-
-#if 0
-    static splines *mem = NULL;
-
-    if (mem != spl) {
-	mem = spl;
-#endif
-	for (i = 0; i < spl->size; i++) {
-	    bz = spl->list[i];
-	    if (BETWEEN(bz.list[bz.size - 1].y, y, bz.list[0].y))
-		break;
-	}
-#if 0
-    }
-#endif
-    if (y > bz.list[0].y)
-	p = bz.list[0];
-    else if (y < bz.list[bz.size - 1].y)
-	p = bz.list[bz.size - 1];
-    else {
-	for (i = 0; i < bz.size; i += 3) {
-	    for (j = 0; j < 3; j++) {
-		if ((bz.list[i + j].y <= y) && (y <= bz.list[i + j + 1].y))
-		    break;
-		if ((bz.list[i + j].y >= y) && (y >= bz.list[i + j + 1].y))
-		    break;
-	    }
-	    if (j < 3)
-		break;
-	}
-	assert(i < bz.size);
-	for (j = 0; j < 4; j++) {
-	    c[j].x = bz.list[i + j].x;
-	    c[j].y = bz.list[i + j].y;
-	    /* make the spline be monotonic in Y, awful but it works for now */
-	    if ((j > 0) && (c[j].y > c[j - 1].y))
-		c[j].y = c[j - 1].y;
-	}
-	low = 0.0;
-	high = 1.0;
-	do {
-	    t = (low + high) / 2.0;
-	    p = Bezier(c, 3, t, NULL, NULL);
-	    d = p.y - y;
-	    if (ABS(d) <= 1)
-		break;
-	    if (d < 0)
-		high = t;
-	    else
-		low = t;
-	} while (1);
-    }
-    p.y = y;
-    return p;
-}
-
-pointf neato_closest(splines * spl, pointf p)
-{
-/* this is a stub so that we can share a common emit.c between dot and neato */
-
-    return spline_at_y(spl, p.y);
-}
-
 static int Tflag;
 void gvToggle(int s)
 {
+    (void)s;
     Tflag = !Tflag;
 #if !defined(_WIN32)
     signal(SIGUSR1, gvToggle);
 #endif
 }
 
-int test_toggle()
+int test_toggle(void)
 {
     return Tflag;
 }
@@ -643,16 +433,19 @@ void common_init_node(node_t * n)
     fi.fontsize = late_double(n, N_fontsize, DEFAULT_FONTSIZE, MIN_FONTSIZE);
     fi.fontname = late_nnstring(n, N_fontname, DEFAULT_FONTNAME);
     fi.fontcolor = late_nnstring(n, N_fontcolor, DEFAULT_COLOR);
-    ND_label(n) = make_label((void*)n, str,
-	        ((aghtmlstr(str) ? LT_HTML : LT_NONE) | ( (shapeOf(n) == SH_RECORD) ? LT_RECD : LT_NONE)),
+    ND_label(n) = make_label(n, str,
+	        (aghtmlstr(str) ? LT_HTML : LT_NONE) | ( (shapeOf(n) == SH_RECORD) ? LT_RECD : LT_NONE),
 		fi.fontsize, fi.fontname, fi.fontcolor);
-    if (N_xlabel && (str = agxget(n, N_xlabel)) && (str[0])) {
-	ND_xlabel(n) = make_label((void*)n, str, (aghtmlstr(str) ? LT_HTML : LT_NONE),
+    if (N_xlabel && (str = agxget(n, N_xlabel)) && str[0]) {
+	ND_xlabel(n) = make_label(n, str, aghtmlstr(str) ? LT_HTML : LT_NONE,
 				fi.fontsize, fi.fontname, fi.fontcolor);
 	GD_has_labels(agraphof(n)) |= NODE_XLABEL;
     }
 
-    ND_showboxes(n) = late_int(n, N_showboxes, 0, 0);
+    {
+	const int showboxes = imin(late_int(n, N_showboxes, 0, 0), UCHAR_MAX);
+	ND_showboxes(n) = (unsigned char)showboxes;
+    }
     ND_shape(n)->fns->initfn(n);
 }
 
@@ -673,26 +466,21 @@ initFontLabelEdgeAttr(edge_t * e, struct fontinfo *fi,
     lfi->fontcolor = late_nnstring(e, E_labelfontcolor, fi->fontcolor);
 }
 
-/* noClip:
- * Return true if head/tail end of edge should not be clipped
- * to node.
- */
-static boolean
+/// Return true if head/tail end of edge should not be clipped to node.
+static bool
 noClip(edge_t *e, attrsym_t* sym)
 {
     char		*str;
-    boolean		rv = FALSE;
+    bool rv = false;
 
     if (sym) {	/* mapbool isn't a good fit, because we want "" to mean true */
 	str = agxget(e,sym);
 	if (str && str[0]) rv = !mapbool(str);
-	else rv = FALSE;
+	else rv = false;
     }
     return rv;
 }
 
-/*chkPort:
- */
 static port
 chkPort (port (*pf)(node_t*, char*, char*), node_t* n, char* s)
 {
@@ -714,50 +502,46 @@ chkPort (port (*pf)(node_t*, char*, char*), node_t* n, char* s)
 }
 
 /* return true if edge has label */
-int common_init_edge(edge_t * e)
-{
+void common_init_edge(edge_t *e) {
     char *str;
-    int r = 0;
     struct fontinfo fi;
     struct fontinfo lfi;
     graph_t *sg = agraphof(agtail(e));
 
     fi.fontname = NULL;
     lfi.fontname = NULL;
-    if (E_label && (str = agxget(e, E_label)) && (str[0])) {
-	r = 1;
+    if (E_label && (str = agxget(e, E_label))) {
 	initFontEdgeAttr(e, &fi);
-	ED_label(e) = make_label((void*)e, str, (aghtmlstr(str) ? LT_HTML : LT_NONE),
+	const int kind = !streq(str, "") && aghtmlstr(str) ? LT_HTML : LT_NONE;
+	ED_label(e) = make_label(e, str, kind,
 				fi.fontsize, fi.fontname, fi.fontcolor);
-	GD_has_labels(sg) |= EDGE_LABEL;
-	ED_label_ontop(e) =
-	    mapbool(late_string(e, E_label_float, "false"));
+	if (!streq(str, "")) {
+	    GD_has_labels(sg) |= EDGE_LABEL;
+	    ED_label_ontop(e) = mapbool(late_string(e, E_label_float, "false"));
+	}
     }
 
-    if (E_xlabel && (str = agxget(e, E_xlabel)) && (str[0])) {
+    if (E_xlabel && (str = agxget(e, E_xlabel)) && str[0]) {
 	if (!fi.fontname)
 	    initFontEdgeAttr(e, &fi);
-	ED_xlabel(e) = make_label((void*)e, str, (aghtmlstr(str) ? LT_HTML : LT_NONE),
+	ED_xlabel(e) = make_label(e, str, aghtmlstr(str) ? LT_HTML : LT_NONE,
 				fi.fontsize, fi.fontname, fi.fontcolor);
 	GD_has_labels(sg) |= EDGE_XLABEL;
     }
 
-
-    /* vladimir */
-    if (E_headlabel && (str = agxget(e, E_headlabel)) && (str[0])) {
+    if (E_headlabel && (str = agxget(e, E_headlabel)) && str[0]) {
 	initFontLabelEdgeAttr(e, &fi, &lfi);
-	ED_head_label(e) = make_label((void*)e, str, (aghtmlstr(str) ? LT_HTML : LT_NONE),
+	ED_head_label(e) = make_label(e, str, aghtmlstr(str) ? LT_HTML : LT_NONE,
 				lfi.fontsize, lfi.fontname, lfi.fontcolor);
 	GD_has_labels(sg) |= HEAD_LABEL;
     }
-    if (E_taillabel && (str = agxget(e, E_taillabel)) && (str[0])) {
+    if (E_taillabel && (str = agxget(e, E_taillabel)) && str[0]) {
 	if (!lfi.fontname)
 	    initFontLabelEdgeAttr(e, &fi, &lfi);
-	ED_tail_label(e) = make_label((void*)e, str, (aghtmlstr(str) ? LT_HTML : LT_NONE),
+	ED_tail_label(e) = make_label(e, str, aghtmlstr(str) ? LT_HTML : LT_NONE,
 				lfi.fontsize, lfi.fontname, lfi.fontcolor);
 	GD_has_labels(sg) |= TAIL_LABEL;
     }
-    /* end vladimir */
 
     /* We still accept ports beginning with colons but this is deprecated
      * That is, we allow tailport = ":abc" as well as the preferred
@@ -767,25 +551,21 @@ int common_init_edge(edge_t * e)
     /* libgraph always defines tailport/headport; libcgraph doesn't */
     if (!str) str = "";
     if (str && str[0])
-	ND_has_port(agtail(e)) = TRUE;
+	ND_has_port(agtail(e)) = true;
     ED_tail_port(e) = chkPort (ND_shape(agtail(e))->fns->portfn, agtail(e), str);
     if (noClip(e, E_tailclip))
-	ED_tail_port(e).clip = FALSE;
+	ED_tail_port(e).clip = false;
     str = agget(e, HEAD_ID);
     /* libgraph always defines tailport/headport; libcgraph doesn't */
     if (!str) str = "";
     if (str && str[0])
-	ND_has_port(aghead(e)) = TRUE;
+	ND_has_port(aghead(e)) = true;
     ED_head_port(e) = chkPort(ND_shape(aghead(e))->fns->portfn, aghead(e), str);
     if (noClip(e, E_headclip))
-	ED_head_port(e).clip = FALSE;
-
-    return r;
+	ED_head_port(e).clip = false;
 }
 
-/* addLabelBB:
- */
-static boxf addLabelBB(boxf bb, textlabel_t * lp, boolean flipxy)
+static boxf addLabelBB(boxf bb, textlabel_t * lp, bool flipxy)
 {
     double width, height;
     pointf p = lp->pos;
@@ -816,20 +596,19 @@ static boxf addLabelBB(boxf bb, textlabel_t * lp, boolean flipxy)
     return bb;
 }
 
-/* polyBB:
- * Compute the bounding box of a polygon.
+/** Compute the bounding box of a polygon.
  * We only need to use the outer periphery.
  */
 boxf
 polyBB (polygon_t* poly)
 {
-    int i, sides = poly->sides;
-    int peris = MAX(poly->peripheries,1);
+    const size_t sides = poly->sides;
+    const size_t peris = MAX(poly->peripheries, 1ul);
     pointf* verts = poly->vertices + (peris-1)*sides;
     boxf bb;
 
     bb.LL = bb.UR = verts[0];
-    for (i = 1; i < sides; i++) {
+    for (size_t i = 1; i < sides; i++) {
 	bb.LL.x = MIN(bb.LL.x,verts[i].x);
 	bb.LL.y = MIN(bb.LL.y,verts[i].y);
 	bb.UR.x = MAX(bb.UR.x,verts[i].x);
@@ -838,8 +617,7 @@ polyBB (polygon_t* poly)
     return bb;
 }
 
-/* updateBB:
- * Reset graph's bounding box to include bounding box of the given label.
+/** Reset graph's bounding box to include bounding box of the given label.
  * Assume the label's position has been set.
  */
 void updateBB(graph_t * g, textlabel_t * lp)
@@ -847,8 +625,7 @@ void updateBB(graph_t * g, textlabel_t * lp)
     GD_bb(g) = addLabelBB(GD_bb(g), lp, GD_flip(g));
 }
 
-/* compute_bb:
- * Compute bounding box of g using nodes, splines, and clusters.
+/** Compute bounding box of g using nodes, splines, and clusters.
  * Assumes bb of clusters already computed.
  * store in GD_bb.
  */
@@ -859,16 +636,15 @@ void compute_bb(graph_t * g)
     boxf b, bb;
     boxf BF;
     pointf ptf, s2;
-    int i, j;
 
-    if ((agnnodes(g) == 0) && (GD_n_cluster(g) ==0)) {
-	bb.LL = pointfof(0, 0);
-	bb.UR = pointfof(0, 0);
+    if (agnnodes(g) == 0 && GD_n_cluster(g) == 0) {
+	bb.LL = (pointf){0};
+	bb.UR = (pointf){0};
 	return;
     }
 
-    bb.LL = pointfof(INT_MAX, INT_MAX);
-    bb.UR = pointfof(-INT_MAX, -INT_MAX);
+    bb.LL = (pointf){INT_MAX, INT_MAX};
+    bb.UR = (pointf){-INT_MAX, -INT_MAX};
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	ptf = coord(n);
 	s2.x = ND_xsize(n) / 2.0;
@@ -883,8 +659,8 @@ void compute_bb(graph_t * g)
 	for (e = agfstout(g, n); e; e = agnxtout(g, e)) {
 	    if (ED_spl(e) == 0)
 		continue;
-	    for (i = 0; i < ED_spl(e)->size; i++) {
-		for (j = 0; j < (((Agedgeinfo_t*)AGDATA(e))->spl)->list[i].size; j++) {
+	    for (size_t i = 0; i < ED_spl(e)->size; i++) {
+		for (size_t j = 0; j < (((Agedgeinfo_t*)AGDATA(e))->spl)->list[i].size; j++) {
 		    ptf = ED_spl(e)->list[i].list[j];
 		    EXPANDBP(bb,ptf);
 		}
@@ -904,7 +680,7 @@ void compute_bb(graph_t * g)
 	}
     }
 
-    for (i = 1; i <= GD_n_cluster(g); i++) {
+    for (int i = 1; i <= GD_n_cluster(g); i++) {
 	B2BF(GD_bb(GD_clust(g)[i]), BF);
 	EXPANDBB(bb,BF);
     }
@@ -915,13 +691,13 @@ void compute_bb(graph_t * g)
     GD_bb(g) = bb;
 }
 
-int is_a_cluster (Agraph_t* g)
+bool is_a_cluster (Agraph_t* g)
 {
-    return ((g == g->root) || (!strncasecmp(agnameof(g), "cluster", 7)) || mapBool(agget(g,"cluster"),FALSE));
+  return g == g->root || !strncasecmp(agnameof(g), "cluster", 7) ||
+         mapbool(agget(g, "cluster"));
 }
 
-/* setAttr:
- * Sets object's name attribute to the given value.
+/** Sets object's name attribute to the given value.
  * Creates the attribute if not already set.
  */
 Agsym_t *setAttr(graph_t * g, void *obj, char *name, char *value,
@@ -944,8 +720,7 @@ Agsym_t *setAttr(graph_t * g, void *obj, char *name, char *value,
     return ap;
 }
 
-/* clustNode:
- * Generate a special cluster node representing the end node
+/** Generate a special cluster node representing the end node
  * of an edge to the cluster cg. n is a node whose name is the same
  * as the cluster cg. clg is the subgraph of all of
  * the original nodes, which will be deleted later.
@@ -955,28 +730,20 @@ static node_t *clustNode(node_t * n, graph_t * cg, agxbuf * xb,
 {
     node_t *cn;
     static int idx = 0;
-    char num[100];
 
-    agxbput(xb, "__");
-    sprintf(num, "%d", idx++);
-    agxbput(xb, num);
-    agxbputc(xb, ':');
-    agxbput(xb, agnameof(cg));
+    agxbprint(xb, "__%d:%s", idx++, agnameof(cg));
 
     cn = agnode(agroot(cg), agxbuse(xb), 1);
-    agbindrec(cn, "Agnodeinfo_t", sizeof(Agnodeinfo_t), TRUE);
+    agbindrec(cn, "Agnodeinfo_t", sizeof(Agnodeinfo_t), true);
 
     SET_CLUST_NODE(cn);
 	agsubnode(cg,cn,1);
-	//aginsert(cg, cn);
 	agsubnode(clg,n,1);
-	//aginsert(clg, n);
 
     /* set attributes */
     N_label = setAttr(agraphof(cn), cn, "label", "", N_label);
     N_style = setAttr(agraphof(cn), cn, "style", "invis", N_style);
     N_shape = setAttr(agraphof(cn), cn, "shape", "box", N_shape);
-    /* N_width = setAttr (cn->graph, cn, "width", "0.0001", N_width); */
 
     return cn;
 }
@@ -990,28 +757,24 @@ typedef struct {
 
 static int cmpItem(Dt_t * d, void *p1[], void *p2[], Dtdisc_t * disc)
 {
-    NOTUSED(d);
-    NOTUSED(disc);
+    (void)d;
+    (void)disc;
 
     if (p1[0] < p2[0])
 	return -1;
-    else if (p1[0] > p2[0])
+    if (p1[0] > p2[0])
 	return 1;
-    else if (p1[1] < p2[1])
+    if (p1[1] < p2[1])
 	return -1;
-    else if (p1[1] > p2[1])
+    if (p1[1] > p2[1])
 	return 1;
-    else
-	return 0;
+    return 0;
 }
 
-/* newItem:
- */
-static void *newItem(Dt_t * d, item * objp, Dtdisc_t * disc)
-{
-    item *newp = NEW(item);
+static void *newItem(item *objp, Dtdisc_t *disc) {
+    item *newp = gv_alloc(sizeof(item));
 
-    NOTUSED(disc);
+    (void)disc;
     newp->p[0] = objp->p[0];
     newp->p[1] = objp->p[1];
     newp->t = objp->t;
@@ -1020,41 +783,32 @@ static void *newItem(Dt_t * d, item * objp, Dtdisc_t * disc)
     return newp;
 }
 
-/* freeItem:
- */
-static void freeItem(Dt_t * d, item * obj, Dtdisc_t * disc)
-{
+static void freeItem(item *obj, Dtdisc_t *disc) {
+    (void)disc;
     free(obj);
 }
 
 static Dtdisc_t mapDisc = {
-    offsetof(item, p),
-    sizeof(2 * sizeof(void *)),
-    offsetof(item, link),
-    (Dtmake_f) newItem,
-    (Dtfree_f) freeItem,
-    (Dtcompar_f) cmpItem,
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .key = offsetof(item, p),
+    .size = sizeof(2 * sizeof(void *)),
+    .link = offsetof(item, link),
+    .makef = (Dtmake_f)newItem,
+    .freef = (Dtfree_f)freeItem,
+    .comparf = (Dtcompar_f)cmpItem,
 };
 
-/* cloneEdge:
- * Make a copy of e in e's graph but using ct and ch as nodes
- */
+/// Make a copy of e in e's graph but using ct and ch as nodes
 static edge_t *cloneEdge(edge_t * e, node_t * ct, node_t * ch)
 {
     graph_t *g = agraphof(ct);
     edge_t *ce = agedge(g, ct, ch,NULL,1);
-    agbindrec(ce, "Agedgeinfo_t", sizeof(Agedgeinfo_t), TRUE);
+    agbindrec(ce, "Agedgeinfo_t", sizeof(Agedgeinfo_t), true);
     agcopyattr(e, ce);
-    ED_compound(ce) = TRUE;
+    ED_compound(ce) = true;
 
     return ce;
 }
 
-/* insertEdge:
- */
 static void insertEdge(Dt_t * map, void *t, void *h, edge_t * e)
 {
     item dummy;
@@ -1072,21 +826,17 @@ static void insertEdge(Dt_t * map, void *t, void *h, edge_t * e)
     dtinsert(map, &dummy);
 }
 
-/* mapEdge:
- * Check if we already have cluster edge corresponding to t->h,
- * and return it.
- */
+/// Check if we already have cluster edge corresponding to t->h, and return it.
 static item *mapEdge(Dt_t * map, edge_t * e)
 {
     void *key[2];
 
     key[0] = agtail(e);
     key[1] = aghead(e);
-    return (item *) dtmatch(map, &key);
+    return dtmatch(map, &key);
 }
 
-/* checkCompound:
- * If endpoint names a cluster, mark for temporary deletion and create
+/** If endpoint names a cluster, mark for temporary deletion and create
  * special node and insert into cluster. Then clone the edge. Real edge
  * will be deleted when we delete the original node.
  * Invariant: new edge has same sense as old. That is, given t->h with
@@ -1101,7 +851,7 @@ static item *mapEdge(Dt_t * map, edge_t * e)
  *
  * Return 1 if cluster edge is created.
  */
-#define MAPC(n) (strncmp(agnameof(n),"cluster",7)?NULL:findCluster(cmap,agnameof(n)))
+#define MAPC(n) (startswith(agnameof(n), "cluster") ? findCluster(cmap, agnameof(n)) : NULL)
 
 static int
 checkCompound(edge_t * e, graph_t * clg, agxbuf * xb, Dt_t * map, Dt_t* cmap)
@@ -1121,7 +871,7 @@ checkCompound(edge_t * e, graph_t * clg, agxbuf * xb, Dt_t * map, Dt_t* cmap)
     if (!tg && !hg)
 	return 0;
     if (tg == hg) {
-	agerr(AGWARN, "cluster cycle %s -- %s not supported\n", agnameof(t),
+	agwarningf("cluster cycle %s -- %s not supported\n", agnameof(t),
 	      agnameof(t));
 	return 0;
     }
@@ -1134,12 +884,12 @@ checkCompound(edge_t * e, graph_t * clg, agxbuf * xb, Dt_t * map, Dt_t* cmap)
     if (hg) {
 	if (tg) {
 	    if (agcontains(hg, tg)) {
-		agerr(AGWARN, "tail cluster %s inside head cluster %s\n",
+		agwarningf("tail cluster %s inside head cluster %s\n",
 		      agnameof(tg), agnameof(hg));
 		return 0;
 	    }
 	    if (agcontains(tg, hg)) {
-		agerr(AGWARN, "head cluster %s inside tail cluster %s\n",
+		agwarningf("head cluster %s inside tail cluster %s\n",
 		      agnameof(hg),agnameof(tg));
 		return 0;
 	    }
@@ -1149,7 +899,7 @@ checkCompound(edge_t * e, graph_t * clg, agxbuf * xb, Dt_t * map, Dt_t* cmap)
 	    insertEdge(map, t, h, ce);
 	} else {
 	    if (agcontains(hg, t)) {
-		agerr(AGWARN, "tail node %s inside head cluster %s\n",
+		agwarningf("tail node %s inside head cluster %s\n",
 		      agnameof(t), agnameof(hg));
 		return 0;
 	    }
@@ -1159,7 +909,7 @@ checkCompound(edge_t * e, graph_t * clg, agxbuf * xb, Dt_t * map, Dt_t* cmap)
 	}
     } else {
 	if (agcontains(tg, h)) {
-	    agerr(AGWARN, "head node %s inside tail cluster %s\n", agnameof(h),
+	    agwarningf("head node %s inside tail cluster %s\n", agnameof(h),
 		  agnameof(tg));
 	    return 0;
 	}
@@ -1181,12 +931,10 @@ num_clust_edges(graph_t * g)
     cl_edge_t* cl_info = (cl_edge_t*)HAS_CLUST_EDGE(g);
     if (cl_info)
 	return cl_info->n_cluster_edges;
-    else
-	return 0;
+    return 0;
 }
 
-/* processClusterEdges:
- * Look for cluster edges. Replace cluster edge endpoints
+/** Look for cluster edges. Replace cluster edge endpoints
  * corresponding to a cluster with special cluster nodes.
  * Delete original nodes.
  * If cluster edges are found, a cl_edge_t record will be
@@ -1199,15 +947,13 @@ void processClusterEdges(graph_t * g)
     node_t *nxt;
     edge_t *e;
     graph_t *clg;
-    agxbuf xb;
+    agxbuf xb = {0};
     Dt_t *map;
     Dt_t *cmap = mkClustMap (g);
-    unsigned char buf[SMALLBUF];
 
     map = dtopen(&mapDisc, Dtoset);
     clg = agsubg(g, "__clusternodes",1);
-    agbindrec(clg, "Agraphinfo_t", sizeof(Agraphinfo_t), TRUE);
-    agxbinit(&xb, SMALLBUF, buf);
+    agbindrec(clg, "Agraphinfo_t", sizeof(Agraphinfo_t), true);
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	if (IS_CLUST_NODE(n)) continue;
 	for (e = agfstout(g, n); e; e = agnxtout(g, e)) {
@@ -1223,14 +969,13 @@ void processClusterEdges(graph_t * g)
     agclose(clg);
     if (num_cl_edges) {
 	cl_edge_t* cl_info;
-	cl_info = agbindrec(g, CL_EDGE_TAG, sizeof(cl_edge_t), FALSE);
+	cl_info = agbindrec(g, CL_EDGE_TAG, sizeof(cl_edge_t), false);
 	cl_info->n_cluster_edges = num_cl_edges;
     }
     dtclose(cmap);
 }
 
-/* mapN:
- * Convert cluster nodes back to ordinary nodes
+/** Convert cluster nodes back to ordinary nodes
  * If n is already ordinary, return it.
  * Otherwise, we know node's name is "__i:xxx"
  * where i is some number and xxx is the nodes's original name.
@@ -1244,7 +989,7 @@ static node_t *mapN(node_t * n, graph_t * clg)
     graph_t *g = agraphof(n);
     Agsym_t *sym;
 
-    if (!(IS_CLUST_NODE(n)))
+    if (!IS_CLUST_NODE(n))
 	return n;
     agsubnode(clg, n, 1);
     name = strchr(agnameof(n), ':');
@@ -1253,7 +998,7 @@ static node_t *mapN(node_t * n, graph_t * clg)
     if ((nn = agfindnode(g, name)))
 	return nn;
     nn = agnode(g, name, 1);
-    agbindrec(nn, "Agnodeinfo_t", sizeof(Agnodeinfo_t), TRUE);
+    agbindrec(nn, "Agnodeinfo_t", sizeof(Agnodeinfo_t), true);
     SET_CLUST_NODE(nn);
 
     /* Set all attributes to default */
@@ -1290,8 +1035,7 @@ static void undoCompound(edge_t * e, graph_t * clg)
     gv_cleanup_edge(e);
 }
 
-/* undoClusterEdges:
- * Replace cluster nodes with originals. Make sure original has
+/** Replace cluster nodes with originals. Make sure original has
  * no attributes. Replace original edges. Delete cluster nodes,
  * which will also delete cluster edges.
  */
@@ -1301,24 +1045,23 @@ void undoClusterEdges(graph_t * g)
     node_t *nextn;
     edge_t *e;
     graph_t *clg;
-    edge_t **elist;
     int ecnt = num_clust_edges(g);
     int i = 0;
 
     if (!ecnt) return;
     clg = agsubg(g, "__clusternodes",1);
-    agbindrec(clg, "Agraphinfo_t", sizeof(Agraphinfo_t), TRUE);
-    elist = N_NEW(ecnt, edge_t*);
+    agbindrec(clg, "Agraphinfo_t", sizeof(Agraphinfo_t), true);
+    edge_t **edgelist = gv_calloc(ecnt, sizeof(edge_t*));
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	for (e = agfstout(g, n); e; e = agnxtout(g, e)) {
 	    if (ED_compound(e))
-		elist[i++] = e;
+		edgelist[i++] = e;
 	}
     }
     assert(i == ecnt);
     for (i = 0; i < ecnt; i++)
-	undoCompound(elist[i], clg);
-    free (elist);
+	undoCompound(edgelist[i], clg);
+    free (edgelist);
     for (n = agfstnode(clg); n; n = nextn) {
 	nextn = agnxtnode(clg, n);
 	gv_cleanup_node(n);
@@ -1327,57 +1070,47 @@ void undoClusterEdges(graph_t * g)
     agclose(clg);
 }
 
-/* safe_dcl:
- * Find the attribute belonging to graph g for objects like obj
+/** Find the attribute belonging to graph g for objects like obj
  * with given name. If one does not exist, create it with the
- * default value def.
+ * default value defaultValue.
  */
-attrsym_t*
-safe_dcl(graph_t * g, int obj_kind, char *name, char *def)
-{
+attrsym_t *safe_dcl(graph_t *g, int obj_kind, char *name, char *defaultValue) {
     attrsym_t *a = agattr(g,obj_kind,name, NULL);
     if (!a)	/* attribute does not exist */
-	a = agattr(g,obj_kind,name,def);
+        a = agattr(g, obj_kind, name, defaultValue);
     return a;
 }
 
 static int comp_entities(const void *e1, const void *e2) {
-  return strcmp(((struct entities_s *)e1)->name, ((struct entities_s *)e2)->name);
+  return strcmp(e1, ((const struct entities_s *)e2)->name);
 }
 
 #define MAXENTLEN 8
 
-/* scanEntity:
- * Scan non-numeric entity, convert to &#...; form and store in xbuf.
+/** Scan non-numeric entity, convert to &#...; form and store in xbuf.
  * t points to first char after '&'. Return after final semicolon.
  * If unknown, we return t and let libexpat flag the error.
  *     */
 char* scanEntity (char* t, agxbuf* xb)
 {
     char*  endp = strchr (t, ';');
-    struct entities_s key, *res;
-    int    len;
+    struct entities_s *res;
+    size_t len;
     char   buf[MAXENTLEN+1];
 
     agxbputc(xb, '&');
     if (!endp) return t;
-    if (((len = endp-t) > MAXENTLEN) || (len < 2)) return t;
+    if ((len = (size_t)(endp - t)) > MAXENTLEN || len < 2) return t;
     strncpy (buf, t, len);
     buf[len] = '\0';
-    key.name =  buf;
-    res = bsearch(&key, entities, NR_OF_ENTITIES,
+    res = bsearch(buf, entities, NR_OF_ENTITIES,
         sizeof(entities[0]), comp_entities);
     if (!res) return t;
-    sprintf (buf, "%d", res->value);
-    agxbputc(xb, '#');
-    agxbput(xb, buf);
-    agxbputc(xb, ';');
-    return (endp+1);
+    agxbprint(xb, "#%d;", res->value);
+    return endp + 1;
 }
 
-
-/* htmlEntity:
- * Check for an HTML entity for a special character.
+/** Check for an HTML entity for a special character.
  * Assume *s points to first byte after '&'.
  * If successful, return the corresponding value and update s to
  * point after the terminating ';'.
@@ -1387,7 +1120,7 @@ static int
 htmlEntity (char** s)
 {
     char *p;
-    struct entities_s key, *res;
+    struct entities_s *res;
     char entity_name_buf[ENTITY_NAME_LENGTH_MAX+1];
     unsigned char* str = *(unsigned char**)s;
     unsigned int byte;
@@ -1407,14 +1140,14 @@ htmlEntity (char** s)
                     byte = byte - '0';
 		else
                     break;
-		n = (n * 16) + byte;
+		n = n * 16 + (int)byte;
 	    }
 	}
 	else {
 	    for (i = 1; i < 8; i++) {
 		byte = *(str + i);
 		if (byte >= '0' && byte <= '9')
-		    n = (n * 10) + (byte - '0');
+		    n = n * 10 + ((int)byte - '0');
 		else
 		    break;
 	    }
@@ -1427,21 +1160,21 @@ htmlEntity (char** s)
 	}
     }
     else {
-	key.name = p = entity_name_buf;
+	p = entity_name_buf;
 	for (i = 0; i <  ENTITY_NAME_LENGTH_MAX; i++) {
 	    byte = *(str + i);
 	    if (byte == '\0') break;
 	    if (byte == ';') {
 		*p++ = '\0';
-		res = bsearch(&key, entities, NR_OF_ENTITIES,
-		    sizeof(entities[0]), *comp_entities);
+		res = bsearch(entity_name_buf, entities, NR_OF_ENTITIES,
+		    sizeof(entities[0]), comp_entities);
 		if (res) {
 		    n = res->value;
 		    str += i+1;
 		}
 		break;
 	    }
-	    *p++ = byte;
+	    *p++ = (char)byte;
 	}
     }
     *s = (char*)str;
@@ -1452,15 +1185,13 @@ static unsigned char
 cvtAndAppend (unsigned char c, agxbuf* xb)
 {
     char buf[2];
-    char* s;
-    char* p;
-    int len;
 
     buf[0] = c;
     buf[1] = '\0';
 
-    p = s = latin1ToUTF8 (buf);
-    len = strlen(s);
+    char *s = latin1ToUTF8(buf);
+    char *p = s;
+    size_t len = strlen(s);
     while (len-- > 1)
 	agxbputc(xb, *p++);
     c = *p;
@@ -1468,18 +1199,14 @@ cvtAndAppend (unsigned char c, agxbuf* xb)
     return c;
 }
 
-/* htmlEntityUTF8:
- * substitute html entities like: &#123; and: &amp; with the UTF8 equivalents
+/** substitute html entities like: &#123; and: &amp; with the UTF8 equivalents
  * check for invalid utf8. If found, treat a single byte as Latin-1, convert it to
  * utf8 and warn the user.
  */
 char* htmlEntityUTF8 (char* s, graph_t* g)
 {
     static graph_t* lastg;
-    static boolean warned;
-    char*  ns;
-    agxbuf xb;
-    unsigned char buf[BUFSIZ];
+    static bool warned;
     unsigned char c;
     unsigned int v;
 
@@ -1488,10 +1215,10 @@ char* htmlEntityUTF8 (char* s, graph_t* g)
 
     if (lastg != g) {
 	lastg = g;
-	warned = 0;
+	warned = false;
     }
 
-    agxbinit(&xb, BUFSIZ, buf);
+    agxbuf xb = {0};
 
     while ((c = *(unsigned char*)s++)) {
         if (c < 0xC0)
@@ -1511,8 +1238,8 @@ char* htmlEntityUTF8 (char* s, graph_t* g)
         else {
             uc = -1;
             if (!warned) {
-                agerr(AGWARN, "UTF8 codes > 4 bytes are not currently supported (graph %s) - treated as Latin-1. Perhaps \"-Gcharset=latin1\" is needed?\n", agnameof(g));
-                warned = 1;
+                agwarningf("UTF8 codes > 4 bytes are not currently supported (graph %s) - treated as Latin-1. Perhaps \"-Gcharset=latin1\" is needed?\n", agnameof(g));
+                warned = true;
             }
             c = cvtAndAppend (c, &xb);
         }
@@ -1525,12 +1252,12 @@ char* htmlEntityUTF8 (char* s, graph_t* g)
 		    if (v < 0x7F) /* entity needs 1 byte in UTF8 */
 			c = v;
 		    else if (v < 0x07FF) { /* entity needs 2 bytes in UTF8 */
-			agxbputc(&xb, (v >> 6) | 0xC0);
+			agxbputc(&xb, (char)((v >> 6) | 0xC0));
 			c = (v & 0x3F) | 0x80;
 		    }
 		    else { /* entity needs 3 bytes in UTF8 */
-			agxbputc(&xb, (v >> 12) | 0xE0);
-			agxbputc(&xb, ((v >> 6) & 0x3F) | 0x80);
+			agxbputc(&xb, (char)((v >> 12) | 0xE0));
+			agxbputc(&xb, (char)(((v >> 6) & 0x3F) | 0x80));
 			c = (v & 0x3F) | 0x80;
 		    }
 		    }
@@ -1538,37 +1265,27 @@ char* htmlEntityUTF8 (char* s, graph_t* g)
         else /* copy n byte UTF8 characters */
             for (ui = 0; ui < uc; ++ui)
                 if ((*s & 0xC0) == 0x80) {
-                    agxbputc(&xb, c);
+                    agxbputc(&xb, (char)c);
                     c = *(unsigned char*)s++;
                 }
                 else {
 		            if (!warned) {
-		                agerr(AGWARN, "Invalid %d-byte UTF8 found in input of graph %s - treated as Latin-1. Perhaps \"-Gcharset=latin1\" is needed?\n", uc + 1, agnameof(g));
-		                warned = 1;
+		                agwarningf("Invalid %d-byte UTF8 found in input of graph %s - treated as Latin-1. Perhaps \"-Gcharset=latin1\" is needed?\n", uc + 1, agnameof(g));
+		                warned = true;
 		            }
 		            c = cvtAndAppend (c, &xb);
                     break;
 	            }
-	    agxbputc(&xb, c);
+        agxbputc(&xb, (char)c);
     }
-    ns = strdup (agxbuse(&xb));
-    agxbfree(&xb);
-    return ns;
+    return agxbdisown(&xb);
 }
 
-/* latin1ToUTF8:
- * Converts string from Latin1 encoding to utf8
- * Also translates HTML entities.
- *
- */
+/// Converts string from Latin1 encoding to utf8. Also translates HTML entities.
 char* latin1ToUTF8 (char* s)
 {
-    char*  ns;
-    agxbuf xb;
-    unsigned char buf[BUFSIZ];
-    unsigned int  v;
-
-    agxbinit(&xb, BUFSIZ, buf);
+    agxbuf xb = {0};
+    unsigned int v;
 
     /* Values are either a byte (<= 256) or come from htmlEntity, whose
      * values are all less than 0x07FF, so we need at most 3 bytes.
@@ -1579,247 +1296,173 @@ char* latin1ToUTF8 (char* s)
 	    if (!v) v = '&';
         }
 	if (v < 0x7F)
-	    agxbputc(&xb, v);
+	    agxbputc(&xb, (char)v);
 	else if (v < 0x07FF) {
-	    agxbputc(&xb, (v >> 6) | 0xC0);
-	    agxbputc(&xb, (v & 0x3F) | 0x80);
+	    agxbputc(&xb, (char)((v >> 6) | 0xC0));
+	    agxbputc(&xb, (char)((v & 0x3F) | 0x80));
 	}
 	else {
-	    agxbputc(&xb, (v >> 12) | 0xE0);
-	    agxbputc(&xb, ((v >> 6) & 0x3F) | 0x80);
-	    agxbputc(&xb, (v & 0x3F) | 0x80);
+	    agxbputc(&xb, (char)((v >> 12) | 0xE0));
+	    agxbputc(&xb, (char)(((v >> 6) & 0x3F) | 0x80));
+	    agxbputc(&xb, (char)((v & 0x3F) | 0x80));
 	}
     }
-    ns = strdup (agxbuse(&xb));
-    agxbfree(&xb);
-    return ns;
+    return agxbdisown(&xb);
 }
 
-/* utf8ToLatin1:
- * Converts string from utf8 encoding to Latin1
+/** Converts string from utf8 encoding to Latin1
  * Note that it does not attempt to reproduce HTML entities.
  * We assume the input string comes from latin1ToUTF8.
  */
 char*
 utf8ToLatin1 (char* s)
 {
-    char*  ns;
-    agxbuf xb;
-    unsigned char buf[BUFSIZ];
+    agxbuf xb = {0};
     unsigned char c;
-    unsigned char outc;
-
-    agxbinit(&xb, BUFSIZ, buf);
 
     while ((c = *(unsigned char*)s++)) {
 	if (c < 0x7F)
-	    agxbputc(&xb, c);
+	    agxbputc(&xb, (char)c);
 	else {
-	    outc = (c & 0x03) << 6;
-	    c = *(unsigned char*)s++;
-	    outc = outc | (c & 0x3F);
-	    agxbputc(&xb, outc);
+            unsigned char outc = (c & 0x03) << 6;
+            c = *(unsigned char *)s++;
+            outc = outc | (c & 0x3F);
+	    agxbputc(&xb, (char)outc);
 	}
     }
-    ns = strdup (agxbuse(&xb));
-    agxbfree(&xb);
-    return ns;
+    return agxbdisown(&xb);
 }
 
-boolean overlap_node(node_t *n, boxf b)
-{
-    inside_t ictxt;
-    pointf p;
-
+bool overlap_node(node_t *n, boxf b) {
     if (! OVERLAP(b, ND_bb(n)))
-        return FALSE;
+        return false;
 
-/*  FIXME - need to do something better about CLOSEENOUGH */
-    p = sub_pointf(ND_coord(n), mid_pointf(b.UR, b.LL));
+    /*  FIXME - need to do something better about CLOSEENOUGH */
+    pointf p = sub_pointf(ND_coord(n), mid_pointf(b.UR, b.LL));
 
-    ictxt.s.n = n;
-    ictxt.s.bp = NULL;
+    inside_t ictxt = {.s.n = n};
 
     return ND_shape(n)->fns->insidefn(&ictxt, p);
 }
 
-boolean overlap_label(textlabel_t *lp, boxf b)
+bool overlap_label(textlabel_t *lp, boxf b)
 {
     pointf s;
-    boxf bb;
-
     s.x = lp->dimen.x / 2.;
     s.y = lp->dimen.y / 2.;
-    bb.LL = sub_pointf(lp->pos, s);
-    bb.UR = add_pointf(lp->pos, s);
+    boxf bb = {.LL = sub_pointf(lp->pos, s), .UR = add_pointf(lp->pos, s)};
     return OVERLAP(b, bb);
 }
 
-static boolean overlap_arrow(pointf p, pointf u, double scale, int flag, boxf b)
+static bool overlap_arrow(pointf p, pointf u, double scale, boxf b)
 {
-    if (OVERLAP(b, arrow_bb(p, u, scale, flag))) {
-	/* FIXME - check inside arrow shape */
-	return TRUE;
-    }
-    return FALSE;
+    // FIXME - check inside arrow shape
+    return OVERLAP(b, arrow_bb(p, u, scale));
 }
 
-static boolean overlap_bezier(bezier bz, boxf b)
-{
-    int i;
-    pointf p, u;
-
+static bool overlap_bezier(bezier bz, boxf b) {
     assert(bz.size);
-    u = bz.list[0];
-    for (i = 1; i < bz.size; i++) {
-	p = bz.list[i];
-	if (lineToBox(p, u, b) != -1)
-	    return TRUE;
+    pointf u = bz.list[0];
+    for (size_t i = 1; i < bz.size; i++) {
+        pointf p = bz.list[i];
+        if (lineToBox(p, u, b) != -1)
+            return true;
 	u = p;
     }
 
     /* check arrows */
     if (bz.sflag) {
-	if (overlap_arrow(bz.sp, bz.list[0], 1, bz.sflag, b))
-	    return TRUE;
+	if (overlap_arrow(bz.sp, bz.list[0], 1, b))
+	    return true;
     }
     if (bz.eflag) {
-	if (overlap_arrow(bz.ep, bz.list[bz.size - 1], 1, bz.eflag, b))
-	    return TRUE;
+	if (overlap_arrow(bz.ep, bz.list[bz.size - 1], 1, b))
+	    return true;
     }
-    return FALSE;
+    return false;
 }
 
-boolean overlap_edge(edge_t *e, boxf b)
+bool overlap_edge(edge_t *e, boxf b)
 {
-    int i;
-    splines *spl;
-    textlabel_t *lp;
-
-    spl = ED_spl(e);
+    splines *spl = ED_spl(e);
     if (spl && boxf_overlap(spl->bb, b))
-        for (i = 0; i < spl->size; i++)
+        for (size_t i = 0; i < spl->size; i++)
             if (overlap_bezier(spl->list[i], b))
-                return TRUE;
+                return true;
 
-    lp = ED_label(e);
+    textlabel_t *lp = ED_label(e);
     if (lp && overlap_label(lp, b))
-        return TRUE;
+        return true;
 
-    return FALSE;
+    return false;
 }
 
-/* edgeType:
- * Convert string to edge type.
- */
-int edgeType (char* s, int dflt)
-{
-    int et;
-
-    if (!s || (*s == '\0')) return dflt;
-
-    et = ET_NONE;
-    switch (*s) {
-    case '0' :    /* false */
-	et = ET_LINE;
-	break;
-    case '1' :    /* true */
-    case '2' :
-    case '3' :
-    case '4' :
-    case '5' :
-    case '6' :
-    case '7' :
-    case '8' :
-    case '9' :
-	et = ET_SPLINE;
-	break;
-    case 'c' :
-    case 'C' :
-	if (!strcasecmp (s+1, "urved"))
-	    et = ET_CURVED;
-	else if (!strcasecmp (s+1, "ompound"))
-	    et = ET_COMPOUND;
-	break;
-    case 'f' :
-    case 'F' :
-	if (!strcasecmp (s+1, "alse"))
-	    et = ET_LINE;
-	break;
-    case 'l' :
-    case 'L' :
-	if (!strcasecmp (s+1, "ine"))
-	    et = ET_LINE;
-	break;
-    case 'n' :
-    case 'N' :
-	if (!strcasecmp (s+1, "one")) return et;
-	if (!strcasecmp (s+1, "o")) return ET_LINE;
-	break;
-    case 'o' :
-    case 'O' :
-	if (!strcasecmp (s+1, "rtho"))
-	    et = ET_ORTHO;
-	break;
-    case 'p' :
-    case 'P' :
-	if (!strcasecmp (s+1, "olyline"))
-	    et = ET_PLINE;
-	break;
-    case 's' :
-    case 'S' :
-	if (!strcasecmp (s+1, "pline"))
-	    et = ET_SPLINE;
-	break;
-    case 't' :
-    case 'T' :
-	if (!strcasecmp (s+1, "rue"))
-	    et = ET_SPLINE;
-	break;
-    case 'y' :
-    case 'Y' :
-	if (!strcasecmp (s+1, "es"))
-	    et = ET_SPLINE;
-	break;
+/// Convert string to edge type.
+static int edgeType(const char *s, int defaultValue) {
+    if (s == NULL || strcmp(s, "") == 0) {
+        return defaultValue;
     }
-    if (!et) {
-	agerr(AGWARN, "Unknown \"splines\" value: \"%s\" - ignored\n", s);
-	et = dflt;
+
+    if (*s == '0') { /* false */
+	return EDGETYPE_LINE;
+    } else if (*s >= '1' && *s <= '9') { /* true */
+	return EDGETYPE_SPLINE;
+    } else if (strcasecmp(s, "curved") == 0) {
+	return EDGETYPE_CURVED;
+    } else if (strcasecmp(s, "compound") == 0) {
+	return EDGETYPE_COMPOUND;
+    } else if (strcasecmp(s, "false") == 0) {
+	return EDGETYPE_LINE;
+    } else if (strcasecmp(s, "line") == 0) {
+	return EDGETYPE_LINE;
+    } else if (strcasecmp(s, "none") == 0) {
+	return EDGETYPE_NONE;
+    } else if (strcasecmp(s, "no") == 0) {
+	return EDGETYPE_LINE;
+    } else if (strcasecmp(s, "ortho") == 0) {
+	return EDGETYPE_ORTHO;
+    } else if (strcasecmp(s, "polyline") == 0) {
+	return EDGETYPE_PLINE;
+    } else if (strcasecmp(s, "spline") == 0) {
+	return EDGETYPE_SPLINE;
+    } else if (strcasecmp(s, "true") == 0) {
+	return EDGETYPE_SPLINE;
+    } else if (strcasecmp(s, "yes") == 0) {
+	return EDGETYPE_SPLINE;
     }
-    return et;
+
+    agwarningf("Unknown \"splines\" value: \"%s\" - ignored\n", s);
+    return defaultValue;
 }
 
-/* setEdgeType:
- * Sets graph's edge type based on the "splines" attribute.
- * If the attribute is not defined, use default.
+/** Sets graph's edge type based on the "splines" attribute.
+ * If the attribute is not defined, use defaultValue.
  * If the attribute is "", use NONE.
  * If attribute value matches (case indepedent), use match.
- *   ortho => ET_ORTHO
- *   none => ET_NONE
- *   line => ET_LINE
- *   polyline => ET_PLINE
- *   spline => ET_SPLINE
- * If attribute is boolean, true means ET_SPLINE, false means ET_LINE.
- * Else warn and use default.
+ *   ortho => EDGETYPE_ORTHO
+ *   none => EDGETYPE_NONE
+ *   line => EDGETYPE_LINE
+ *   polyline => EDGETYPE_PLINE
+ *   spline => EDGETYPE_SPLINE
+ * If attribute is boolean, true means EDGETYPE_SPLINE, false means
+ * EDGETYPE_LINE. Else warn and use default.
  */
-void setEdgeType (graph_t* g, int dflt)
-{
+void setEdgeType(graph_t *g, int defaultValue) {
     char* s = agget(g, "splines");
     int et;
 
     if (!s) {
-	et = dflt;
+        et = defaultValue;
     }
     else if (*s == '\0') {
-	et = ET_NONE;
+	et = EDGETYPE_NONE;
+    } else {
+        et = edgeType(s, defaultValue);
     }
-    else et = edgeType (s, dflt);
     GD_flags(g) |= et;
 }
 
-
-/* get_gradient_points
- * Evaluates the extreme points of an ellipse or polygon
+/** Evaluates the extreme points of an ellipse or polygon
  * Determines the point at the center of the extreme points
  * If isRadial is true,sets the inner radius to half the distance to the min point;
  * else uses the angle parameter to identify two points on a line that defines the
@@ -1827,38 +1470,34 @@ void setEdgeType (graph_t* g, int dflt)
  * By default, this assumes a left-hand coordinate system (for svg); if RHS = 2 flag
  * is set, use standard coordinate system.
  */
-void get_gradient_points(pointf * A, pointf * G, int n, float angle, int flags)
-{
-    int i;
-    double rx, ry;
+void get_gradient_points(pointf *A, pointf *G, size_t n, double angle, int flags) {
     pointf min,max,center;
     int isRadial = flags & 1;
     int isRHS = flags & 2;
 
     if (n == 2) {
-      rx = A[1].x - A[0].x;
-      ry = A[1].y - A[0].y;
-      min.x = A[0].x - rx;
-      max.x = A[0].x + rx;
-      min.y = A[0].y - ry;
-      max.y = A[0].y + ry;
+        double rx = A[1].x - A[0].x;
+        double ry = A[1].y - A[0].y;
+        min.x = A[0].x - rx;
+        max.x = A[0].x + rx;
+        min.y = A[0].y - ry;
+        max.y = A[0].y + ry;
     }
     else {
       min.x = max.x = A[0].x;
       min.y = max.y = A[0].y;
-      for (i = 0; i < n; i++){
-	min.x = MIN(A[i].x,min.x);
-	min.y = MIN(A[i].y,min.y);
-	max.x = MAX(A[i].x,max.x);
-	max.y = MAX(A[i].y,max.y);
+      for (size_t i = 0; i < n; i++) {
+            min.x = MIN(A[i].x, min.x);
+            min.y = MIN(A[i].y, min.y);
+            max.x = MAX(A[i].x, max.x);
+            max.y = MAX(A[i].y, max.y);
       }
     }
       center.x = min.x + (max.x - min.x)/2;
       center.y = min.y + (max.y - min.y)/2;
     if (isRadial) {
 	double inner_r, outer_r;
-	outer_r = sqrt((center.x - min.x)*(center.x - min.x) +
-		      (center.y - min.y)*(center.y - min.y));
+	outer_r = hypot(center.x - min.x, center.y - min.y);
 	inner_r = outer_r /4.;
 	if (isRHS) {
 	    G[0].y = center.y;
@@ -1888,58 +1527,9 @@ void get_gradient_points(pointf * A, pointf * G, int n, float angle, int flags)
     }
 }
 
-#ifndef WIN32_STATIC
-#ifndef HAVE_STRCASECMP
-
-
-#include <string.h>
-//#include <ctype.h>
-
-
-int strcasecmp(const char *s1, const char *s2)
-{
-    while ((*s1 != '\0')
-	   && (tolower(*(unsigned char *) s1) ==
-	       tolower(*(unsigned char *) s2))) {
-	s1++;
-	s2++;
-    }
-
-    return tolower(*(unsigned char *) s1) - tolower(*(unsigned char *) s2);
-}
-
-#endif				/* HAVE_STRCASECMP */
-#endif				/* WIN32_STATIC */
-
-#ifndef WIN32_STATIC
-#ifndef HAVE_STRNCASECMP
-#include <string.h>
-//#include <ctype.h>
-
-int strncasecmp(const char *s1, const char *s2, unsigned int n)
-{
-    if (n == 0)
-	return 0;
-
-    while ((n-- != 0)
-	   && (tolower(*(unsigned char *) s1) ==
-	       tolower(*(unsigned char *) s2))) {
-	if (n == 0 || *s1 == '\0' || *s2 == '\0')
-	    return 0;
-	s1++;
-	s2++;
-    }
-
-    return tolower(*(unsigned char *) s1) - tolower(*(unsigned char *) s2);
-}
-
-#endif				/* HAVE_STRNCASECMP */
-#endif                          /* WIN32_STATIC */
-void gv_free_splines(edge_t * e)
-{
-    int i;
+void gv_free_splines(edge_t *e) {
     if (ED_spl(e)) {
-        for (i = 0; i < ED_spl(e)->size; i++)
+        for (size_t i = 0; i < ED_spl(e)->size; i++)
             free(ED_spl(e)->list[i].list);
         free(ED_spl(e)->list);
         free(ED_spl(e));
@@ -1949,63 +1539,41 @@ void gv_free_splines(edge_t * e)
 
 void gv_cleanup_edge(edge_t * e)
 {
-    free (ED_path(e).ps);
+    free(ED_path(e).ps);
     gv_free_splines(e);
     free_label(ED_label(e));
     free_label(ED_xlabel(e));
     free_label(ED_head_label(e));
     free_label(ED_tail_label(e));
-	/*FIX HERE , shallow cleaning may not be enough here */
-	agdelrec(e, "Agedgeinfo_t");
+    /*FIX HERE , shallow cleaning may not be enough here */
+    agdelrec(e, "Agedgeinfo_t");
 }
 
 void gv_cleanup_node(node_t * n)
 {
-    if (ND_pos(n)) free(ND_pos(n));
+    free(ND_pos(n));
     if (ND_shape(n))
         ND_shape(n)->fns->freefn(n);
     free_label(ND_label(n));
     free_label(ND_xlabel(n));
-	/*FIX HERE , shallow cleaning may not be enough here */
-	agdelrec(n, "Agnodeinfo_t");
+    /*FIX HERE , shallow cleaning may not be enough here */
+    agdelrec(n, "Agnodeinfo_t");
 }
 
-void gv_nodesize(node_t * n, boolean flip)
-{
-    double w;
-
+void gv_nodesize(node_t *n, bool flip) {
     if (flip) {
-        w = INCH2PS(ND_height(n));
+        double w = INCH2PS(ND_height(n));
         ND_lw(n) = ND_rw(n) = w / 2;
         ND_ht(n) = INCH2PS(ND_width(n));
     }
     else {
-        w = INCH2PS(ND_width(n));
+        double w = INCH2PS(ND_width(n));
         ND_lw(n) = ND_rw(n) = w / 2;
         ND_ht(n) = INCH2PS(ND_height(n));
     }
 }
 
-#ifdef _WIN32
-void fix_fc(void)
-{
-    char buf[28192];
-    char buf2[28192];
-    int cur=0;
-    FILE* fp;
-
-    if((fp = fopen("fix-fc.exe", "r")) == NULL)
-	    return ;
-    fclose (fp);
-    if (!system ("fix-fc.exe")) {
-	system ("del fix-fc.exe");
-	system ("dot -c");	//run dot -c once too since we already run things :)
-    }
-}
-#endif
-
 #ifndef HAVE_DRAND48
-#pragma weak drand48
 double drand48(void)
 {
     double d;
@@ -2020,48 +1588,36 @@ typedef struct {
     Agraph_t* clp;
 } clust_t;
 
-static void free_clust (Dt_t* dt, clust_t* clp, Dtdisc_t* disc)
-{
-    free (clp);
+static void free_clust(clust_t *clp, Dtdisc_t *disc) {
+    (void)disc;
+    free(clp);
 }
 
 static Dtdisc_t strDisc = {
-    offsetof(clust_t,name),
-    -1,
-    offsetof(clust_t,link),
-    NIL(Dtmake_f),
-    (Dtfree_f)free_clust,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .key = offsetof(clust_t, name),
+    .size = -1,
+    .link = offsetof(clust_t, link),
+    .freef = (Dtfree_f)free_clust,
 };
 
 static void fillMap (Agraph_t* g, Dt_t* map)
 {
-    Agraph_t* cl;
-    int c;
-    char* s;
-    clust_t* ip;
-
-    for (c = 1; c <= GD_n_cluster(g); c++) {
-	cl = GD_clust(g)[c];
-	s = agnameof(cl);
-	if (dtmatch (map, s)) {
-	    agerr(AGWARN, "Two clusters named %s - the second will be ignored\n", s);
-	}
-	else {
-	    ip = NEW(clust_t);
-	    ip->name = s;
-	    ip->clp = cl;
+    for (int c = 1; c <= GD_n_cluster(g); c++) {
+        Agraph_t *cl = GD_clust(g)[c];
+        char *s = agnameof(cl);
+        if (dtmatch(map, s)) {
+            agwarningf("Two clusters named %s - the second will be ignored\n", s);
+        } else {
+            clust_t *ip = gv_alloc(sizeof(clust_t));
+            ip->name = s;
+            ip->clp = cl;
 	    dtinsert (map, ip);
-	}
-	fillMap (cl, map);
+        }
+        fillMap (cl, map);
     }
 }
 
-/* mkClustMap:
- * Generates a dictionary mapping cluster names to corresponding cluster.
+/** Generates a dictionary mapping cluster names to corresponding cluster.
  * Used with cgraph as the latter does not support a flat namespace of clusters.
  * Assumes G has already built a cluster tree using GD_n_cluster and GD_clust.
  */
@@ -2080,11 +1636,17 @@ findCluster (Dt_t* map, char* name)
     clust_t* clp = dtmatch (map, name);
     if (clp)
 	return clp->clp;
-    else
-	return NULL;
+    return NULL;
 }
 
-Agnodeinfo_t* ninf(Agnode_t* n) {return (Agnodeinfo_t*)AGDATA(n);}
-Agraphinfo_t* ginf(Agraph_t* g) {return (Agraphinfo_t*)AGDATA(g);}
-Agedgeinfo_t* einf(Agedge_t* e) {return (Agedgeinfo_t*)AGDATA(e);}
-/* void dumpG(Agraph_t* g) { agwrite(g, stderr); } */
+/**
+ * @dir lib/common
+ * @brief common code for layout engines
+ * @ingroup engines
+ *
+ * @ref common_utils
+ *
+ * @defgroup common_utils utilities
+ * @brief low level utilities for layout engines and rendering
+ * @ingroup engines
+ */

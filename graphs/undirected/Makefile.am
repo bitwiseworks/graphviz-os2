@@ -1,4 +1,3 @@
-# $Id$ $Revision$
 ## Process this file with automake to produce Makefile.in
 
 GRAPHS = ER.gv ngk10_4.gv process.gv Heawood.gv Petersen.gv
@@ -9,7 +8,7 @@ undirected_DATA = $(GRAPHS)
 
 EXTRA_DIST = $(GRAPHS)
 
-CLEANFILES = core *.gv.* *.png .xvpics/* 
+CLEANFILES = core *.gv.* *.png .xvpics/*
 
 DOT = $(top_builddir)/cmd/dot/dot_builtins
 
@@ -20,7 +19,7 @@ test:
 		-Tjpg -Tpdf -Tfig -Tgif -Tpng \
 		-Tps -Tps2 -Tps:lasi -Tps:cairo -Tpdf \
 		-Tsvg -Tsvg:cairo -Tsvgz -Tvrml \
-		-O $(GRAPHS) 
+		-O $(GRAPHS)
 
 canon:
 	for i in $(GRAPHS); do echo "neato $$i"; \
@@ -57,10 +56,6 @@ gif:
 gv dot:
 	for i in $(GRAPHS); do echo "neato $$i"; \
 		$(DOT) -Kneato -Tgv -o$$i.gv $(top_srcdir)/graphs/undirected/$$i; done
-
-hpgl:
-	for i in $(GRAPHS); do echo "neato $$i"; \
-		$(DOT) -Kneato -Thpgl -o$$i.hpgl $(top_srcdir)/graphs/undirected/$$i; done
 
 ismap:
 	for i in $(GRAPHS); do echo "neato $$i"; \

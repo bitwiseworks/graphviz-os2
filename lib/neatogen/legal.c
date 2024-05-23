@@ -1,24 +1,21 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "neato.h"
-#include "pathutil.h"
-#include <setjmp.h>
-
-static jmp_buf jbuf;
-
-#define MAXINTS  10000		/* modify this line to reflect the max no. of 
-				   intersections you want reported -- 50000 seems to break the program */
+#include <assert.h>
+#include <math.h>
+#include <cgraph/alloc.h>
+#include <cgraph/exit.h>
+#include <limits.h>
+#include <neatogen/neato.h>
+#include <pathplan/pathutil.h>
+#include <stddef.h>
 
 #define SLOPE(p,q) ( ( ( p.y ) - ( q.y ) ) / ( ( p.x ) - ( q.x ) ) )
 
@@ -41,14 +38,6 @@ typedef struct polygon polygon;
 	boxf bb;
     };
 
-    typedef struct {
-	vertex *firstv, *secondv;
-#ifdef RECORD_INTERSECTS
-	polygon *firstp, *secondp;
-#endif
-	double x, y;
-    } intersection ;
-
     struct active_edge {
 	vertex *name;
 	struct active_edge *next, *last;
@@ -58,9 +47,16 @@ typedef struct polygon polygon;
 	int number;
     } active_edge_list ;
     typedef struct {
-	int nvertices, npolygons, ninters;
+	int nvertices, ninters;
     } data ;
 
+static int sign(double v) {
+  if (v < 0)
+    return -1;
+  if (v > 0)
+    return 1;
+  return 0;
+}
 
 /* find the sign of the area of each of the triangles
     formed by adding a vertex of m to l  
@@ -76,19 +72,45 @@ static void sgnarea(vertex *l, vertex *m, int i[])
     f = m->pos.y - b;
     g = after(m)->pos.x - a;
     h = after(m)->pos.y - b;
-    t = (c * f) - (d * e);
-    i[0] = ((t == 0) ? 0 : (t > 0 ? 1 : -1));
-    t = (c * h) - (d * g);
-    i[1] = ((t == 0) ? 0 : (t > 0 ? 1 : -1));
+    t = c * f - d * e;
+    i[0] = sign(t);
+    t = c * h - d * g;
+    i[1] = sign(t);
     i[2] = i[0] * i[1];
 }
 
-/* determine if g lies between f and h      */
-static int between(double f, double g, double h)
-{
-    if ((f == g) || (g == h))
-	return (0);
-    return ((f < g) ? (g < h ? 1 : -1) : (h < g ? 1 : -1));
+/** where is `g` relative to the interval delimited by `f` and `h`?
+ *
+ * The order of `f` and `h` is not assumed. That is, the interval defined may be
+ * `(f, h)` or `(h, f)` depending on whether `f` is less than or greater than
+ * `h`.
+ *
+ * \param f First boundary of the interval
+ * \param g Value to test
+ * \param h Second boundary of the interval
+ * \return -1 if g is not in the interval, 1 if g is in the interval, 0 if g is
+ *   on the boundary (that is, equal to f or equal to h)
+ */
+static int between(double f, double g, double h) {
+  if (f < g) {
+    if (g < h) {
+      return 1;
+    }
+    if (g > h) {
+      return -1;
+    }
+    return 0;
+  }
+  if (f > g) {
+    if (g > h) {
+      return 1;
+    }
+    if (g < h) {
+      return -1;
+    }
+    return 0;
+  }
+  return 0;
 }
 
 /* determine if vertex i of line m is on line l     */
@@ -97,12 +119,10 @@ static int online(vertex *l, vertex *m, int i)
     pointf a, b, c;
     a = l->pos;
     b = after(l)->pos;
-    c = (i == 0) ? m->pos : after(m)->pos;
-    return ((a.x == b.x) ? ((a.x == c.x)
-			    && (-1 !=
-				between(a.y, c.y, b.y))) : between(a.x,
-								   c.x,
-								   b.x));
+    c = i == 0 ? m->pos : after(m)->pos;
+    return a.x == b.x
+      ? (a.x == c.x && -1 != between(a.y, c.y, b.y))
+      : between(a.x, c.x, b.x);
 }
 
 /* determine point of detected intersections  */
@@ -112,7 +132,7 @@ static int intpoint(vertex *l, vertex *m, double *x, double *y, int cond)
     double m1, m2, c1, c2;
 
     if (cond <= 0)
-	return (0);
+	return 0;
     ls = l->pos;
     le = after(l)->pos;
     ms = m->pos;
@@ -130,24 +150,22 @@ static int intpoint(vertex *l, vertex *m, double *x, double *y, int cond)
 	} else {
 	    m1 = SLOPE(ms, me);
 	    m2 = SLOPE(ls, le);
-	    c1 = ms.y - (m1 * ms.x);
-	    c2 = ls.y - (m2 * ls.x);
+	    c1 = ms.y - m1 * ms.x;
+	    c2 = ls.y - m2 * ls.x;
 	    *x = (c2 - c1) / (m1 - m2);
-	    *y = ((m1 * c2) - (c1 * m2)) / (m1 - m2);
+	    *y = (m1 * c2 - c1 * m2) / (m1 - m2);
 	}
 	break;
 
     case 2:			/*     the two lines  have a common segment  */
 	if (online(l, m, 0) == -1) {	/* ms between ls and le */
 	    pt1 = ms;
-	    pt2 =
-		(online(m, l, 1) ==
-		 -1) ? ((online(m, l, 0) == -1) ? le : ls) : me;
+	    pt2 = online(m, l, 1) == -1
+	      ? (online(m, l, 0) == -1 ? le : ls) : me;
 	} else if (online(l, m, 1) == -1) {	/* me between ls and le */
 	    pt1 = me;
-	    pt2 =
-		(online(l, m, 0) ==
-		 -1) ? ((online(m, l, 0) == -1) ? le : ls) : ms;
+	    pt2 = online(l, m, 0) == -1
+	      ? (online(m, l, 0) == -1 ? le : ls) : ms;
 	} else {
 	    /* may be degenerate? */
 	    if (online(m, l, 0) != -1)
@@ -169,7 +187,7 @@ static int intpoint(vertex *l, vertex *m, double *x, double *y, int cond)
 	    *y = me.y;
 	}
     }				/* end switch  */
-    return (1);
+    return 1;
 }
 
 static void
@@ -180,7 +198,7 @@ putSeg (int i, vertex* v)
 }
 
 /* realIntersect:
- * Return 1 if a real inatersection has been found
+ * Return 1 if a real intersection has been found
  */
 static int
 realIntersect (vertex *firstv, vertex *secondv, pointf p)
@@ -192,12 +210,9 @@ realIntersect (vertex *firstv, vertex *secondv, pointf p)
     vsd = secondv->pos;
     avsd = after(secondv)->pos;
 
-    if (((vft.x != avft.x) && (vsd.x != avsd.x)) ||
-	((vft.x == avft.x) &&
-	 !EQ_PT(vft, p) &&
-	 !EQ_PT(avft, p)) ||
-	((vsd.x == avsd.x) &&
-	 !EQ_PT(vsd, p) && !EQ_PT(avsd, p))) 
+    if ((vft.x != avft.x && vsd.x != avsd.x) ||
+	(vft.x == avft.x && !EQ_PT(vft, p) && !EQ_PT(avft, p)) ||
+	(vsd.x == avsd.x && !EQ_PT(vsd, p) && !EQ_PT(avsd, p))) 
     {
 	if (Verbose > 1) {
 		fprintf(stderr, "\nintersection at %.3f %.3f\n",
@@ -214,10 +229,7 @@ realIntersect (vertex *firstv, vertex *secondv, pointf p)
  * detect whether segments l and m intersect      
  * Return 1 if found; 0 otherwise;
  */
-static int find_intersection(vertex *l,
-		  vertex *m,
-		  intersection* ilist, data *input)
-{
+static int find_intersection(vertex *l, vertex *m) {
     double x, y;
     pointf p;
 	int i[3];
@@ -230,76 +242,61 @@ static int find_intersection(vertex *l,
 	sgnarea(m, l, i);
 	if (i[2] > 0)
 	    return 0;
-	if (!intpoint
-	    (l, m, &x, &y, (i[2] < 0) ? 3 : online(m, l, ABS(i[0]))))
+	if (!intpoint(l, m, &x, &y, i[2] < 0 ? 3 : online(m, l, abs(i[0]))))
 	    return 0;
     }
 
-    else if (!intpoint(l, m, &x, &y, (i[0] == i[1]) ?
+    else if (!intpoint(l, m, &x, &y, i[0] == i[1] ?
 		       2 * MAX(online(l, m, 0),
-			       online(l, m, 1)) : online(l, m, ABS(i[0]))))
+			       online(l, m, 1)) : online(l, m, abs(i[0]))))
 	return 0;
 
-#ifdef RECORD_INTERSECTS
-    if (input->ninters >= MAXINTS) {
-	agerr(AGERR, "using too many intersections\n");
-	exit(1);
-    }
-
-    ilist[input->ninters].firstv = l;
-    ilist[input->ninters].secondv = m;
-    ilist[input->ninters].firstp = l->poly;
-    ilist[input->ninters].secondp = m->poly;
-    ilist[input->ninters].x = x;
-    ilist[input->ninters].y = y;
-    input->ninters++;
-#endif
     p.x = x;
     p.y = y;
     return realIntersect(l, m, p);
 }
 
-static int gt(vertex **i, vertex **j)
-{
-    /* i > j if i.x > j.x or i.x = j.x and i.y > j.y  */
-    double t;
-    if ((t = (*i)->pos.x - (*j)->pos.x) != 0.)
-	return ((t > 0.) ? 1 : -1);
-    if ((t = (*i)->pos.y - (*j)->pos.y) == 0.)
-	return (0);
-    else
-	return ((t > 0.) ? 1 : -1);
+static int gt(const void *a, const void *b) {
+    const vertex *const *i = a;
+    const vertex *const *j = b;
+    if ((*i)->pos.x > (*j)->pos.x) {
+      return 1;
+    }
+    if ((*i)->pos.x < (*j)->pos.x) {
+      return -1;
+    }
+    if ((*i)->pos.y > (*j)->pos.y) {
+      return 1;
+    }
+    if ((*i)->pos.y < (*j)->pos.y) {
+      return -1;
+    }
+    return 0;
 }
 
 /* find_ints:
  * Check for pairwise intersection of polygon sides
- * Return 1 if intersection found, 0 otherwise.
+ * Return 1 if intersection found, 0 for not found, -1 for error.
  */
-static int
-find_ints(vertex vertex_list[],
-	  polygon polygon_list[],
-	  data *input, intersection ilist[])
-{
-    int i, j, k, found = 0;
+static int find_ints(vertex vertex_list[], size_t nvertices) {
+    int j, k, found = 0;
     active_edge_list all;
     active_edge *new, *tempa;
-    vertex *pt1, *pt2, *templ, **pvertex;
+    vertex *pt1, *pt2, *templ;
 
-    input->ninters = 0;
     all.first = all.final = 0;
     all.number = 0;
 
-    pvertex = N_GNEW(input->nvertices, vertex *);
+    vertex **pvertex = gv_calloc(nvertices, sizeof(vertex*));
 
-    for (i = 0; i < input->nvertices; i++)
+    for (size_t i = 0; i < nvertices; i++)
 	pvertex[i] = vertex_list + i;
 
 /* sort vertices by x coordinate	*/
-    qsort(pvertex, input->nvertices, sizeof(vertex *),
-    	  (int (*)(const void *, const void *))gt);
+    qsort(pvertex, nvertices, sizeof(vertex *), gt);
 
 /* walk through the vertices in order of increasing x coordinate	*/
-    for (i = 0; i < input->nvertices; i++) {
+    for (size_t i = 0; i < nvertices; i++) {
 	pt1 = pvertex[i];
 	templ = pt2 = prior(pvertex[i]);
 	for (k = 0; k < 2; k++) {	/* each vertex has 2 edges */
@@ -310,12 +307,12 @@ find_ints(vertex vertex_list[],
                  /* test */
 		for (tempa = all.first, j = 0; j < all.number;
 		     j++, tempa = tempa->next) {
-		    found = find_intersection(tempa->name, templ, ilist, input);
+		    found = find_intersection(tempa->name, templ);
 		    if (found)
 			goto finish;
 		}
 
-		new = GNEW(active_edge);
+		new = gv_alloc(sizeof(active_edge));
 		if (all.number == 0) {
 		    all.first = new;
 		    new->last = 0;
@@ -336,8 +333,8 @@ find_ints(vertex vertex_list[],
 	    case 1:		/* backward edge, delete        */
 
 		if ((tempa = templ->active) == 0) {
-		    agerr(AGERR, "trying to delete a non-line\n");
-		    longjmp(jbuf, 1);
+		    agerrorf("trying to delete a non-line\n");
+		    return -1;
 		}
 		if (all.number == 1)
 		    all.final = all.first = 0;	/* delete the line */
@@ -351,10 +348,13 @@ find_ints(vertex vertex_list[],
 		    tempa->last->next = tempa->next;
 		    tempa->next->last = tempa->last;
 		}
-		free((char *) tempa);
+		free(tempa);
 		all.number--;
 		templ->active = 0;
 		break;		/* end of case 1        */
+
+	    default:
+		break; // same point; do nothing
 
 	    }			/* end switch   */
 
@@ -411,26 +411,24 @@ findInside(Ppoly_t ** polys, int n_polys, polygon* polygon_list)
  */
 int Plegal_arrangement(Ppoly_t ** polys, int n_polys)
 {
-    int i, j, vno, nverts, found;
-    vertex *vertex_list;
-    polygon *polygon_list;
-    data input;
-    intersection ilist[MAXINTS];
+    int i, vno, found;
     boxf bb;
     double x, y;
 
-    polygon_list = N_GNEW(n_polys, polygon);
+    polygon *polygon_list = gv_calloc(n_polys, sizeof(polygon));
 
-    for (i = nverts = 0; i < n_polys; i++)
+    size_t nverts;
+    for (nverts = 0, i = 0; i < n_polys; i++) {
 	nverts += polys[i]->pn;
+    }
 
-    vertex_list = N_GNEW(nverts, vertex);
+    vertex *vertex_list = gv_calloc(nverts, sizeof(vertex));
 
     for (i = vno = 0; i < n_polys; i++) {
 	polygon_list[i].start = &vertex_list[vno];
 	bb.LL.x = bb.LL.y = MAXDOUBLE;
 	bb.UR.x = bb.UR.y = -MAXDOUBLE;
-	for (j = 0; j < polys[i]->pn; j++) {
+	for (size_t j = 0; j < polys[i]->pn; j++) {
 	    x = polys[i]->ps[j].x;
 	    y = polys[i]->ps[j].y;
 	    bb.LL.x = MIN(bb.LL.x,x);
@@ -447,15 +445,12 @@ int Plegal_arrangement(Ppoly_t ** polys, int n_polys)
 	polygon_list[i].bb = bb;
     }
 
-    input.nvertices = nverts;
-    input.npolygons = n_polys;
-
-    if (setjmp(jbuf)) {
+    found = find_ints(vertex_list, nverts);
+    if (found < 0) {
 	free(polygon_list);
 	free(vertex_list);
 	return 0;
     }
-    found = find_ints(vertex_list, polygon_list, &input, ilist);
 
     if (!found) {
 	found = findInside(polys, n_polys, polygon_list);

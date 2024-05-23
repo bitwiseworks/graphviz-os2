@@ -1,17 +1,14 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "gvplugin.h"
+#include <gvc/gvplugin.h>
 
 extern gvplugin_installed_t gvrender_gd_types[];
 extern gvplugin_installed_t gvrender_vrml_types[];
@@ -32,10 +29,10 @@ static gvplugin_api_t apis[] = {
     {(api_t)0, 0},
 };
 
-#if defined(_WIN32) || defined(__OS2__)
-#   define GVPLUGIN_GD_API __declspec(dllexport)
+#ifdef GVDLL
+#define GVPLUGIN_GD_API __declspec(dllexport)
 #else
-#   define GVPLUGIN_GD_API
+#define GVPLUGIN_GD_API
 #endif
 
 GVPLUGIN_GD_API gvplugin_library_t gvplugin_gd_LTX_library = { "gd", apis };

@@ -1,20 +1,22 @@
 # Graphviz - Graph Visualization Tools
 
-[![Linux build status](https://img.shields.io/travis/ellson/graphviz/master.svg?label=Linux)](https://travis-ci.org/ellson/graphviz)
-[![Windows Build Status](https://img.shields.io/appveyor/ci/ellson/graphviz/master.svg?label=Windows)](https://ci.appveyor.com/project/ellson/graphviz/branch/master)
+[![build status](https://gitlab.com/graphviz/graphviz/badges/main/pipeline.svg)](https://gitlab.com/graphviz/graphviz/-/pipelines/)
 
-from AT&T Research and Lucent Bell Labs
+from AT&amp;T Research and Lucent Bell Labs
 
 * https://graphviz.org/
 
 See doc/build.html within the source tree or https://graphviz.org/doc/build.html for prerequisites and detailed build notes.
 
-## master GIT Repository
+## main GIT Repository
 
-The master GIT Repository for graphviz can be found at:
+The main GIT Repository for graphviz can be found at:
+
 * https://gitlab.com/graphviz/graphviz/
 
 ## Support
+
+Graphviz is maintained by a few very talented volunteers, and with some help from its founders. Financial donations are accepted on [patreon](https://patreon.com/graphviz). Anyone who is able to fund a summer intern project (or other project) based on graphviz is invited to contact any of the project leaders, e.g. send a message to north on graphviz org).
 
 This project has only 3 of its founders remaining as volunteer maintainers, and support is limited and may end soon. If you can help fund to a more formal foundation to continue this project, please contact north on graphviz org.
 
@@ -32,12 +34,12 @@ The Graphviz layout programs take descriptions of graphs in a simple text langua
 
 Graphviz has many useful features for concrete diagrams, such as options for colors, fonts, tabular node layouts, line styles, hyperlinks, and custom shapes.
 
-In practice, graphs are usually generated from an external data sources, but they can also be created and edited manually, either as raw text files or within a graphical editor. (Graphviz was not intended to be a Visio replacement, so it is probably frustrating to try to use it that way.) 
+In practice, graphs are usually generated from an external data sources, but they can also be created and edited manually, either as raw text files or within a graphical editor. (Graphviz was not intended to be a Visio replacement, so it is probably frustrating to try to use it that way.)
 
 ## Contacts
 
 If you have a bug or believe something is not working as expected, please submit a [bug report](https://gitlab.com/graphviz/graphviz/issues).
 
-If you have a general question or are unsure how things work, these queries can also be posted in the [Graphviz Issues page](https://gitlab.com/graphviz/graphviz/issues).
+If you have a general question or are unsure how things work, these queries can be posted in the [Graphviz Forum](https://forum.graphviz.org/).
 
-John Ellson
+Graphviz is on twitter and fosstodon.

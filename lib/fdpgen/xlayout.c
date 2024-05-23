@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -26,11 +23,11 @@ Increase less between tries
 
 /* uses PRIVATE interface */
 #define FDP_PRIVATE 1
-
-#include <xlayout.h>
-#include <adjust.h>
-#include <dbg.h>
-#include <ctype.h>
+#include <cgraph/gv_ctype.h>
+#include <fdpgen/xlayout.h>
+#include <neatogen/adjust.h>
+#include <fdpgen/dbg.h>
+#include <math.h>
 
 /* Use bbox based force function */
 /* #define MS */
@@ -57,17 +54,18 @@ static expand_t X_marg;
 static double X_nonov;
 static double X_ov;
 
-void pr2graphs(Agraph_t *g0, Agraph_t *g1)
-{
+#ifdef DEBUG
+static void pr2graphs(Agraph_t *g0, Agraph_t *g1) {
 	fprintf(stderr,"%s",agnameof(g0));
 	fprintf(stderr,"(%s)",agnameof(g1));
 }
+#endif
 
 static double RAD(Agnode_t * n)
 {
     double w = WD2(n);
     double h = HT2(n);
-    return sqrt(w * w + h * h);
+    return hypot(w, h);
 }
 
 /* xinit_params:
@@ -75,6 +73,8 @@ static double RAD(Agnode_t * n)
  */
 static void xinit_params(graph_t* g, int n, xparams * xpms)
 {
+    (void)g;
+
     xParams.K = xpms->K;
     xParams.numIters = xpms->numIters;
     xParams.T0 = xpms->T0;
@@ -105,7 +105,7 @@ static void xinit_params(graph_t* g, int n, xparams * xpms)
 
 static double cool(int t)
 {
-    return (X_T0 * (X_numIters - t)) / X_numIters;
+    return X_T0 * (X_numIters - t) / X_numIters;
 }
 
 #define EPSILON 0.01
@@ -120,7 +120,7 @@ static double dist(pointf p, pointf q)
 
     dx = p.x - q.x;
     dy = p.y - q.y;
-    return (sqrt(dx * dx + dy * dy));
+    return hypot(dx, dy);
 }
 
 /* bBox:
@@ -150,54 +150,54 @@ static double boxDist(node_t * p, node_t * q)
 
     if (q_ll.x > p_ur.x) {
 	if (q_ll.y > p_ur.y) {
-	    return (dist(p_ur, q_ll));
+	    return dist(p_ur, q_ll);
 	} else if (q_ll.y >= p_ll.y) {
-	    return (q_ll.x - p_ur.x);
+	    return q_ll.x - p_ur.x;
 	} else {
 	    if (q_ur.y >= p_ll.y)
-		return (q_ll.x - p_ur.x);
+		return q_ll.x - p_ur.x;
 	    else {
 		p_ur.y = p_ll.y;	/* p_ur is now lower right */
 		q_ll.y = q_ur.y;	/* q_ll is now upper left */
-		return (dist(p_ur, q_ll));
+		return dist(p_ur, q_ll);
 	    }
 	}
     } else if (q_ll.x >= p_ll.x) {
 	if (q_ll.y > p_ur.y) {
-	    return (q_ll.y - p_ur.x);
+	    return q_ll.y - p_ur.x;
 	} else if (q_ll.y >= p_ll.y) {
 	    return 0.0;
 	} else {
 	    if (q_ur.y >= p_ll.y)
 		return 0.0;
 	    else
-		return (p_ll.y - q_ur.y);
+		return p_ll.y - q_ur.y;
 	}
     } else {
 	if (q_ll.y > p_ur.y) {
 	    if (q_ur.x >= p_ll.x)
-		return (q_ll.y - p_ur.y);
+		return q_ll.y - p_ur.y;
 	    else {
 		p_ur.x = p_ll.x;	/* p_ur is now upper left */
 		q_ll.x = q_ur.x;	/* q_ll is now lower right */
-		return (dist(p_ur, q_ll));
+		return dist(p_ur, q_ll);
 	    }
 	} else if (q_ll.y >= p_ll.y) {
 	    if (q_ur.x >= p_ll.x)
 		return 0.0;
 	    else
-		return (p_ll.x - q_ur.x);
+		return p_ll.x - q_ur.x;
 	} else {
 	    if (q_ur.x >= p_ll.x) {
 		if (q_ur.y >= p_ll.y)
 		    return 0.0;
 		else
-		    return (p_ll.y - q_ur.y);
+		    return p_ll.y - q_ur.y;
 	    } else {
 		if (q_ur.y >= p_ll.y)
-		    return (p_ll.x - q_ur.x);
+		    return p_ll.x - q_ur.x;
 		else
-		    return (dist(p_ll, q_ur));
+		    return dist(p_ll, q_ur);
 	    }
 	}
     }
@@ -213,13 +213,9 @@ static int overlap(node_t * p, node_t * q)
     double xdelta, ydelta;
     int    ret;
 
-    xdelta = ND_pos(q)[0] - ND_pos(p)[0];
-    if (xdelta < 0)
-	xdelta = -xdelta;
-    ydelta = ND_pos(q)[1] - ND_pos(p)[1];
-    if (ydelta < 0)
-	ydelta = -ydelta;
-    ret = ((xdelta <= (WD2(p) + WD2(q))) && (ydelta <= (HT2(p) + HT2(q))));
+    xdelta = fabs(ND_pos(q)[0] - ND_pos(p)[0]);
+    ydelta = fabs(ND_pos(q)[1] - ND_pos(p)[1]);
+    ret = xdelta <= WD2(p) + WD2(q) && ydelta <= HT2(p) + HT2(q);
     return ret;
 #else
     double dist2, xdelta, ydelta;
@@ -229,7 +225,7 @@ static int overlap(node_t * p, node_t * q)
     xdelta = ND_pos(q)[0] - ND_pos(p)[0];
     ydelta = ND_pos(q)[1] - ND_pos(p)[1];
     dist2 = xdelta * xdelta + ydelta * ydelta;
-    return (dist2 <= (din * din));
+    return dist2 <= din * din;
 #endif
 }
 
@@ -258,11 +254,9 @@ doRep(node_t * p, node_t * q, double xdelta, double ydelta, double dist2)
 {
     int ov;
     double force;
-    /* double dout, din; */
 #if defined(DEBUG) || defined(MS) || defined(ALT)
     double dist;
 #endif
-    /* double factor; */
 
     while (dist2 == 0.0) {
 	xdelta = 5 - rand() % 10;
@@ -270,9 +264,7 @@ doRep(node_t * p, node_t * q, double xdelta, double ydelta, double dist2)
 	dist2 = xdelta * xdelta + ydelta * ydelta;
     }
 #if defined(MS)
-    dout = boxDist(p, q);
-    if (dout < EPSILON)
-	dout = EPSILON;
+    dout = fmax(boxDist(p, q), EPSILON);
     dist = sqrt(dist2);
     force = K2 / (dout * dist);
 #elif defined(ALT)
@@ -340,17 +332,17 @@ static void applyAttr(Agnode_t * p, Agnode_t * q)
 	return;
     xdelta = ND_pos(q)[0] - ND_pos(p)[0];
     ydelta = ND_pos(q)[1] - ND_pos(p)[1];
-    dist = sqrt(xdelta * xdelta + ydelta * ydelta);
-    force = (dout * dout) / (X_K * dist);
+    dist = hypot(xdelta, ydelta);
+    force = dout * dout / (X_K * dist);
 #elif defined(ALT)
     xdelta = ND_pos(q)[0] - ND_pos(p)[0];
     ydelta = ND_pos(q)[1] - ND_pos(p)[1];
-    dist = sqrt(xdelta * xdelta + ydelta * ydelta);
+    dist = hypot(xdelta, ydelta);
     din = RAD(p) + RAD(q);
     if (dist < X_K + din)
 	return;
     dout = dist - din;
-    force = (dout * dout) / ((X_K + din) * dist);
+    force = dout * dout / ((X_K + din) * dist);
 #else
     if (overlap(p, q)) {
 #ifdef DEBUG
@@ -363,10 +355,10 @@ static void applyAttr(Agnode_t * p, Agnode_t * q)
     }
     xdelta = ND_pos(q)[0] - ND_pos(p)[0];
     ydelta = ND_pos(q)[1] - ND_pos(p)[1];
-    dist = sqrt(xdelta * xdelta + ydelta * ydelta);
+    dist = hypot(xdelta, ydelta);
     din = RAD(p) + RAD(q);
     dout = dist - din;
-    force = (dout * dout) / ((X_K + din) * dist);
+    force = dout * dout / ((X_K + din) * dist);
 #endif
 #ifdef DEBUG
     if (Verbose == 4) {
@@ -408,8 +400,6 @@ static int adjust(Agraph_t * g, double temp)
 	int ov;
 	for (n1 = agnxtnode(g, n); n1; n1 = agnxtnode(g, n1)) {
 	    ov = applyRep(n, n1);
-/* if (V && ov)  */
-	    /* fprintf (stderr,"%s ov %s\n", n->name, n1->name); */
 	    overlaps += ov;
 	}
 	for (e = agfstout(g, n); e; e = agnxtout(g, e)) {
@@ -433,8 +423,8 @@ static int adjust(Agraph_t * g, double temp)
 	} else {
 	    /* to avoid sqrt, consider abs(x) + abs(y) */
 	    len = sqrt(len2);
-	    ND_pos(n)[0] += (disp[0] * temp) / len;
-	    ND_pos(n)[1] += (disp[1] * temp) / len;
+	    ND_pos(n)[0] += disp[0] * temp / len;
+	    ND_pos(n)[1] += disp[1] * temp / len;
 	}
     }
     return overlaps;
@@ -475,10 +465,10 @@ static int x_layout(graph_t * g, xparams * pxpms, int tries)
     try = 0;
     xpms = *pxpms;
     K = xpms.K;
-    while (ov && (try < tries)) {
+    while (ov && try < tries) {
 	xinit_params(g, nnodes, &xpms);
 	X_ov = X_C * K2;
-	X_nonov = (nedges*X_ov*2.0)/(nnodes*(nnodes-1));
+	X_nonov = nedges*X_ov*2.0/(nnodes*(nnodes-1));
 #ifdef DEBUG
 	if (Verbose) {
 	    prIndent();
@@ -535,11 +525,11 @@ void fdp_xLayout(graph_t * g, xparams * xpms)
 #endif
         fprintf (stderr, "xLayout ");
     }
-    if (!ovlp || (*ovlp == '\0')) {
+    if (!ovlp || *ovlp == '\0') {
 	ovlp = DFLT_overlap;
     }
     /* look for optional ":" or "number:" */
-    if ((cp = strchr(ovlp, ':')) && ((cp == ovlp) || isdigit(*ovlp))) {
+    if ((cp = strchr(ovlp, ':')) && (cp == ovlp || gv_isdigit(*ovlp))) {
       cp++;
       rest = cp;
       tries = atoi (ovlp);

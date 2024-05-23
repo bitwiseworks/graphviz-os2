@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -24,9 +21,12 @@
 /* uses PRIVATE interface for NOTUSED */
 #define FDP_PRIVATE 1
 
-#include <fdp.h>
-#include <grid.h>
-#include <macros.h>
+#include <cgraph/alloc.h>
+#include <fdpgen/fdp.h>
+#include <fdpgen/grid.h>
+#include <common/macros.h>
+#include <stddef.h>
+#include <string.h>
 
   /* structure for maintaining a free list of cells */
 typedef struct _block {
@@ -41,11 +41,9 @@ typedef struct _block {
  */
 static block_t *newBlock(int size)
 {
-    block_t *newb;
-
-    newb = GNEW(block_t);
+    block_t *newb = gv_alloc(sizeof(block_t));
     newb->next = 0;
-    newb->mem = N_GNEW(size, cell);
+    newb->mem = gv_calloc(size, sizeof(cell));
     newb->endp = newb->mem + size;
     newb->cur = newb->mem;
 
@@ -96,29 +94,36 @@ static cell *getCell(Grid * g)
 
 static int ijcmpf(Dt_t * d, gridpt * p1, gridpt * p2, Dtdisc_t * disc)
 {
-    int diff;
+    (void)d;
+    (void)disc;
 
-    NOTUSED(d);
-    NOTUSED(disc);
-    if ((diff = (p1->i - p2->i)))
-	return diff;
-    else
-	return (p1->j - p2->j);
+    if (p1->i < p2->i) {
+        return -1;
+    }
+    if (p1->i > p2->i) {
+        return 1;
+    }
+    if (p1->j < p2->j) {
+        return -1;
+    }
+    if (p1->j > p2->j) {
+        return 1;
+    }
+    return 0;
 }
 
-static Grid *_grid;		/* hack because can't attach info. to Dt_t */
+static Grid _grid; // hack because can't attach info. to Dt_t
 
 /* newCell:
  * Allocate a new cell from free store and initialize its indices
  * This is used by the grid discipline to create cells.
  */
-static void *newCell(Dt_t * d, void *obj, Dtdisc_t * disc)
-{
-    cell *cellp = (cell *) obj;
+static void *newCell(void *obj, Dtdisc_t *disc) {
+    cell *cellp = obj;
     cell *newp;
 
-    NOTUSED(disc);
-    newp = getCell(_grid);
+    (void)disc;
+    newp = getCell(&_grid);
     newp->p.i = cellp->p.i;
     newp->p.j = cellp->p.j;
     newp->nodes = 0;
@@ -148,11 +153,8 @@ static Dtdisc_t gridDisc = {
     sizeof(gridpt),
     offsetof(cell, link),
     (Dtmake_f) newCell,
-    NIL(Dtfree_f),
+    NULL,
     (Dtcompar_f) ijcmpf,
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
 };
 
 /* mkGrid:
@@ -162,13 +164,9 @@ static Dtdisc_t gridDisc = {
  */
 Grid *mkGrid(int cellHint)
 {
-    Grid *g;
-
-    g = GNEW(Grid);
-    _grid = g;			/* see comment above */
+    Grid *g = &_grid;
+    memset(g, 0, sizeof(*g)); // see comment above
     g->data = dtopen(&gridDisc, Dtoset);
-    g->listMem = 0;
-    g->listSize = 0;
     g->cellMem = newBlock(cellHint);
     return g;
 }
@@ -184,10 +182,10 @@ void adjustGrid(Grid * g, int nnodes)
     int nsize;
 
     if (nnodes > g->listSize) {
-	nsize = MAX(nnodes, 2 * (g->listSize));
+	nsize = MAX(nnodes, 2 * g->listSize);
 	if (g->listMem)
 	    free(g->listMem);
-	g->listMem = N_GNEW(nsize, node_list);
+	g->listMem = gv_calloc(nsize, sizeof(node_list));
 	g->listSize = nsize;
     }
 }
@@ -212,7 +210,6 @@ void delGrid(Grid * g)
     dtclose(g->data);
     freeBlock(g->cellMem);
     free(g->listMem);
-    free(g);
 }
 
 /* addGrid:
@@ -232,7 +229,7 @@ void addGrid(Grid * g, int i, int j, Agnode_t * n)
     }
 }
 
-typedef int (*walkfn_t) (Dt_t *, void *, void *);
+typedef int (*walkfn_t)(void*, void*);
 
 /* walkGrid:
  * Apply function walkf to each cell in the grid.
@@ -240,7 +237,7 @@ typedef int (*walkfn_t) (Dt_t *, void *, void *);
  * third argument is the grid. (The first argument
  * is the dictionary.) walkf must return 0.
  */
-void walkGrid(Grid * g, int (*walkf) (Dt_t *, cell *, Grid *))
+void walkGrid(Grid *g, int (*walkf)(cell*, Grid*))
 {
     dtwalk(g->data, (walkfn_t) walkf, g);
 }
@@ -255,7 +252,7 @@ cell *findGrid(Grid * g, int i, int j)
 
     key.p.i = i;
     key.p.j = j;
-    return ((cell *) dtsearch(g->data, &key));
+    return dtsearch(g->data, &key);
 }
 
 /* gLength:

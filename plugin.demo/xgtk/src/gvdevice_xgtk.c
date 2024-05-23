@@ -1,22 +1,17 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <stdbool.h>
 #include <stdint.h>
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 
 #include "gvplugin_device.h"
 
@@ -32,11 +27,10 @@
 #include "support.h"
 
 // note that we do not own the newly entered string - must copy
-void
+static void
 attr_value_edited_cb(GtkCellRendererText *renderer, gchar *pathStr, gchar *newText, gpointer data)
 {
 	GtkTreeModel *model = GTK_TREE_MODEL(data);
-//	GVJ_t *job = (GVJ_t *)g_object_get_data(G_OBJECT(model), "job");
 	GtkTreePath *path;
 	GtkTreeIter iter;
 	gchar *old_attr;
@@ -63,28 +57,10 @@ static void gtk_initialize(GVJ_t *firstjob)
     Display *dpy;
     const char *display_name = NULL;
     int scr;
-//    GdkScreen *scr1;
-//    GtkWidget *window1;
-
-#if 0
-#ifdef ENABLE_NLS
-    bindtextdomain (GETTEXT_PACKAGE, PACKAGE_LOCALE_DIR);
-    bind_textdomain_codeset (GETTEXT_PACKAGE, "UTF-8");
-    textdomain (GETTEXT_PACKAGE);
-#endif
-#endif
 
     gtk_set_locale ();
-//    gtk_init (&argc, &argv);
     gtk_init (NULL, NULL);
 
-//  add_pixmap_directory (PACKAGE_DATA_DIR "/" PACKAGE "/pixmaps");
-
-//    window1 = create_window1 ();
-
-//    scr = gdk_drawable_get_screen (window1);
-//    firstjob->device_dpi.x = gdk_screen_get_width(scr) * 25.4 / gdk_screen_get_width_mm(scr);  /* pixels_per_inch */
-//    firstjob->device_dpi.y = gdk_screen_get_height(scr) * 25.4 / gdk_screen_get_height_mm(scr);
     dpy = XOpenDisplay(display_name);
     if (dpy == NULL) {
         fprintf(stderr, "Failed to open XLIB display: %s\n",
@@ -94,7 +70,7 @@ static void gtk_initialize(GVJ_t *firstjob)
     scr = DefaultScreen(dpy);
     firstjob->device_dpi.x = DisplayWidth(dpy, scr) * 25.4 / DisplayWidthMM(dpy, scr);
     firstjob->device_dpi.y = DisplayHeight(dpy, scr) * 25.4 / DisplayHeightMM(dpy, scr);
-    firstjob->device_sets_dpi = TRUE;
+    firstjob->device_sets_dpi = true;
 }
 
 static void gtk_finalize(GVJ_t *firstjob)

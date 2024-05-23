@@ -1,54 +1,47 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief single-source distance filter
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include "cgraph.h"
-#include "ingraphs.h"
+#include <cgraph/alloc.h>
+#include <cgraph/cgraph.h>
+#include <cgraph/ingraphs.h>
+#include <cgraph/exit.h>
+#include <cgraph/unreachable.h>
 #include <getopt.h>
-
-#ifndef HUGE
-/* HUGE is not defined on 64bit HP-UX */
-#define HUGE HUGE_VAL
-#endif
 
 static char *CmdName;
 static char **Files;
 static char **Nodes;
-static int setall = 0;		/* if false, don't set dist attribute for
+static bool setall;		/* if false, don't set dist attribute for
 				 * nodes in different components.
 				 */
-static int doPath = 0;		/* if 1, record shortest paths */
-static int doDirected;		/* if 1, use directed paths */
+static bool doPath;		/* if true, record shortest paths */
+static bool doDirected;	/* if true, use directed paths */
 static Agsym_t *len_sym;
 
-typedef struct nodedata_s {
+typedef struct {
     Agrec_t hdr;
     double dist;		/* always positive for scanned nodes */
     Agnode_t* prev;
-    int done;                   /* > 0 if finished */
+    bool done; ///< true if finished
 } nodedata_t;
-
-#if 0
-typedef struct edgedata_s {
-    Agrec_t hdr;
-    double length;		/* non-negative */
-    int init;                   /* non-zero if length is set */
-} edgedata_t;
-#endif
 
 static double getlength(Agedge_t * e)
 {
@@ -58,7 +51,7 @@ static double getlength(Agedge_t * e)
 
     if (len_sym && (*(lens = agxget(e, len_sym)))) {
 	len = strtod (lens, &p);
-	if ((len < 0) || (p == lens))
+	if (len < 0 || p == lens)
 	    len = 1;
     }
     else
@@ -66,7 +59,6 @@ static double getlength(Agedge_t * e)
     return len;
 }
 
-#ifdef USE_FNS
 static double getdist(Agnode_t * n)
 {
     nodedata_t *data;
@@ -80,22 +72,22 @@ static void setdist(Agnode_t * n, double dist)
     data = (nodedata_t *) (n->base.data);
     data->dist = dist;
 }
-#else
-#define getdist(n) (((nodedata_t*)((n)->base.data))->dist)
-#define setdist(n,d) (((nodedata_t*)((n)->base.data))->dist = (d))
+
 #define getprev(n) (((nodedata_t*)((n)->base.data))->prev)
 #define setprev(n,p) (((nodedata_t*)((n)->base.data))->prev = (p))
 #define isDone(n) (((nodedata_t*)((n)->base.data))->done)
-#define setDone(n) (((nodedata_t*)((n)->base.data))->done = 1)
-#endif
+#define setDone(n) (((nodedata_t*)((n)->base.data))->done = true)
 
 static int cmpf(Dt_t * d, void *key1, void *key2, Dtdisc_t * disc)
 {
-    double t;
-    t = getdist((Agnode_t *) key1) - getdist((Agnode_t *) key2);
-    if (t < 0)
+    (void)d;
+    (void)disc;
+
+    const double dist1 = getdist(key1);
+    const double dist2 = getdist(key2);
+    if (dist1 < dist2)
 	return -1;
-    if (t > 0)
+    if (dist1 > dist2)
 	return 1;
     if (key1 < key2)
 	return -1;
@@ -111,9 +103,6 @@ static Dtdisc_t MyDisc = {
     0,				/* Dtmake_f makef */
     0,				/* Dtfree_f freef */
     cmpf,			/* Dtcompar_f comparf */
-    0,				/* Dthash_f hashf */
-    0,				/* Dtmemory_f memoryf */
-    0				/* Dtevent_f eventf */
 };
 
 static Agnode_t *extract_min(Dict_t * Q)
@@ -144,10 +133,7 @@ static void update(Dict_t * Q, Agnode_t * dest, Agnode_t * src, double len)
 static void pre(Agraph_t * g)
 {
     len_sym = agattr(g, AGEDGE, "len", NULL);
-    aginit(g, AGNODE, "dijkstra", sizeof(nodedata_t), 1);
-#if 0
-    aginit(g, AGEDGE, "dijkstra", sizeof(edgedata_t), 1);
-#endif
+    aginit(g, AGNODE, "dijkstra", sizeof(nodedata_t), true);
 }
 
 static void post(Agraph_t * g)
@@ -166,13 +152,13 @@ static void post(Agraph_t * g)
 	psym = agattr(g, AGNODE, "prev", "");
 
     if (setall)
-	sprintf(dflt, "%.3lf", HUGE);
+	snprintf(dflt, sizeof(dflt), "%.3lf", HUGE_VAL);
 
     for (v = agfstnode(g); v; v = agnxtnode(g, v)) {
 	dist = getdist(v);
 	if (dist) {
 	    dist--;
-	    sprintf(buf, "%.3lf", dist);
+	    snprintf(buf, sizeof(buf), "%.3lf", dist);
 	    agxset(v, sym, buf);
 	    if (doPath && (prev = getprev(v)))
 		agxset(v, psym, agnameof(prev));
@@ -192,10 +178,10 @@ static void post(Agraph_t * g)
 	    if (oldmax > maxdist)
 		maxdist = oldmax;
 	}
-	sprintf(buf, "%.3lf", maxdist);
+	snprintf(buf, sizeof(buf), "%.3lf", maxdist);
 	agxset(g, sym, buf);
     } else {
-	sprintf(buf, "%.3lf", maxdist);
+	snprintf(buf, sizeof(buf), "%.3lf", maxdist);
 	agattr(g, AGRAPH, "maxdist", buf);
     }
 
@@ -203,7 +189,7 @@ static void post(Agraph_t * g)
     agclean(g, AGEDGE, "dijkstra");
 }
 
-void dijkstra(Dict_t * Q, Agraph_t * G, Agnode_t * n)
+static void dijkstra(Dict_t * Q, Agraph_t * G, Agnode_t * n)
 {
     Agnode_t *u;
     Agedge_t *e;
@@ -240,7 +226,7 @@ If no files are specified, stdin is used\n";
 static void usage(int v)
 {
     printf("%s",useString);
-    exit(v);
+    graphviz_exit(v);
 }
 
 static void init(int argc, char *argv[])
@@ -249,24 +235,28 @@ static void init(int argc, char *argv[])
 
     CmdName = argv[0];
     opterr = 0;
-    while ((c = getopt(argc, argv, "adp")) != -1) {
+    while ((c = getopt(argc, argv, "adp?")) != -1) {
 	switch (c) {
 	case 'a':
-	    setall = 1;
+	    setall = true;
 	    break;
 	case 'd':
-	    doDirected = 1;
+	    doDirected = true;
 	    break;
 	case 'p':
-	    doPath = 1;
+	    doPath = true;
 	    break;
 	case '?':
-	    if (optopt == '?')
+	    if (optopt == '\0' || optopt == '?')
 		usage(0);
-	    else
-		fprintf(stderr, "%s: option -%c unrecognized - ignored\n",
+	    else {
+		fprintf(stderr, "%s: option -%c unrecognized\n",
 			CmdName, optopt);
+		usage(1);
+	    }
 	    break;
+	default:
+	    UNREACHABLE();
 	}
     }
     argv += optind;
@@ -276,19 +266,14 @@ static void init(int argc, char *argv[])
 	fprintf(stderr, "%s: no node specified\n", CmdName);
 	usage(1);
     }
-    Files = malloc(sizeof(char *) * (argc / 2 + 2));
-    Nodes = malloc(sizeof(char *) * (argc / 2 + 2));
+    Files = gv_calloc((size_t)argc / 2 + 2, sizeof(char *));
+    Nodes = gv_calloc((size_t)argc / 2 + 2, sizeof(char *));
     for (j = i = 0; i < argc; i++) {
 	Nodes[j] = argv[i++];
-	Files[j] = (argv[i] ? argv[i] : "-");
+	Files[j] = argv[i] ? argv[i] : "-";
 	j++;
     }
-    Nodes[j] = Files[j] = 0;
-}
-
-static Agraph_t *gread(FILE * fp)
-{
-    return agread(fp, (Agdisc_t *) 0);
+    Nodes[j] = Files[j] = NULL;
 }
 
 int main(int argc, char **argv)
@@ -296,12 +281,12 @@ int main(int argc, char **argv)
     Agraph_t *g;
     Agnode_t *n;
     ingraph_state ig;
-    int i = 0;
+    size_t i = 0;
     int code = 0;
     Dict_t *Q;
 
     init(argc, argv);
-    newIngraph(&ig, Files, gread);
+    newIngraph(&ig, Files);
 
     Q = dtopen(&MyDisc, Dtoset);
     while ((g = nextGraph(&ig)) != 0) {
@@ -318,5 +303,7 @@ int main(int argc, char **argv)
 	agclose(g);
 	i++;
     }
-    exit(code);
+    free(Nodes);
+    free(Files);
+    graphviz_exit(code);
 }

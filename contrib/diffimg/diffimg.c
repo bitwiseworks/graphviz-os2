@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at http://www.graphviz.org/
  *************************************************************************/
 
 /*
@@ -30,35 +27,28 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#ifndef _WIN32
-//#include <unistd.h>
-#endif
 
 #ifdef _WIN32
 #define EX_USAGE		64
 #define EX_DATAERR		65
 #define EX_NOINPUT		66
 #define EX_UNAVAILABLE	69
-#define bool int
-#define false 0
+#define EX_OSERR	71
 #else
 #include <sysexits.h>
 #endif
 #include <gd.h>
 #include <stdbool.h>
-
-#define NOT(v) (!(v))
-#ifndef false
-#define false 0
-#define true NOT(false)
-#endif
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <cgraph/exit.h>
 
 static char *pstopng="gs -dNOPAUSE -sDEVICE=pngalpha -sOutputFile=- -q -";
 
 static gdImagePtr imageLoad (char *filename)
 {
     FILE *f;
-    char *ext, *cmd, *tmp;
+    char *ext;
     gdImagePtr im;
     int rc;
     struct stat statbuf;
@@ -66,40 +56,36 @@ static gdImagePtr imageLoad (char *filename)
     ext = strrchr(filename, '.');
     if (!ext) {
         fprintf(stderr, "Filename \"%s\" has no file extension.\n", filename);
-        exit(EX_USAGE);
+        graphviz_exit(EX_USAGE);
     }
     rc = stat(filename, &statbuf);
     if (rc) {
 	 fprintf(stderr, "Failed to stat \"%s\"\n", filename);
-         exit(EX_NOINPUT);
+         graphviz_exit(EX_NOINPUT);
     }
     if (strcasecmp(ext, ".ps") == 0) {
 	ext = ".png";
-	tmp = malloc(strlen(filename) + strlen(ext) + 1);
-	strcpy(tmp,filename);
-	strcat(tmp,ext);
+	agxbuf fname = {0};
+	agxbprint(&fname, "%s%s", filename, ext);
+	const char *tmp = agxbuse(&fname);
 	
-	cmd = malloc(strlen(pstopng) + 2 + strlen(filename) + 2 + strlen(tmp) + 1);
-	strcpy(cmd,pstopng);
-	strcat(cmd," <");
-	strcat(cmd,filename);
-	strcat(cmd," >");
-	strcat(cmd,tmp);
-	rc = system(cmd);
-	free(cmd);
+	agxbuf cmd = {0};
+	agxbprint(&cmd, "%s <%s >%s", pstopng, filename, tmp);
+	rc = system(agxbuse(&cmd));
+	agxbfree(&cmd);
 	
         f = fopen(tmp, "rb");
-	free(tmp);
+	agxbfree(&fname);
         if (!f) {
             fprintf(stderr, "Failed to open converted \"%s%s\"\n", filename, ext);
-            exit(EX_NOINPUT);
+            graphviz_exit(EX_NOINPUT);
         }
     }
     else {
         f = fopen(filename, "rb");
         if (!f) {
             fprintf(stderr, "Failed to open \"%s\"\n", filename);
-            exit(EX_NOINPUT);
+            graphviz_exit(EX_NOINPUT);
         }
     }
     im = 0;
@@ -108,7 +94,7 @@ static gdImagePtr imageLoad (char *filename)
         im = gdImageCreateFromPng(f);
 #else
         fprintf(stderr, "PNG support is not available\n");
-        exit(EX_UNAVAILABLE);
+        graphviz_exit(EX_UNAVAILABLE);
 #endif
     }
     else if (strcasecmp(ext, ".gif") == 0) {
@@ -116,7 +102,7 @@ static gdImagePtr imageLoad (char *filename)
         im = gdImageCreateFromGif(f);
 #else
         fprintf(stderr, "GIF support is not available\n");
-        exit(EX_UNAVAILABLE);
+        graphviz_exit(EX_UNAVAILABLE);
 #endif
     }
     else if (strcasecmp(ext, ".jpg") == 0) {
@@ -124,13 +110,13 @@ static gdImagePtr imageLoad (char *filename)
         im = gdImageCreateFromJpeg(f);
 #else
         fprintf(stderr, "JPEG support is not available\n");
-        exit(EX_UNAVAILABLE);
+        graphviz_exit(EX_UNAVAILABLE);
 #endif
     }
     fclose(f);
     if (!im) {
         fprintf(stderr, "Loading image from file  \"%s\" failed!\n", filename);
-        exit(EX_DATAERR);
+        graphviz_exit(EX_DATAERR);
     }
     return im;
 }
@@ -164,9 +150,13 @@ int main(int argc, char **argv)
     FILE *f;
 #endif
 
+    if (argc == 2 && strcmp(argv[1], "-?") == 0) {
+        fprintf(stderr, "Usage: diffimg image1 image2 [outimage]\n");
+        graphviz_exit(0);
+    }
     if (argc < 3) {
         fprintf(stderr, "Usage: diffimg image1 image2 [outimage]\n");
-        exit(EX_USAGE);
+        graphviz_exit(EX_USAGE);
     }
     A = imageLoad(argv[1]);
     B = imageLoad(argv[2]);
@@ -202,6 +192,6 @@ int main(int argc, char **argv)
     gdImageDestroy(B);
     gdImageDestroy(C);
 
-    return (rc ? EXIT_FAILURE : EXIT_SUCCESS);
+    graphviz_exit(rc ? EXIT_FAILURE : EXIT_SUCCESS);
 }
 

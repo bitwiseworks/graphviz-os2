@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -17,40 +14,30 @@
  *
  */
 
-#ifdef _WIN32
-#include "windows.h"
-#include "shlwapi.h"
-#endif
-
-#include <gprstate.h>
-#include <error.h>
-#include <sfstr.h>
+#include <gvpr/gprstate.h>
+#include <ast/error.h>
+#include <cgraph/alloc.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 
 static int name_used;
 
-int validTVT(int c)
-{
-    return ((TV_flat <= c) && (c <= TV_prepostrev));
+bool validTVT(long long c) {
+  return TV_flat <= c && c <= TV_prepostrev;
 }
 
-void initGPRState(Gpr_t * state, Vmalloc_t * vm)
-{
-    state->tgtname = vmstrdup(vm, "gvpr_result");
+void initGPRState(Gpr_t *state) {
+  state->tgtname = strdup("gvpr_result");
 }
 
 Gpr_t *openGPRState(gpr_info* info)
 {
     Gpr_t *state;
 
-    if (!(state = newof(0, Gpr_t, 1, 0))) {
+    if (!(state = calloc(1, sizeof(Gpr_t)))) {
 	error(ERROR_ERROR, "Could not create gvpr state: out of memory");
 	return state;
-    }
-
-    if (!(state->tmp = sfstropen())) {
-	error(ERROR_ERROR, "Could not create state tmpfile");
-	free (state);
-	return 0;
     }
 
     state->tvt = TV_flat;
@@ -71,7 +58,7 @@ Gpr_t *openGPRState(gpr_info* info)
 static int
 bindingcmpf (const void *key, const void *ip)
 {
-    return strcmp (((gvprbinding*)key)->name, ((gvprbinding*)ip)->name);
+    return strcmp (((const gvprbinding*)key)->name, ((const gvprbinding*)ip)->name);
 }
 
 /* findBinding:
@@ -92,7 +79,7 @@ findBinding (Gpr_t* state, char* fname)
     }
 
     key.name = fname;
-    bp = (gvprbinding*)bsearch(&key, state->bindings, state->n_bindings, sizeof(gvprbinding), bindingcmpf); 
+    bp = bsearch(&key, state->bindings, state->n_bindings, sizeof(gvprbinding), bindingcmpf);
     if (!bp)
 	error(ERROR_ERROR, "No binding for \"%s\" in call()", fname);
     return bp;
@@ -103,7 +90,7 @@ findBinding (Gpr_t* state, char* fname)
  */
 void addBindings (Gpr_t* state, gvprbinding* bindings)
 {
-    int n = 0;
+    size_t n = 0;
     gvprbinding* bp = bindings;
     gvprbinding* buf;
     gvprbinding* bufp;
@@ -114,7 +101,7 @@ void addBindings (Gpr_t* state, gvprbinding* bindings)
     }
 
     if (n == 0) return;
-    bufp = buf = newof(0, gvprbinding, n, 0);
+    bufp = buf = gv_calloc(n, sizeof(gvprbinding));
     bp = bindings;
     while (bp->name) {
         if (bp->fn) {
@@ -133,17 +120,7 @@ void closeGPRState(Gpr_t* state)
 {
     if (!state) return;
     name_used = state->name_used;
-    if (state->tmp)
-	sfclose (state->tmp);
+    free(state->tgtname);
     free (state->dp);
     free (state);
 }
-
-#ifdef WIN32_DLL
-int pathisrelative (char* path)
-{
-    return PathIsRelative(path);
-
-}
-#endif
-

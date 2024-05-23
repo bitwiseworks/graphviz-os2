@@ -51,42 +51,33 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib\ast;$(SolutionDir)lib\cdt;$(SolutionDir)lib\sfio;$(SolutionDir)lib\vmalloc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NDEBUG;_LIB;WIN32_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <MinimalRebuild>true</MinimalRebuild>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib;$(SolutionDir)lib\cdt;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;GVDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
     </ClCompile>
     <Lib />
     <PreBuildEvent>
-      <Command>bison -dy exparse.y -o exparse-intermediate.c
-sed "s/yy/ex/g" &lt; exparse-intermediate.c | sed "s/YY/EX/g" &gt; exparse.c
-sed "s/yy/ex/g" &lt; exparse-intermediate.h | sed "s/YY/EX/g" &gt; exparse.h
-del exparse-intermediate.c
-del exparse-intermediate.h</Command>
+      <Command>win_bison -dy -Wno-yacc exparse.y -o exparse.c</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib\ast;$(SolutionDir)lib\cdt;$(SolutionDir)lib\sfio;$(SolutionDir)lib\vmalloc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NDEBUG;_LIB;WIN32_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib;$(SolutionDir)lib\cdt;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;GVDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
     </ClCompile>
     <Lib />
     <PreBuildEvent>
-      <Command>bison -dy exparse.y -o exparse-intermediate.c
-sed "s/yy/ex/g" &lt; exparse-intermediate.c | sed "s/YY/EX/g" &gt; exparse.c
-sed "s/yy/ex/g" &lt; exparse-intermediate.h | sed "s/YY/EX/g" &gt; exparse.h
-del exparse-intermediate.c
-del exparse-intermediate.h</Command>
+      <Command>win_bison -dy -Wno-yacc exparse.y -o exparse.c</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -97,18 +88,15 @@ del exparse-intermediate.h</Command>
     <ClInclude Include="expr.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="exparse.c" />
     <ClCompile Include="excc.c" />
     <ClCompile Include="excontext.c" />
     <ClCompile Include="exdata.c" />
     <ClCompile Include="exerror.c" />
     <ClCompile Include="exeval.c" />
     <ClCompile Include="exexpr.c" />
-    <ClCompile Include="exlexname.c" />
     <ClCompile Include="exnospace.c" />
     <ClCompile Include="exopen.c" />
-    <ClCompile Include="exrewind.c" />
-    <ClCompile Include="exstash.c" />
+    <ClCompile Include="exparse.c" />
     <ClCompile Include="extoken.c" />
     <ClCompile Include="extype.c" />
     <ClCompile Include="exzero.c" />

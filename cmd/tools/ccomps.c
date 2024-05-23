@@ -1,14 +1,16 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief connected components filter for graphs
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -17,14 +19,19 @@
  * Updated by Emden Gansner
  */
 
-#include "config.h"
-
-#include <ctype.h>
+#include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
-#include "cgraph.h"
-
-#define N_NEW(n,t)       (t*)calloc((n),sizeof(t))
-#define NEW(t)           (t*)malloc(sizeof(t))
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <cgraph/cgraph.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/ingraphs.h>
+#include <cgraph/prisize_t.h>
+#include <cgraph/stack.h>
+#include <cgraph/startswith.h>
+#include <cgraph/unreachable.h>
+#include <cgraph/exit.h>
 
 typedef struct {
     Agrec_t h;
@@ -46,11 +53,7 @@ typedef struct {
 
 #include <getopt.h>
 
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 #include <string.h>
-#include "ingraphs.h"
 
   /* internals of libgraph */
 #define TAG_NODE            1
@@ -65,24 +68,24 @@ typedef struct {
 #define BY_INDEX 1
 #define BY_SIZE  2
 
-char* Cmd;
-char **Files;
-int verbose;
-int printMode = INTERNAL;
-int useClusters = 0;
-int doEdges = 1;		/* induce edges */
-int doAll = 1;			/* induce subgraphs */
-char *suffix = 0;
-char *outfile = 0;
-char *path = 0;
-int sufcnt = 0;
-int sorted = 0;
-int sortIndex = 0;
-int sortFinal;
-int x_index = -1;
-int x_final = -1;  /* require 0 <= x_index <= x_final or x_final= -1 */ 
-int x_mode;
-char *x_node;
+static char* Cmd;
+static char **Files;
+static int verbose;
+static int printMode = INTERNAL;
+static int useClusters = 0;
+static int doEdges = 1; // induce edges
+static int doAll = 1; // induce subgraphs
+static char *suffix = 0;
+static char *outfile = 0;
+static char *path = 0;
+static int sufcnt = 0;
+static int sorted = 0;
+static int sortIndex = 0;
+static int sortFinal;
+static int x_index = -1;
+static int x_final = -1; // require 0 <= x_index <= x_final or x_final= -1
+static int x_mode;
+static char *x_node;
 
 static char *useString =
     "Usage: ccomps [-svenCx?] [-X[#%]s[-f]] [-o<out template>] <files>\n\
@@ -101,23 +104,19 @@ If no files are specified, stdin is used\n";
 static void usage(int v)
 {
     printf("%s",useString);
-    exit(v);
+    graphviz_exit(v);
 }
 
-static void split(char *name)
-{
+static void split(void) {
     char *sfx = 0;
-    int size;
 
-    sfx = strrchr(name, '.');
+    sfx = strrchr(outfile, '.');
     if (sfx) {
 	suffix = sfx + 1;
-	size = sfx - name;
-	path = (char *) malloc(size + 1);
-	strncpy(path, name, size);
-	*(path + size) = '\0';
+	size_t size = (size_t)(sfx - outfile);
+	path = gv_strndup(outfile, size);
     } else {
-	path = name;
+	path = outfile;
     }
 }
 
@@ -126,7 +125,7 @@ static void split(char *name)
  */
 static int isCluster(Agraph_t * g)
 {
-    return (strncmp(agnameof(g), "cluster", 7) == 0);
+  return startswith(agnameof(g), "cluster");
 }
 
 static void init(int argc, char *argv[])
@@ -136,11 +135,11 @@ static void init(int argc, char *argv[])
 
     Cmd = argv[0];
     opterr = 0;
-    while ((c = getopt(argc, argv, ":zo:xCX:nesv")) != -1) {
+    while ((c = getopt(argc, argv, ":zo:xCX:nesv?")) != -1) {
 	switch (c) {
 	case 'o':
 	    outfile = optarg;
-	    split(outfile);
+	    split();
 	    break;
 	case 'C':
 	    useClusters = 1;
@@ -158,16 +157,16 @@ static void init(int argc, char *argv[])
 	    printMode = SILENT;
 	    break;
 	case 'X':
-	    if ((*optarg == '#') || (*optarg == '%')) {
+	    if (*optarg == '#' || *optarg == '%') {
 		char *p = optarg + 1;
 		if (*optarg == '#') x_mode = BY_INDEX;
 		else x_mode = BY_SIZE;
-		if (isdigit(*p)) {
+		if (gv_isdigit(*p)) {
 		    x_index = (int)strtol (p, &endp, 10);
 		    printMode = EXTRACT;
 		    if (*endp == '-') {
 			p = endp + 1;
-			if (isdigit(*p)) {
+			if (gv_isdigit(*p)) {
 			    x_final = atoi (p);
 			    if (x_final < x_index) {
 				printMode = INTERNAL;
@@ -205,19 +204,23 @@ static void init(int argc, char *argv[])
 		"ccomps: option -%c missing argument - ignored\n", optopt);
 	    break;
 	case '?':
-	    if (optopt == '?')
+	    if (optopt == '\0' || optopt == '?')
 		usage(0);
-	    else
+	    else {
 		fprintf(stderr,
-			"ccomps: option -%c unrecognized - ignored\n", optopt);
+			"ccomps: option -%c unrecognized\n", optopt);
+                usage(1);
+	    }
 	    break;
+	default:
+	    UNREACHABLE();
 	}
     }
     argv += optind;
     argc -= optind;
 
     if (sorted) {
-	if ((printMode == EXTRACT) && (x_index >= 0)) {
+	if (printMode == EXTRACT && x_index >= 0) {
 	    printMode = INTERNAL;
 	    sortIndex = x_index;
 	    sortFinal = x_final;
@@ -233,71 +236,20 @@ static void init(int argc, char *argv[])
 	Files = argv;
 }
 
-typedef struct blk_t {
-    Agnode_t **data;
-    Agnode_t **endp;
-    struct blk_t *prev;
-    struct blk_t *next;
-} blk_t;
-
-typedef struct {
-    blk_t *fstblk;
-    blk_t *curblk;
-    Agnode_t **curp;
-} stk_t;
-
-
-#define SMALLBUF 1024
-#define BIGBUF 1000000
-
-static Agnode_t *base[SMALLBUF];
-static blk_t Blk;
-static stk_t Stk;
-
-static void initStk(void)
-{
-    Blk.data = base;
-    Blk.endp = Blk.data + SMALLBUF;
-    Stk.curblk = Stk.fstblk = &Blk;
-    Stk.curp = Stk.curblk->data;
-}
+static gv_stack_t Stk;
 
 static void push(Agnode_t * np)
 {
-    if (Stk.curp == Stk.curblk->endp) {
-	if (Stk.curblk->next == NULL) {
-	    blk_t *bp = NEW(blk_t);
-	    if (bp == 0) {
-		fprintf(stderr, "gc: Out of memory\n");
-		exit(1);
-	    }
-	    bp->prev = Stk.curblk;
-	    bp->next = NULL;
-	    bp->data = N_NEW(BIGBUF, Agnode_t *);
-	    if (bp->data == 0) {
-		fprintf(stderr, "%s: Out of memory\n", Cmd);
-		exit(1);
-	    }
-	    bp->endp = bp->data + BIGBUF;
-	    Stk.curblk->next = bp;
-	}
-	Stk.curblk = Stk.curblk->next;
-	Stk.curp = Stk.curblk->data;
-    }
-    ND_mark(np) = -1;
-    *Stk.curp++ = np;
+  ND_mark(np) = -1;
+  stack_push(&Stk, np);
 }
 
 static Agnode_t *pop(void)
 {
-    if (Stk.curp == Stk.curblk->data) {
-	if (Stk.curblk == Stk.fstblk)
-	    return 0;
-	Stk.curblk = Stk.curblk->prev;
-	Stk.curp = Stk.curblk->endp;
-    }
-    Stk.curp--;
-    return *Stk.curp;
+  if (stack_is_empty(&Stk)) {
+    return NULL;
+  }
+  return stack_pop(&Stk);
 }
 
 static int dfs(Agraph_t * g, Agnode_t * n, Agraph_t * out)
@@ -321,45 +273,20 @@ static int dfs(Agraph_t * g, Agnode_t * n, Agraph_t * out)
     return cnt;
 }
 
-/* nodeInduce:
- * Using the edge set of eg, add to g any edges
- * with both endpoints in g.
- */
-static int nodeInduce(Agraph_t * g, Agraph_t * eg)
-{
-    Agnode_t *n;
-    Agedge_t *e;
-    int e_cnt = 0;
-
-    for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-	for (e = agfstout(eg, n); e; e = agnxtout(eg, e)) {
-	    if (agsubnode(g, aghead(e), 0)) {
-		agsubedge(g, e, 1);
-		e_cnt++;
-	    }
-	}
-    }
-    return e_cnt;
-}
-
 static char *getName(void)
 {
-    char *name;
-    static char *buf = 0;
+    agxbuf name = {0};
 
     if (sufcnt == 0)
-	name = outfile;
+	agxbput(&name, outfile);
     else {
-	if (!buf)
-	    buf = (char *) malloc(strlen(outfile) + 20);	/* enough to handle '_number' */
 	if (suffix)
-	    sprintf(buf, "%s_%d.%s", path, sufcnt, suffix);
+	    agxbprint(&name, "%s_%d.%s", path, sufcnt, suffix);
 	else
-	    sprintf(buf, "%s_%d", path, sufcnt);
-	name = buf;
+	    agxbprint(&name, "%s_%d", path, sufcnt);
     }
     sufcnt++;
-    return name;
+    return agxbdisown(&name);
 }
 
 static void gwrite(Agraph_t * g)
@@ -376,32 +303,13 @@ static void gwrite(Agraph_t * g)
 	if (!outf) {
 	    fprintf(stderr, "Could not open %s for writing\n", name);
 	    perror("ccomps");
+	    free(name);
+	    graphviz_exit(EXIT_FAILURE);
 	}
+	free(name);
 	agwrite(g, outf);
-	fflush(outf);
 	fclose(outf);
     }
-}
-
-/* getBuf
- * Return pointer to buffer containing at least n bytes.
- * Non-reentrant.
- */
-static char *getBuf(int n)
-{
-    static int len = 0;
-    static char *buf = 0;
-    int sz;
-
-    if (n > len) {
-	sz = n + 100;
-	if (len == 0)
-	    buf = (char *) malloc(sz);
-	else
-	    buf = (char *) realloc(buf, sz);
-	len = sz;
-    }
-    return buf;
 }
 
 /* projectG:
@@ -428,7 +336,7 @@ static Agraph_t *projectG(Agraph_t * subg, Agraph_t * g, int inCluster)
 	proj = agsubg(g, agnameof(subg), 1);
     }
     if (proj) {
-	if (doEdges) nodeInduce(proj, subg);
+	if (doEdges) (void)graphviz_node_induce(proj, subg);
 	agcopyattr(subg, proj);
     }
 
@@ -478,9 +386,9 @@ static void deriveClusters(Agraph_t* dg, Agraph_t * g)
     Agnode_t *n;
 
     for (subg = agfstsubg(g); subg; subg = agnxtsubg(subg)) {
-	if (!strncmp(agnameof(subg), "cluster", 7)) {
+	if (startswith(agnameof(subg), "cluster")) {
 	    dn = agnode(dg, agnameof(subg), 1);
-	    agbindrec (dn, "nodeinfo", sizeof(Agnodeinfo_t), TRUE);
+	    agbindrec (dn, "nodeinfo", sizeof(Agnodeinfo_t), true);
 	    ND_ptr(dn) = (Agobj_t*)subg;
 	    for (n = agfstnode(subg); n; n = agnxtnode(subg, n)) {
 		if (ND_ptr(n)) {
@@ -515,7 +423,7 @@ static Agraph_t *deriveGraph(Agraph_t * g)
 	if (ND_dn(n))
 	    continue;
 	dn = agnode(dg, agnameof(n), 1);
-	agbindrec (dn, "nodeinfo", sizeof(Agnodeinfo_t), TRUE);
+	agbindrec (dn, "nodeinfo", sizeof(Agnodeinfo_t), true);
 	ND_ptr(dn) = (Agobj_t*)n;
 	ND_ptr(n) = (Agobj_t*)dn;
     }
@@ -558,17 +466,34 @@ static void unionNodes(Agraph_t * dg, Agraph_t * g)
     }
 }
 
-typedef int (*qsort_cmpf) (const void *, const void *);
-
-static int cmp(Agraph_t** p0, Agraph_t** p1)
-{
-    return (agnnodes(*p1) - agnnodes(*p0));
+static int cmp(const void *x, const void *y) {
+// Suppress Clang/GCC -Wcast-qual warning. Casting away const here is acceptable
+// as the later usage is const. We need the cast because `agnnodes` uses
+// non-const pointers.
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
+  Agraph_t **p0 = (Agraph_t **)x;
+  Agraph_t **p1 = (Agraph_t **)y;
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+  const int n0 = agnnodes(*p0);
+  const int n1 = agnnodes(*p1);
+  if (n0 < n1) {
+    return 1;
+  }
+  if (n0 > n1) {
+    return -1;
+  }
+  return 0;
 }
 
 static void
 printSorted (Agraph_t* root, int c_cnt)
 {
-    Agraph_t** ccs = N_NEW(c_cnt, Agraph_t*);
+    Agraph_t** ccs = gv_calloc(c_cnt, sizeof(Agraph_t*));
     Agraph_t* subg;
     int i = 0, endi;
 
@@ -577,7 +502,7 @@ printSorted (Agraph_t* root, int c_cnt)
 	    ccs[i++] = subg;
     }
     /* sort by component size, largest first */
-    qsort (ccs, c_cnt, sizeof(Agraph_t*), (qsort_cmpf)cmp);
+    qsort(ccs, c_cnt, sizeof(Agraph_t *), cmp);
 
     if (sortIndex >= 0) {
 	if (x_mode == BY_INDEX) {
@@ -585,6 +510,7 @@ printSorted (Agraph_t* root, int c_cnt)
 		fprintf(stderr,
 		    "ccomps: component %d not found in graph %s - ignored\n",
 		    sortIndex, agnameof(root));
+		free(ccs);
 		return;
 	    }
 	    if (sortFinal >= sortIndex) {
@@ -604,9 +530,8 @@ printSorted (Agraph_t* root, int c_cnt)
 	    if (sortFinal == -1)
 		sortFinal = agnnodes(ccs[0]);
             for (i = 0; i < c_cnt ; i++) {
-		int sz;
 		subg = ccs[i];
-		sz = agnnodes(subg);
+		int sz = agnnodes(subg);
 		if (sz > sortFinal) continue;
 		if (sz < sortIndex) break;
 		if (doAll)
@@ -630,8 +555,7 @@ printSorted (Agraph_t* root, int c_cnt)
 static int processClusters(Agraph_t * g, char* graphName)
 {
     Agraph_t *dg;
-    long n_cnt, c_cnt, e_cnt;
-    char *name;
+    long n_cnt, c_cnt;
     Agraph_t *out;
     Agnode_t *n;
     Agraph_t *dout;
@@ -647,24 +571,28 @@ static int processClusters(Agraph_t * g, char* graphName)
 		    x_node, agnameof(g));
 	    return 1;
 	}
-	name = getBuf(sizeof(PFX1) + strlen(graphName));
-	sprintf(name, PFX1, graphName);
-	dout = agsubg(dg, name, 1);
-	out = agsubg(g, name, 1);
-	aginit(out, AGRAPH, "graphinfo", sizeof(Agraphinfo_t), TRUE);
+	{
+	    agxbuf buf = {0};
+	    agxbprint(&buf, PFX1, graphName);
+	    char *name = agxbuse(&buf);
+	    dout = agsubg(dg, name, 1);
+	    out = agsubg(g, name, 1);
+	    agxbfree(&buf);
+	}
+	aginit(out, AGRAPH, "graphinfo", sizeof(Agraphinfo_t), true);
 	GD_cc_subg(out) = 1;
 	dn = ND_dn(n);
 	n_cnt = dfs(dg, dn, dout);
 	unionNodes(dout, out);
+	size_t e_cnt = 0;
 	if (doEdges)
-	    e_cnt = nodeInduce(out, out->root);
-	else
-	    e_cnt = 0;
+	    e_cnt = graphviz_node_induce(out, out->root);
 	if (doAll)
 	    subGInduce(g, out);
 	gwrite(out);
 	if (verbose)
-	    fprintf(stderr, " %7ld nodes %7ld edges\n", n_cnt, e_cnt);
+	    fprintf(stderr, " %7ld nodes %7" PRISIZE_T " edges\n", n_cnt,
+	            e_cnt);
 	return 0;
     }
 
@@ -672,18 +600,21 @@ static int processClusters(Agraph_t * g, char* graphName)
     for (dn = agfstnode(dg); dn; dn = agnxtnode(dg, dn)) {
 	if (ND_mark(dn))
 	    continue;
-	name = getBuf(sizeof(PFX2) + strlen(graphName) + 32);
-	sprintf(name, PFX2, graphName, c_cnt);
-	dout = agsubg(dg, name, 1);
-	out = agsubg(g, name, 1);
-	aginit(out, AGRAPH, "graphinfo", sizeof(Agraphinfo_t), TRUE);
+	{
+	    agxbuf buf = {0};
+	    agxbprint(&buf, PFX2, graphName, c_cnt);
+	    char *name = agxbuse(&buf);
+	    dout = agsubg(dg, name, 1);
+	    out = agsubg(g, name, 1);
+	    agxbfree(&buf);
+	}
+	aginit(out, AGRAPH, "graphinfo", sizeof(Agraphinfo_t), true);
 	GD_cc_subg(out) = 1;
 	n_cnt = dfs(dg, dn, dout);
 	unionNodes(dout, out);
+	size_t e_cnt = 0;
 	if (doEdges)
-	    e_cnt = nodeInduce(out, out->root);
-	else
-	    e_cnt = 0;
+	    e_cnt = graphviz_node_induce(out, out->root);
 	if (printMode == EXTERNAL) {
 	    if (doAll)
 		subGInduce(g, out);
@@ -701,7 +632,7 @@ static int processClusters(Agraph_t * g, char* graphName)
 	    }
 	    else if (x_mode == BY_SIZE) {
 		int sz = agnnodes(out);
-		if ((x_index <= sz) && ((x_final == -1) || (sz <= x_final))) {
+		if (x_index <= sz && (x_final == -1 || sz <= x_final)) {
 		    extracted = 1;
 		    if (doAll)
 			subGInduce(g, out);
@@ -713,11 +644,11 @@ static int processClusters(Agraph_t * g, char* graphName)
 	    agdelete(g, out);
 	agdelete(dg, dout);
 	if (verbose)
-	    fprintf(stderr, "(%4ld) %7ld nodes %7ld edges\n",
+	    fprintf(stderr, "(%4ld) %7ld nodes %7" PRISIZE_T " edges\n",
 		    c_cnt, n_cnt, e_cnt);
 	c_cnt++;
     }
-    if ((printMode == EXTRACT) && !extracted && (x_mode == BY_INDEX))  {
+    if (printMode == EXTRACT && !extracted && x_mode == BY_INDEX)  {
 	fprintf(stderr,
 		"ccomps: component %d not found in graph %s - ignored\n",
 		x_index, agnameof(g));
@@ -743,7 +674,7 @@ bindGraphinfo (Agraph_t * g)
 {
     Agraph_t *subg;
 
-    aginit(g, AGRAPH, "graphinfo", sizeof(Agraphinfo_t), TRUE);
+    aginit(g, AGRAPH, "graphinfo", sizeof(Agraphinfo_t), true);
     for (subg = agfstsubg(g); subg; subg = agnxtsubg(subg)) {
 	bindGraphinfo (subg);
     }
@@ -754,15 +685,13 @@ bindGraphinfo (Agraph_t * g)
  */
 static int process(Agraph_t * g, char* graphName)
 {
-    long n_cnt, c_cnt, e_cnt;
-    char *name;
+    long n_cnt, c_cnt;
     Agraph_t *out;
     Agnode_t *n;
     int extracted = 0;
 
-    aginit(g, AGNODE, "nodeinfo", sizeof(Agnodeinfo_t), TRUE);
+    aginit(g, AGNODE, "nodeinfo", sizeof(Agnodeinfo_t), true);
     bindGraphinfo (g);
-    initStk();
 
     if (useClusters)
 	return processClusters(g, graphName);
@@ -775,21 +704,24 @@ static int process(Agraph_t * g, char* graphName)
 		    x_node, agnameof(g));
 	    return 1;
 	}
-	name = getBuf(sizeof(PFX1) + strlen(graphName));
-	sprintf(name, PFX1, graphName);
-	out = agsubg(g, name, 1);
-	aginit(out, AGRAPH, "graphinfo", sizeof(Agraphinfo_t), TRUE);
+	{
+	    agxbuf name = {0};
+	    agxbprint(&name, PFX1, graphName);
+	    out = agsubg(g, agxbuse(&name), 1);
+	    agxbfree(&name);
+	}
+	aginit(out, AGRAPH, "graphinfo", sizeof(Agraphinfo_t), true);
 	GD_cc_subg(out) = 1;
 	n_cnt = dfs(g, n, out);
+	size_t e_cnt = 0;
 	if (doEdges)
-	    e_cnt = nodeInduce(out, out->root);
-	else
-	    e_cnt = 0;
+	    e_cnt = graphviz_node_induce(out, out->root);
 	if (doAll)
 	    subGInduce(g, out);
 	gwrite(out);
 	if (verbose)
-	    fprintf(stderr, " %7ld nodes %7ld edges\n", n_cnt, e_cnt);
+	    fprintf(stderr, " %7ld nodes %7" PRISIZE_T " edges\n", n_cnt,
+	            e_cnt);
 	return 0;
     }
 
@@ -797,16 +729,18 @@ static int process(Agraph_t * g, char* graphName)
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	if (ND_mark(n))
 	    continue;
-	name = getBuf(sizeof(PFX2) + strlen(graphName) + 32);
-	sprintf(name, PFX2, graphName, c_cnt);
-	out = agsubg(g, name, 1);
-	aginit(out, AGRAPH, "graphinfo", sizeof(Agraphinfo_t), TRUE);
+	{
+	    agxbuf name = {0};
+	    agxbprint(&name, PFX2, graphName, c_cnt);
+	    out = agsubg(g, agxbuse(&name), 1);
+	    agxbfree(&name);
+	}
+	aginit(out, AGRAPH, "graphinfo", sizeof(Agraphinfo_t), true);
 	GD_cc_subg(out) = 1;
 	n_cnt = dfs(g, n, out);
+	size_t e_cnt = 0;
 	if (doEdges)
-	    e_cnt = nodeInduce(out, out->root);
-	else
-	    e_cnt = 0;
+	    e_cnt = graphviz_node_induce(out, out->root);
 	if (printMode == EXTERNAL) {
 	    if (doAll)
 		subGInduce(g, out);
@@ -824,7 +758,7 @@ static int process(Agraph_t * g, char* graphName)
 	    }
 	    else if (x_mode == BY_SIZE) {
 		int sz = agnnodes(out);
-		if ((x_index <= sz) && ((x_final == -1) || (sz <= x_final))) {
+		if (x_index <= sz && (x_final == -1 || sz <= x_final)) {
 		    extracted = 1;
 		    if (doAll)
 			subGInduce(g, out);
@@ -835,11 +769,11 @@ static int process(Agraph_t * g, char* graphName)
 	if (printMode != INTERNAL)
 	    agdelete(g, out);
 	if (verbose)
-	    fprintf(stderr, "(%4ld) %7ld nodes %7ld edges\n",
+	    fprintf(stderr, "(%4ld) %7ld nodes %7" PRISIZE_T " edges\n",
 		    c_cnt, n_cnt, e_cnt);
 	c_cnt++;
     }
-    if ((printMode == EXTRACT) && !extracted && (x_mode == BY_INDEX))  {
+    if (printMode == EXTRACT && !extracted && x_mode == BY_INDEX)  {
 	fprintf(stderr,
 		"ccomps: component %d not found in graph %s - ignored\n",
 		x_index, agnameof(g));
@@ -854,12 +788,7 @@ static int process(Agraph_t * g, char* graphName)
     if (verbose)
 	fprintf(stderr, "       %7d nodes %7d edges %7ld components %s\n",
 		agnnodes(g), agnedges(g), c_cnt, agnameof(g));
-    return (c_cnt > 1);
-}
-
-static Agraph_t *gread(FILE * fp)
-{
-    return agread(fp, (Agdisc_t *) 0);
+    return c_cnt > 1;
 }
 
 /* chkGraphName:
@@ -876,21 +805,13 @@ static Agraph_t *gread(FILE * fp)
 static char*
 chkGraphName (Agraph_t* g)
 {
-    static char* buf = NULL;
-    static int buflen = 0;
+    static agxbuf buf;
     char* s = agnameof(g);
-    int len;
 
     if (*s != '%') return s;
-    len = strlen(s) + 2;   /* plus '\0' and '_' */
-    if (len > buflen) {
-	buf = realloc (buf, len);
-	buflen = len;
-    }
-    buf[0] = '_';
-    strcpy (buf+1, s);
+    agxbprint(&buf, "_%s", s);
 
-    return buf;
+    return agxbuse(&buf);
 }
 
 int main(int argc, char *argv[])
@@ -899,12 +820,14 @@ int main(int argc, char *argv[])
     ingraph_state ig;
     int r = 0;
     init(argc, argv);
-    newIngraph(&ig, Files, gread);
+    newIngraph(&ig, Files);
 
     while ((g = nextGraph(&ig)) != 0) {
 	r += process(g, chkGraphName(g));
 	agclose(g);
     }
 
-    return r;
+    stack_reset(&Stk);
+
+    graphviz_exit(r);
 }

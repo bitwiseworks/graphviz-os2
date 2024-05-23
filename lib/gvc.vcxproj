@@ -51,16 +51,15 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(SolutionDir)windows\include;$(SolutionDir)windows\dependencies\GTK2\include;$(SolutionDir)windows\dependencies\libraries\x86\include;$(SolutionDir);$(SolutionDir)lib\ast;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;$(SolutionDir)lib\fdpgen;$(SolutionDir)lib\label;$(SolutionDir)lib\pathplan;$(SolutionDir)lib\gvc;$(SolutionDir)lib\xdot;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;GVC_EXPORTS;WIN32_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <MinimalRebuild>true</MinimalRebuild>
+      <AdditionalIncludeDirectories>$(SolutionDir)windows\include;$(SolutionDir)windows\include\unistd;$(SolutionDir)windows\dependencies\GTK2\include;$(SolutionDir)windows\dependencies\libraries\x86\include;$(SolutionDir);$(SolutionDir)lib;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;$(SolutionDir)lib\pathplan;$(SolutionDir)lib\gvc;$(SolutionDir)lib\xdot;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;GVDLL;GVC_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(SolutionDir)windows\dependencies\libraries\x86\lib;$(OutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -68,19 +67,14 @@
       <SubSystem>Windows</SubSystem>
       <DataExecutionPrevention />
       <TargetMachine>MachineX86</TargetMachine>
-      <ModuleDefinitionFile>gvc.def</ModuleDefinitionFile>
-      <AdditionalDependencies>cdt.lib;cgraph.lib;xml2.lib;expat.lib;zlib.lib;rxspencer.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cdt.lib;cgraph.lib;xml2.lib;expat.lib;zlib.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions>/WHOLEARCHIVE:gvortho.lib %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <PreBuildEvent>
-      <Command>bison -dy common\htmlparse.y -o common\htmlparse-intermediate.c
-sed "s/yy/html/g" &lt; common\htmlparse-intermediate.c &gt; common\htmlparse.c
-sed "s/yy/html/g" &lt; common\htmlparse-intermediate.h &gt; common\htmlparse.h
-del common\htmlparse-intermediate.c
-del common\htmlparse-intermediate.h
-awk -f $(SolutionDir)awk\svgcolor.awk common\svgcolor_names &gt; common\svgcolor_lib
-awk -f $(SolutionDir)awk\brewer.awk common\brewer_colors &gt; common\brewer_lib
-type common\brewer_lib common\svgcolor_lib common\color_names | sort /L C &gt; color_lib
-awk -f $(SolutionDir)awk\colortbl.awk color_lib &gt; common\colortbl.h</Command>
+      <Command>win_bison -dy -Wno-yacc common\htmlparse.y -o common\htmlparse.c
+python common\make_svgcolor_lib.py common\svgcolor_names common\svgcolor_lib
+python common\make_brewer_lib.py common\brewer_colors common\brewer_lib
+python common\make_colortbl.py common\brewer_lib common\svgcolor_lib common\color_names common\colortbl.h</Command>
     </PreBuildEvent>
     <PostBuildEvent>
       <Command>copy $(SolutionDir)windows\dependencies\libraries\x86\bin\expat.dll $(OutDir)expat.dll</Command>
@@ -88,12 +82,12 @@ awk -f $(SolutionDir)awk\colortbl.awk color_lib &gt; common\colortbl.h</Command>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)windows\include;$(SolutionDir)windows\dependencies\GTK2\include;$(SolutionDir)windows\dependencies\libraries\x86\include;$(SolutionDir);$(SolutionDir)lib\ast;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;$(SolutionDir)lib\fdpgen;$(SolutionDir)lib\label;$(SolutionDir)lib\pathplan;$(SolutionDir)lib\gvc;$(SolutionDir)lib\xdot;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_USRDLL;GVC_EXPORTS;WIN32_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)windows\include;$(SolutionDir)windows\include\unistd;$(SolutionDir)windows\dependencies\GTK2\include;$(SolutionDir)windows\dependencies\libraries\x86\include;$(SolutionDir);$(SolutionDir)lib;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;$(SolutionDir)lib\pathplan;$(SolutionDir)lib\gvc;$(SolutionDir)lib\xdot;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;GVDLL;GVC_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(SolutionDir)windows\dependencies\libraries\x86\lib;$(OutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -103,19 +97,14 @@ awk -f $(SolutionDir)awk\colortbl.awk color_lib &gt; common\colortbl.h</Command>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <DataExecutionPrevention />
       <TargetMachine>MachineX86</TargetMachine>
-      <ModuleDefinitionFile>gvc.def</ModuleDefinitionFile>
-      <AdditionalDependencies>cdt.lib;cgraph.lib;xml2.lib;expat.lib;zlib.lib;rxspencer.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cdt.lib;cgraph.lib;xml2.lib;expat.lib;zlib.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions>/WHOLEARCHIVE:gvortho.lib %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <PreBuildEvent>
-      <Command>bison -dy common\htmlparse.y -o common\htmlparse-intermediate.c
-sed "s/yy/html/g" &lt; common\htmlparse-intermediate.c &gt; common\htmlparse.c
-sed "s/yy/html/g" &lt; common\htmlparse-intermediate.h &gt; common\htmlparse.h
-del common\htmlparse-intermediate.c
-del common\htmlparse-intermediate.h
-awk -f $(SolutionDir)awk\svgcolor.awk common\svgcolor_names &gt; common\svgcolor_lib
-awk -f $(SolutionDir)awk\brewer.awk common\brewer_colors &gt; common\brewer_lib
-type common\brewer_lib common\svgcolor_lib common\color_names | sort /L C &gt; color_lib
-awk -f $(SolutionDir)awk\colortbl.awk color_lib &gt; common\colortbl.h</Command>
+      <Command>win_bison -dy -Wno-yacc common\htmlparse.y -o common\htmlparse.c
+python common\make_svgcolor_lib.py common\svgcolor_names common\svgcolor_lib
+python common\make_brewer_lib.py common\brewer_colors common\brewer_lib
+python common\make_colortbl.py common\brewer_lib common\svgcolor_lib common\color_names common\colortbl.h</Command>
     </PreBuildEvent>
     <PostBuildEvent>
       <Command>copy $(SolutionDir)windows\dependencies\libraries\x86\bin\expat.dll $(OutDir)expat.dll</Command>
@@ -123,25 +112,24 @@ awk -f $(SolutionDir)awk\colortbl.awk color_lib &gt; common\colortbl.h</Command>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="common\arith.h" />
+    <ClInclude Include="common\boxes.h" />
     <ClInclude Include="common\color.h" />
     <ClInclude Include="common\colorprocs.h" />
     <ClInclude Include="common\colortbl.h" />
     <ClInclude Include="common\const.h" />
     <ClInclude Include="common\entities.h" />
-    <ClInclude Include="common\exparse.h" />
     <ClInclude Include="common\geom.h" />
     <ClInclude Include="common\geomprocs.h" />
     <ClInclude Include="common\globals.h" />
     <ClInclude Include="common\htmllex.h" />
     <ClInclude Include="common\htmlparse.h" />
     <ClInclude Include="common\htmltable.h" />
-    <ClInclude Include="common\logic.h" />
     <ClInclude Include="common\macros.h" />
-    <ClInclude Include="common\memory.h" />
     <ClInclude Include="common\pointset.h" />
     <ClInclude Include="common\ps_font_equiv.h" />
     <ClInclude Include="common\render.h" />
     <ClInclude Include="common\textspan.h" />
+    <ClInclude Include="common\textspan_lut.h" />
     <ClInclude Include="common\types.h" />
     <ClInclude Include="common\usershape.h" />
     <ClInclude Include="common\utils.h" />
@@ -174,7 +162,6 @@ awk -f $(SolutionDir)awk\colortbl.awk color_lib &gt; common\colortbl.h</Command>
     <ClCompile Include="common\input.c" />
     <ClCompile Include="common\intset.c" />
     <ClCompile Include="common\labels.c" />
-    <ClCompile Include="common\memory.c" />
     <ClCompile Include="common\ns.c" />
     <ClCompile Include="common\output.c" />
     <ClCompile Include="common\pointset.c" />
@@ -185,8 +172,10 @@ awk -f $(SolutionDir)awk\colortbl.awk color_lib &gt; common\colortbl.h</Command>
     <ClCompile Include="common\splines.c" />
     <ClCompile Include="common\taper.c" />
     <ClCompile Include="common\textspan.c" />
+    <ClCompile Include="common\textspan_lut.c" />
     <ClCompile Include="common\timing.c" />
     <ClCompile Include="common\utils.c" />
+    <ClCompile Include="common\xml.c" />
     <ClCompile Include="gvc\gvc.c" />
     <ClCompile Include="gvc\gvconfig.c" />
     <ClCompile Include="gvc\gvcontext.c" />
@@ -198,6 +187,7 @@ awk -f $(SolutionDir)awk\colortbl.awk color_lib &gt; common\colortbl.h</Command>
     <ClCompile Include="gvc\gvplugin.c" />
     <ClCompile Include="gvc\gvrender.c" />
     <ClCompile Include="gvc\gvtextlayout.c" />
+    <ClCompile Include="gvc\gvtool_tred.c" />
     <ClCompile Include="gvc\gvusershape.c" />
     <ClCompile Include="label\index.c" />
     <ClCompile Include="label\node.c" />
@@ -209,12 +199,14 @@ awk -f $(SolutionDir)awk\colortbl.awk color_lib &gt; common\colortbl.h</Command>
   </ItemGroup>
   <ItemGroup>
     <None Include="common\entities.html" />
-    <None Include="gvc.def" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="cdt\cdt.vcxproj">
       <Project>{83cf0498-7884-49d3-8b3c-263c5af5fe1b}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+    <ProjectReference Include="ortho\gvortho.vcxproj">
+      <Project>{2d29953f-2d74-471e-a064-5d184e762dff}</Project>
     </ProjectReference>
     <ProjectReference Include="patchwork\gvpatchwork.vcxproj">
       <Project>{6bd77bde-151d-4824-a8bc-9f067662f7ab}</Project>

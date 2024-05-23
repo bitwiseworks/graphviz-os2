@@ -1,18 +1,14 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef GRAPH_GENERATOR_H
-#define GRAPH_GENERATOR_H
+#pragma once
 
 typedef void (*edgefn)(int, int);
 
@@ -30,6 +26,7 @@ extern void makeRandom(int, int, edgefn);
 extern void makeSquareGrid(int, int, int, int, edgefn);
 extern void makeBinaryTree(int, edgefn);
 extern void makeSierpinski(int, edgefn);
+extern void makeTetrix(int, edgefn);
 extern void makeHypercube(int, edgefn);
 extern void makeTree(int, int, edgefn);
 extern void makeTriMesh(int, edgefn);
@@ -39,4 +36,3 @@ typedef struct treegen_s treegen_t;
 extern treegen_t* makeTreeGen (int);
 extern void makeRandomTree (treegen_t*, edgefn);
 extern void freeTreeGen(treegen_t*);
-#endif

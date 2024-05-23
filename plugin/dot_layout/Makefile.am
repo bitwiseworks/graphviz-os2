@@ -1,8 +1,7 @@
-# $Id$ $Revision$
 ## Process this file with automake to produce Makefile.in
 
 AM_CPPFLAGS = \
-	-I$(top_srcdir) \
+	-I$(top_srcdir)/lib \
 	-I$(top_srcdir)/lib/common \
 	-I$(top_srcdir)/lib/pathplan \
 	-I$(top_srcdir)/lib/gvc \
@@ -35,10 +34,6 @@ libgvplugin_dot_layout_la_LIBADD = $(libgvplugin_dot_layout_C_la_LIBADD) \
 if WITH_WIN32
 libgvplugin_dot_layout_la_LDFLAGS += -no-undefined
 libgvplugin_dot_layout_la_LIBADD += $(top_builddir)/lib/cgraph/libcgraph.la
-endif
-
-if WITH_DARWIN9
-libgvplugin_dot_layout_la_LDFLAGS += -Wl,-exported_symbol,_gvplugin_dot_layout_LTX_library
 endif
 
 EXTRA_DIST = gvplugin_dot_layout.vcxproj*

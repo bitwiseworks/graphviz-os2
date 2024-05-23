@@ -1,30 +1,32 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
-
+#include <assert.h>
+#include <ctype.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "gvplugin_render.h"
-#include "gvplugin_device.h"
-#include "gvio.h"
-#include "agxbuf.h"
-#include "utils.h"
+#include <gvc/gvplugin_render.h>
+#include <gvc/gvplugin_device.h>
+#include <gvc/gvio.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/cgraph.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/prisize_t.h>
+#include <common/utils.h>
 #include "ps.h"
 
 /* for CHAR_LATIN1  */
-#include "const.h"
+#include <common/const.h>
 
 /*
  *     J$: added `pdfmark' URL embedding.  PostScript rendered from
@@ -36,7 +38,7 @@
 typedef enum { FORMAT_PS, FORMAT_PS2, FORMAT_EPS } format_type;
 
 static int isLatin1;
-static char setupLatin1;
+static bool setupLatin1;
 
 static void psgen_begin_job(GVJ_t * job)
 {
@@ -67,7 +69,7 @@ static void psgen_begin_graph(GVJ_t * job)
 {
     obj_state_t *obj = job->obj;
 
-    setupLatin1 = FALSE;
+    setupLatin1 = false;
 
     if (job->common->viewNum == 0) {
         gvprintf(job, "%%%%Title: %s\n", agnameof(obj->u.g));
@@ -104,7 +106,7 @@ static void psgen_begin_graph(GVJ_t * job)
      */
     if (!setupLatin1) {
 	gvputs(job, "setupLatin1\n");	/* as defined in ps header */
-	setupLatin1 = TRUE;
+	setupLatin1 = true;
     }
     /*  Set base URL for relative links (for Distiller >= 3.0)  */
     if (obj->url)
@@ -114,6 +116,7 @@ static void psgen_begin_graph(GVJ_t * job)
 
 static void psgen_begin_layer(GVJ_t * job, char *layername, int layerNum, int numLayers)
 {
+    (void)layername;
     gvprintf(job, "%d %d setlayer\n", layerNum, numLayers);
 }
 
@@ -203,6 +206,10 @@ static void psgen_end_edge(GVJ_t * job)
 
 static void psgen_begin_anchor(GVJ_t *job, char *url, char *tooltip, char *target, char *id)
 {
+    (void)tooltip;
+    (void)target;
+    (void)id;
+
     obj_state_t *obj = job->obj;
 
     if (url && obj->url_map_p) {
@@ -269,6 +276,39 @@ static void ps_set_color(GVJ_t *job, gvcolor_t *color)
     }
 }
 
+/** check a font name abides by Adobe’s rules
+ *
+ * Adobe Technical Note #5088 “Font Naming Issues” §2.2:
+ *
+ *   For compatibility with the earliest versions of PostScript interpreters and
+ *   with the file systems in some operating systems, Adobe limits the number of
+ *   characters in the `FontName` to 29 characters.
+ *
+ *   As with any PostScript language name, a valid `FontName` must not contain
+ *   spaces, and may only use characters from the standard ASCII character set.
+ *
+ * @param fontname Font name to check
+ */
+static void check_fontname(const char *fontname) {
+
+  if (strlen(fontname) > 29) {
+    agwarningf(
+          "font name %s is longer than 29 characters which may be rejected by "
+          "some PS viewers\n",
+          fontname);
+  }
+
+  for (const char *p = fontname; *p != '\0'; ++p) {
+    if (!isascii((int)*p) || *p == ' ' || gv_iscntrl(*p)) {
+      agwarningf(
+            "font name %s contains characters that may not be accepted by some "
+            "PS viewers\n",
+            fontname);
+      break;
+    }
+  }
+}
+
 static void psgen_textspan(GVJ_t * job, pointf p, textspan_t * span)
 {
     char *str;
@@ -278,6 +318,7 @@ static void psgen_textspan(GVJ_t * job, pointf p, textspan_t * span)
 
     ps_set_color(job, &(job->obj->pencolor));
     gvprintdouble(job, span->font->size);
+    check_fontname(span->font->name);
     gvprintf(job, " /%s set_font\n", span->font->name);
     str = ps_string(span->str,isLatin1);
     switch (span->just) {
@@ -321,18 +362,13 @@ static void psgen_ellipse(GVJ_t * job, pointf * A, int filled)
     }
 }
 
-static void
-psgen_bezier(GVJ_t * job, pointf * A, int n, int arrow_at_start,
-	     int arrow_at_end, int filled)
-{
-    int j;
-
+static void psgen_bezier(GVJ_t *job, pointf *A, size_t n, int filled) {
     if (filled && job->obj->fillcolor.u.HSVA[3] > .5) {
 	ps_set_color(job, &(job->obj->fillcolor));
 	gvputs(job, "newpath ");
 	gvprintpointf(job, A[0]);
 	gvputs(job, " moveto\n");
-	for (j = 1; j < n; j += 3) {
+	for (size_t j = 1; j < n; j += 3) {
 	    gvprintpointflist(job, &A[j], 3);
 	    gvputs(job, " curveto\n");
 	}
@@ -344,7 +380,7 @@ psgen_bezier(GVJ_t * job, pointf * A, int n, int arrow_at_start,
 	gvputs(job, "newpath ");
 	gvprintpointf(job, A[0]);
 	gvputs(job, " moveto\n");
-	for (j = 1; j < n; j += 3) {
+	for (size_t j = 1; j < n; j += 3) {
 	    gvprintpointflist(job, &A[j], 3);
 	    gvputs(job, " curveto\n");
 	}
@@ -352,16 +388,13 @@ psgen_bezier(GVJ_t * job, pointf * A, int n, int arrow_at_start,
     }
 }
 
-static void psgen_polygon(GVJ_t * job, pointf * A, int n, int filled)
-{
-    int j;
-
+static void psgen_polygon(GVJ_t *job, pointf *A, size_t n, int filled) {
     if (filled && job->obj->fillcolor.u.HSVA[3] > .5) {
 	ps_set_color(job, &(job->obj->fillcolor));
 	gvputs(job, "newpath ");
 	gvprintpointf(job, A[0]);
 	gvputs(job, " moveto\n");
-	for (j = 1; j < n; j++) {
+	for (size_t j = 1; j < n; j++) {
 	    gvprintpointf(job, A[j]);
 	    gvputs(job, " lineto\n");
         }
@@ -373,7 +406,7 @@ static void psgen_polygon(GVJ_t * job, pointf * A, int n, int filled)
 	gvputs(job, "newpath ");
 	gvprintpointf(job, A[0]);
 	gvputs(job, " moveto\n");
-        for (j = 1; j < n; j++) {
+        for (size_t j = 1; j < n; j++) {
 	    gvprintpointf(job, A[j]);
 	    gvputs(job, " lineto\n");
 	}
@@ -381,17 +414,14 @@ static void psgen_polygon(GVJ_t * job, pointf * A, int n, int filled)
     }
 }
 
-static void psgen_polyline(GVJ_t * job, pointf * A, int n)
-{
-    int j;
-
+static void psgen_polyline(GVJ_t *job, pointf *A, size_t n) {
     if (job->obj->pencolor.u.HSVA[3] > .5) {
         ps_set_pen_style(job);
         ps_set_color(job, &(job->obj->pencolor));
 	gvputs(job, "newpath ");
 	gvprintpointf(job, A[0]);
 	gvputs(job, " moveto\n");
-        for (j = 1; j < n; j++) {
+        for (size_t j = 1; j < n; j++) {
 	    gvprintpointf(job, A[j]);
 	    gvputs(job, " lineto\n");
 	}
@@ -406,15 +436,15 @@ static void psgen_comment(GVJ_t * job, char *str)
     gvputs(job, "\n");
 }
 
-static void psgen_library_shape(GVJ_t * job, char *name, pointf * A, int n, int filled)
-{
+static void psgen_library_shape(GVJ_t *job, char *name, pointf *A, size_t n,
+                                int filled) {
     if (filled && job->obj->fillcolor.u.HSVA[3] > .5) {
 	ps_set_color(job, &(job->obj->fillcolor));
 	gvputs(job, "[ ");
         gvprintpointflist(job, A, n);
         gvputs(job, " ");
         gvprintpointf(job, A[0]);
-	gvprintf(job, " ]  %d true %s\n", n, name);
+	gvprintf(job, " ]  %" PRISIZE_T " true %s\n", n, name);
     }
     if (job->obj->pencolor.u.HSVA[3] > .5) {
         ps_set_pen_style(job);
@@ -423,7 +453,7 @@ static void psgen_library_shape(GVJ_t * job, char *name, pointf * A, int n, int 
         gvprintpointflist(job, A, n);
         gvputs(job, " ");
         gvprintpointf(job, A[0]);
-        gvprintf(job, " ]  %d false %s\n", n, name);
+        gvprintf(job, " ]  %" PRISIZE_T " false %s\n", n, name);
     }
 }
 

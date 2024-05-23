@@ -1,15 +1,14 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
+
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,9 +17,6 @@ extern "C" {
 /*
  * standalone mini error interface
  */
-
-#ifndef _ERROR_H
-#define _ERROR_H
 
 #include <stdarg.h>
 #include <errno.h>
@@ -34,10 +30,6 @@ extern "C" {
 	char *file;
 	char *id;
     } Error_info_t;
-
-#ifndef ERROR_catalog
-#define ERROR_catalog(t)        t
-#endif
 
 #define ERROR_INFO	0	/* info message -- no err_id    */
 #define ERROR_WARNING	1	/* warning message              */
@@ -53,6 +45,13 @@ extern "C" {
 #define error		_err_msg
 #define errorv		_err_msgv
 
+/* support for extra API misuse warnings if available */
+#ifdef __GNUC__
+  #define PRINTF_LIKE(index, first) __attribute__((format(printf, index, first)))
+#else
+  #define PRINTF_LIKE(index, first) /* nothing */
+#endif
+
     extern Error_info_t error_info;
 
     extern void setTraceLevel (int);
@@ -62,11 +61,11 @@ extern "C" {
     extern void setErrorErrors (int);
     extern int  getErrorErrors (void);
 
-    extern void error(int, ...);
-    extern void errorf(void *, void *, int, ...);
-    extern void errorv(const char *, int, va_list);
+    extern void error(int, const char *, ...) PRINTF_LIKE(2, 3);
+    extern void errorf(void *, void *, int, const char *, ...) PRINTF_LIKE(4, 5);
+    extern void errorv(const char *, int, const char *, va_list);
 
-#endif
+#undef PRINTF_LIKE
 
 #ifdef __cplusplus
 }

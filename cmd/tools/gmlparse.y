@@ -1,61 +1,60 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
+
+%require "3.0"
+
+  /* By default, Bison emits a parser using symbols prefixed with "yy". Graphviz
+   * contains multiple Bison-generated parsers, so we alter this prefix to avoid
+   * symbol clashes.
+   */
+%define api.prefix {gml}
 
 %{
 #include <stdlib.h>
-#include <stddef.h>
 #include <string.h>
 #include <arith.h>
 #include <gml2gv.h>
 #include <agxbuf.h>
 #include <assert.h>
-
-#define NEW(t)       (t*)malloc(sizeof(t))
-#define N_NEW(n,t)   (t*)calloc((n),sizeof(t))
-#define RALLOC(size,ptr,type) ((type*)realloc(ptr,(size)*sizeof(type)))
-
-typedef unsigned short ushort;
+#include <cgraph/alloc.h>
+#include <cgraph/exit.h>
+#include <cgraph/stack.h>
 
 static gmlgraph* G;
 static gmlnode* N;
 static gmledge* E;
 static Dt_t* L;
-static Dt_t** liststk;
-static int liststk_sz;
-static int liststk_cnt;
+static gv_stack_t liststk;
 
-static void free_attr (Dt_t*d, gmlattr* p, Dtdisc_t* ds); /* forward decl */
-static char* sortToStr (int sort);    /* forward decl */
+static void free_attr(gmlattr *p, Dtdisc_t *ds);
+static char *sortToStr(unsigned short sort);
 
-static void
-free_node (Dt_t*d, gmlnode* p, Dtdisc_t* ds)
-{
+static void free_node(gmlnode *p, Dtdisc_t *ds) {
+    (void)ds;
+
     if (!p) return;
     if (p->attrlist) dtclose (p->attrlist);
     free (p);
 }
 
-static void
-free_edge (Dt_t*d, gmledge* p, Dtdisc_t* ds)
-{
+static void free_edge(gmledge *p, Dtdisc_t *ds) {
+    (void)ds;
+
     if (!p) return;
     if (p->attrlist) dtclose (p->attrlist);
     free (p);
 }
 
-static void
-free_graph (Dt_t*d, gmlgraph* p, Dtdisc_t* ds)
-{
+static void free_graph(gmlgraph *p, Dtdisc_t *ds) {
+    (void)ds;
+
     if (!p) return;
     if (p->nodelist)
 	dtclose (p->nodelist);
@@ -69,86 +68,55 @@ free_graph (Dt_t*d, gmlgraph* p, Dtdisc_t* ds)
 }
 
 static Dtdisc_t nodeDisc = {
-    offsetof(gmlnode,attrlist),
-    sizeof(Dt_t*),
-    offsetof(gmlnode,link),
-    NIL(Dtmake_f),
-    (Dtfree_f)free_node,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .key = offsetof(gmlnode, attrlist),
+    .size = sizeof(Dt_t *),
+    .link = offsetof(gmlnode, link),
+    .freef = (Dtfree_f)free_node,
 };
 
 static Dtdisc_t edgeDisc = {
-    offsetof(gmledge,attrlist),
-    sizeof(Dt_t*),
-    offsetof(gmledge,link),
-    NIL(Dtmake_f),
-    (Dtfree_f)free_edge,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .key = offsetof(gmledge, attrlist),
+    .size = sizeof(Dt_t *),
+    .link = offsetof(gmledge, link),
+    .freef = (Dtfree_f)free_edge,
 };
 
 static Dtdisc_t attrDisc = {
-    offsetof(gmlattr,name),
-    sizeof(char*),
-    offsetof(gmlattr,link),
-    NIL(Dtmake_f),
-    (Dtfree_f)free_attr,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .key = offsetof(gmlattr, name),
+    .size = sizeof(char *),
+    .link = offsetof(gmlattr, link),
+    .freef = (Dtfree_f)free_attr,
 };
 
 static Dtdisc_t graphDisc = {
-    offsetof(gmlgraph,nodelist),
-    sizeof(Dt_t*),
-    offsetof(gmlgraph,link),
-    NIL(Dtmake_f),
-    (Dtfree_f)free_graph,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .key = offsetof(gmlgraph, nodelist),
+    .size = sizeof(Dt_t *),
+    .link = offsetof(gmlgraph, link),
+    .freef = (Dtfree_f)free_graph,
 };
-
-static void
-initstk (void)
-{
-    liststk_sz = 10;
-    liststk_cnt = 0;
-    liststk = N_NEW(liststk_sz, Dt_t*);
-}
 
 static void
 cleanup (void)
 {
-    int i;
-
-    if (liststk) {
-	for (i = 0; i < liststk_cnt; i++)
-	    dtclose (liststk[i]);
-	free (liststk);
-	liststk = NULL;
+    while (!stack_is_empty(&liststk)) {
+	Dt_t *dt = stack_pop(&liststk);
+	dtclose(dt);
     }
+    stack_reset(&liststk);
     if (L) {
 	dtclose (L);
 	L = NULL;
     }
     if (N) {
-	free_node (0, N, 0);
+	free_node(N, 0);
 	N = NULL;
     }
     if (E) {
-	free_edge (0, E, 0);
+	free_edge(E, 0);
 	E = NULL;
     }
     if (G) {
-	free_graph (0, G, 0);
+	free_graph(G, 0);
 	G = NULL;
     }
 }
@@ -159,11 +127,7 @@ pushAlist (void)
     Dt_t* lp = dtopen (&attrDisc, Dtqueue);
 
     if (L) {
-	if (liststk_cnt == liststk_sz) {
-	    liststk_sz *= 2;
-	    liststk = RALLOC(liststk_sz, liststk, Dt_t*);
-	}
-	liststk[liststk_cnt++] = L;
+	stack_push(&liststk, L);
     }
     L = lp;
 }
@@ -173,8 +137,8 @@ popAlist (void)
 {
     Dt_t* lp = L;
 
-    if (liststk_cnt)
-	L = liststk[--liststk_cnt];
+    if (!stack_is_empty(&liststk))
+	L = stack_pop(&liststk);
     else
 	L = NULL;
 
@@ -190,7 +154,7 @@ popG (void)
 static void
 pushG (void)
 {
-    gmlgraph* g = NEW(gmlgraph);
+    gmlgraph* g = gv_alloc(sizeof(gmlgraph));
 
     g->attrlist = dtopen(&attrDisc, Dtqueue);
     g->nodelist = dtopen(&nodeDisc, Dtqueue);
@@ -208,7 +172,7 @@ pushG (void)
 static gmlnode*
 mkNode (void)
 {
-    gmlnode* np = NEW(gmlnode);
+    gmlnode* np = gv_alloc(sizeof(gmlnode));
     np->attrlist = dtopen (&attrDisc, Dtqueue);
     np->id = NULL;
     return np;
@@ -217,21 +181,20 @@ mkNode (void)
 static gmledge*
 mkEdge (void)
 {
-    gmledge* ep = NEW(gmledge);
+    gmledge* ep = gv_alloc(sizeof(gmledge));
     ep->attrlist = dtopen (&attrDisc, Dtqueue);
     ep->source = NULL;
     ep->target = NULL;
     return ep;
 }
 
-static gmlattr*
-mkAttr (char* name, int sort, int kind, char* str, Dt_t* list)
-{
-    gmlattr* gp = NEW(gmlattr);
+static gmlattr *mkAttr(char* name, unsigned short sort, unsigned short kind,
+                       char* str,  Dt_t* list) {
+    gmlattr* gp = gv_alloc(sizeof(gmlattr));
 
     assert (name || sort);
     if (!name)
-	name = strdup (sortToStr (sort));
+	name = gv_strdup (sortToStr (sort));
     gp->sort = sort;
     gp->kind = kind;
     gp->name = name;
@@ -244,7 +207,7 @@ mkAttr (char* name, int sort, int kind, char* str, Dt_t* list)
 	}
 	gp->u.lp = list;
     }
-/* fprintf (stderr, "[%x] %d %d \"%s\" \"%s\" \n", gp, sort, kind, (name?name:""),  (str?str:"")); */
+/* fprintf (stderr, "[%x] %hu %hu \"%s\" \"%s\" \n", gp, sort, kind, (name?name:""),  (str?str:"")); */
     return gp;
 }
 
@@ -325,7 +288,7 @@ glistitem : node { dtinsert (G->nodelist, $1); }
 		    YYABORT;
 		}
 	  }
-	  | ID INTEGER { dtinsert (G->attrlist, mkAttr (strdup("id"), 0, INTEGER, $2, 0)); }
+	  | ID INTEGER { dtinsert (G->attrlist, mkAttr(gv_strdup("id"), 0, INTEGER, $2, 0)); }
           | alistitem { dtinsert (G->attrlist, $1); }
           ;
 
@@ -349,7 +312,7 @@ elist : elist elistitem
 
 elistitem : SOURCE INTEGER { E->source = $2; }
           | TARGET INTEGER { E->target = $2; }
-	  | ID INTEGER { dtinsert (E->attrlist, mkAttr (strdup("id"), 0, INTEGER, $2, 0)); }
+	  | ID INTEGER { dtinsert (E->attrlist, mkAttr(gv_strdup("id"), 0, INTEGER, $2, 0)); }
           | alistitem { dtinsert (E->attrlist, $1); }
           ;
 
@@ -381,7 +344,8 @@ alistitem : NAME INTEGER { $$ = mkAttr ($1, 0, INTEGER, $2, 0); }
           | OUTLINE STRING  { $$ = mkAttr (0, OUTLINE, STRING, $2, 0); }
           | OUTLINESTYLE STRING  { $$ = mkAttr (0, OUTLINESTYLE, STRING, $2, 0); }
           | OUTLINEWIDTH INTEGER  { $$ = mkAttr (0, OUTLINEWIDTH, INTEGER, $2, 0); }
-          | WIDTH REAL  { $$ = mkAttr (0, OUTLINEWIDTH, REAL, $2, 0); }
+          | WIDTH REAL  { $$ = mkAttr (0, WIDTH, REAL, $2, 0); }
+          | WIDTH INTEGER  { $$ = mkAttr (0, WIDTH, INTEGER, $2, 0); }
           | STYLE STRING  { $$ = mkAttr (0, STYLE, STRING, $2, 0); }
           | STYLE attrlist  { $$ = mkAttr (0, STYLE, LIST, 0, $2); }
           | LINE attrlist  { $$ = mkAttr (0, LINE, LIST, 0, $2); }
@@ -394,11 +358,11 @@ alistitem : NAME INTEGER { $$ = mkAttr ($1, 0, INTEGER, $2, 0); }
 
 %%
 
-static void
-free_attr (Dt_t*d, gmlattr* p, Dtdisc_t* ds)
-{
+static void free_attr(gmlattr *p, Dtdisc_t *ds) {
+    (void)ds;
+
     if (!p) return;
-    if ((p->kind == LIST) && p->u.lp)
+    if (p->kind == LIST && p->u.lp)
 	dtclose (p->u.lp);
     else
 	free (p->u.value);
@@ -412,20 +376,14 @@ static void
 deparseAttr (gmlattr* ap, agxbuf* xb)
 {
     if (ap->kind == LIST) {
-	agxbput (xb, ap->name);
-	agxbputc (xb, ' ');
+	agxbprint (xb, "%s ", ap->name);
 	deparseList (ap->u.lp, xb);
     }
     else if (ap->kind == STRING) {
-	agxbput (xb, ap->name);
-	agxbput (xb, " \"");
-	agxbput (xb, ap->u.value);
-	agxbput (xb, "\"");
+	agxbprint (xb, "%s \"%s\"", ap->name, ap->u.value);
     }
     else {
-	agxbput (xb, ap->name);
-	agxbputc (xb, ' ');
-	agxbput (xb, ap->u.value);
+	agxbprint (xb, "%s %s", ap->name, ap->u.value);
     }
 }
 
@@ -458,9 +416,7 @@ unknown (Agobj_t* obj, gmlattr* ap, agxbuf* xb)
     agsafeset (obj, ap->name, str, "");
 }
 
-static void
-addNodeLabelGraphics (Agnode_t* np, Dt_t* alist, agxbuf* xb, agxbuf* unk)
-{
+static void addNodeLabelGraphics(Agnode_t* np, Dt_t* alist, agxbuf* unk) {
     gmlattr* ap;
     int cnt = 0;
 
@@ -540,9 +496,7 @@ addEdgeLabelGraphics (Agedge_t* ep, Dt_t* alist, agxbuf* xb, agxbuf* unk)
 	}
     }
 
-    agxbput (xb, x);
-    agxbputc (xb, ',');
-    agxbput (xb, y);
+    agxbprint (xb, "%s,%s", x, y);
     agsafeset (ep, "lp", agxbuse (xb), "");
 
     if (cnt) {
@@ -572,12 +526,12 @@ addNodeGraphics (Agnode_t* np, Dt_t* alist, agxbuf* xb, agxbuf* unk)
 	}
 	else if (ap->sort == WVAL) {
 	    d = atof (ap->u.value);
-	    sprintf (buf, "%.04f", d/72.0);
+	    snprintf(buf, sizeof(buf), "%.04f", d/72.0);
 	    agsafeset (np, "width", buf, "");
 	}
 	else if (ap->sort == HVAL) {
 	    d = atof (ap->u.value);
-	    sprintf (buf, "%.04f", d/72.0);
+	    snprintf(buf, sizeof(buf), "%.04f", d/72.0);
 	    agsafeset (np, "height", buf, "");
 	}
 	else if (ap->sort == TYPE) {
@@ -589,10 +543,10 @@ addNodeGraphics (Agnode_t* np, Dt_t* alist, agxbuf* xb, agxbuf* unk)
 	else if (ap->sort == OUTLINE) {
 	    agsafeset (np, "pencolor", ap->u.value, "");
 	}
-	else if ((ap->sort == WIDTH) && (ap->sort == OUTLINEWIDTH )) {
+	else if (ap->sort == WIDTH || ap->sort == OUTLINEWIDTH) {
 	    agsafeset (np, "penwidth", ap->u.value, "");
 	}
-	else if ((ap->sort == OUTLINESTYLE) && (ap->sort == OUTLINEWIDTH )) {
+	else if (ap->sort == STYLE || ap->sort == OUTLINESTYLE) {
 	    agsafeset (np, "style", ap->u.value, "");
 	}
 	else {
@@ -606,9 +560,7 @@ addNodeGraphics (Agnode_t* np, Dt_t* alist, agxbuf* xb, agxbuf* unk)
 	}
     }
 
-    agxbput (xb, x);
-    agxbputc (xb, ',');
-    agxbput (xb, y);
+    agxbprint (xb, "%s,%s", x, y);
     agsafeset (np, "pos", agxbuse (xb), "");
 
     if (cnt) {
@@ -640,9 +592,7 @@ addEdgePoint (Agedge_t* ep, Dt_t* alist, agxbuf* xb)
     }
 
     if (agxblen(xb)) agxbputc (xb, ' ');
-    agxbput (xb, x);
-    agxbputc (xb, ',');
-    agxbput (xb, y);
+    agxbprint (xb, "%s,%s", x, y);
 }
 
 static void
@@ -717,13 +667,13 @@ addAttrs (Agobj_t* obj, Dt_t* alist, agxbuf* xb, agxbuf* unk)
 	}
 	else if (ap->sort == LABELGRAPHICS) {
 	    if (AGTYPE(obj) == AGNODE)
-		addNodeLabelGraphics ((Agnode_t*)obj, ap->u.lp, xb, unk);
+		addNodeLabelGraphics ((Agnode_t*)obj, ap->u.lp, unk);
 	    else if (AGTYPE(obj) == AGEDGE)
 		addEdgeLabelGraphics ((Agedge_t*)obj, ap->u.lp, xb, unk);
 	    else
 		unknown (obj, ap, xb);
 	}
-	else if ((ap->sort == LABEL) && (AGTYPE(obj) != AGRAPH)) {
+	else if (ap->sort == LABEL && AGTYPE(obj) != AGRAPH) {
 	    agsafeset (obj, "name", ap->u.value, "");
 	}
 	else
@@ -731,9 +681,8 @@ addAttrs (Agobj_t* obj, Dt_t* alist, agxbuf* xb, agxbuf* unk)
     }
 }
 
-static Agraph_t*
-mkGraph (gmlgraph* G, Agraph_t* parent, char* name, agxbuf* xb, agxbuf* unk)
-{
+static Agraph_t *mkGraph(gmlgraph *graph, Agraph_t *parent, char *name,
+                         agxbuf *xb, agxbuf *unk) {
     Agraph_t* g;
     Agnode_t* n;
     Agnode_t* h;
@@ -745,7 +694,7 @@ mkGraph (gmlgraph* G, Agraph_t* parent, char* name, agxbuf* xb, agxbuf* unk)
     if (parent) {
 	g = agsubg (parent, NULL, 1);
     }
-    else if (G->directed >= 1)
+    else if (graph->directed >= 1)
 	g = agopen (name, Agdirected, 0);
     else
 	g = agopen (name, Agundirected, 0);
@@ -753,34 +702,34 @@ mkGraph (gmlgraph* G, Agraph_t* parent, char* name, agxbuf* xb, agxbuf* unk)
     if (!parent && L) {
 	addAttrs ((Agobj_t*)g, L, xb, unk);
     } 
-    for (np = dtfirst(G->nodelist); np; np = dtnext (G->nodelist, np)) {
+    for (np = dtfirst(graph->nodelist); np; np = dtnext(graph->nodelist, np)) {
 	if (!np->id) {
 	   fprintf (stderr, "node without an id attribute"); 
-	   exit (1);
+	   graphviz_exit (1);
         }
 	n = agnode (g, np->id, 1);
 	addAttrs ((Agobj_t*)n, np->attrlist, xb, unk);
     }
 
-    for (ep = dtfirst(G->edgelist); ep; ep = dtnext (G->edgelist, ep)) {
+    for (ep = dtfirst(graph->edgelist); ep; ep = dtnext(graph->edgelist, ep)) {
 	if (!ep->source) {
 	   fprintf (stderr, "edge without an source attribute"); 
-	   exit (1);
+	   graphviz_exit (1);
         }
 	if (!ep->target) {
 	   fprintf (stderr, "node without an target attribute"); 
-	   exit (1);
+	   graphviz_exit (1);
         }
 	n = agnode (g, ep->source, 1);
 	h = agnode (g, ep->target, 1);
 	e = agedge (g, n, h, NULL, 1);
 	addAttrs ((Agobj_t*)e, ep->attrlist, xb, unk);
     }
-    for (gp = dtfirst(G->graphlist); gp; gp = dtnext (G->graphlist, gp)) {
+    for (gp = dtfirst(graph->graphlist); gp; gp = dtnext(graph->graphlist, gp)) {
 	mkGraph (gp, g, NULL, xb, unk);
     }
 
-    addAttrs ((Agobj_t*)g, G->attrlist, xb, unk);
+    addAttrs ((Agobj_t*)g, graph->attrlist, xb, unk);
 
     return g;
 }
@@ -789,10 +738,6 @@ Agraph_t*
 gml_to_gv (char* name, FILE* fp, int cnt, int* errors)
 {
     Agraph_t* g;
-    agxbuf xb;
-    unsigned char buf[BUFSIZ];
-    agxbuf unk;
-    unsigned char unknownb[BUFSIZ];
     int error;
 
     if (cnt == 0)
@@ -800,7 +745,6 @@ gml_to_gv (char* name, FILE* fp, int cnt, int* errors)
     else
 	initgmlscan(0);
 		
-    initstk();
     L = NULL;
     pushAlist ();
     gmlparse ();
@@ -810,10 +754,11 @@ gml_to_gv (char* name, FILE* fp, int cnt, int* errors)
     if (!G || error)
 	g = NULL;
     else {
-	agxbinit (&xb, BUFSIZ, buf);
-	agxbinit (&unk, BUFSIZ, unknownb);
+	agxbuf xb = {0};
+	agxbuf unk = {0};
 	g = mkGraph (G, NULL, name, &xb, &unk);
 	agxbfree (&xb);
+	agxbfree(&unk);
     }
 
     cleanup ();
@@ -821,9 +766,7 @@ gml_to_gv (char* name, FILE* fp, int cnt, int* errors)
     return g;
 }
 
-static char*
-sortToStr (int sort)
-{
+static char *sortToStr(unsigned short sort) {
     char* s;
 
     switch (sort) {
@@ -901,18 +844,3 @@ sortToStr (int sort)
 
     return s;
 }
-
-#if 0
-int gmllex ()
-{
-    int tok = _gmllex();
-    char* s = sortToStr (tok);
-
-    if (s)
-        fprintf (stderr, "token = %s\n", s);
-    else
-        fprintf (stderr, "token = <%d>\n", tok);
-    return tok;
-}
-#endif
-

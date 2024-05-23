@@ -1,4 +1,3 @@
-# $Id$ $Revision$
 ## Process this file with automake to produce Makefile.in
 
 GRAPHS = KW91.gv Latin1.gv NaN.gv abstract.gv alf.gv arrows.gv \
@@ -18,7 +17,7 @@ directed_DATA = $(GRAPHS)
 
 EXTRA_DIST = $(GRAPHS)
 
-CLEANFILES = core *.gv.* *.png .xvpics/* 
+CLEANFILES = core *.gv.* *.png .xvpics/*
 
 DOT = $(top_builddir)/cmd/dot/dot_builtins
 
@@ -30,17 +29,17 @@ test:
 		-Tpng:cairo -Tpng:gd -Tpng:cairo:gd -Tpng:cairo:cairo -Tpng:gd:gd \
 		-Tps -Tps:lasi -Tps2 -Tps:cairo -Tpdf \
 		-Tsvg -Tsvg:cairo -Tsvgz -Tvrml \
-		-O $(GRAPHS) 
+		-O $(GRAPHS)
 
 ins_test:
 	dot \
-                -Tcanon -Tgv -Tplain -Tplain-ext -Txdot \
-                -Tcmap -Tcmapx -Tismap -Timap \
-                -Tjpg -Tpdf -Tfig -Tgif -Tpng \
+		-Tcanon -Tgv -Tplain -Tplain-ext -Txdot \
+		-Tcmap -Tcmapx -Tismap -Timap \
+		-Tjpg -Tpdf -Tfig -Tgif -Tpng \
 		-Tpng:cairo -Tpng:gd -Tpng:cairo:gd -Tpng:cairo:cairo -Tpng:gd:gd \
-                -Tps -Tps2 -Tps:lasi -Tps:cairo -Tpdf \
-                -Tsvg -Tsvg:cairo -Tsvgz -Tvrml \
-                -O $(GRAPHS) 
+		-Tps -Tps2 -Tps:lasi -Tps:cairo -Tpdf \
+		-Tsvg -Tsvg:cairo -Tsvgz -Tvrml \
+		-O $(GRAPHS)
 
 canon:
 	for i in $(GRAPHS); do echo "dot $$i"; \
@@ -76,10 +75,6 @@ gif:
 gv dot:
 	for i in $(GRAPHS); do echo "dot $$i"; \
 		$(DOT) -Tgv -o$$i.gv $(top_srcdir)/graphs/directed/$$i; done
-
-hpgl:
-	for i in $(GRAPHS); do echo "dot $$i"; \
-		$(DOT) -Thpgl -o$$i.hpgl $(top_srcdir)/graphs/directed/$$i; done
 
 ismap:
 	for i in $(GRAPHS); do echo "dot $$i"; \

@@ -18,9 +18,12 @@
     <ClInclude Include="graph_generator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="openFile.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="gvpack.c">
+    <ClCompile Include="gvpack.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -3,18 +3,22 @@
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
-#include "general.h"
-#include "QuadTree.h"
-#include "lab.h"
-#include "math.h"
-#include "stdio.h"
-#include "stdlib.h"
-#include "color_palette.h"
-#include "lab_gamut.h"
+
+#include <cgraph/alloc.h>
+#include <cgraph/prisize_t.h>
+#include <sparse/general.h>
+#include <sparse/QuadTree.h>
+#include <edgepaint/lab.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sparse/color_palette.h>
+#include <edgepaint/lab_gamut.h>
 
 color_rgb color_rgb_init(double r, double g, double b){
   color_rgb rgb;
@@ -67,7 +71,7 @@ color_lab RGB2LAB(color_rgb color){
   return color_lab_init(L, A, B);
 }
 
-void LAB2RGB_real_01(real *color){
+void LAB2RGB_real_01(double *color){
   /* convert an array[3] of LAB colors to RGB between 0 to 1, in place */
   color_rgb rgb;
   color_lab lab;
@@ -137,125 +141,61 @@ color_rgb XYZ2RGB(color_xyz color){
   return color_rgb_init(r, g, b);
 }
 
-void get_level(QuadTree qt, int *level0){
-  QuadTree q;
-  int level_max = 0, level;
-  int i;
-
-  if (!qt->qts) return;
-  for (i = 0; i < 1<<(qt->dim); i++){
-    q = qt->qts[i];
-    if (q) {
-      level = *level0 + 1;
-      get_level(q, &level);
-      level_max = MAX(level_max, level);
-    }
-  }
-  *level0 = level_max;
-}
-
-double *lab_gamut_from_file(char *gamut_file, const char *lightness, int *n){
-  /* give a list of n points  in the file defining the LAB color gamut. return NULL if the mgamut file is not found.
-     lightness is a string of the form 0,70, or NULL.
+double *lab_gamut(const int *lightness, int *n) {
+  /* give a list of n points  in the file defining the LAB color gamut.
    */
-  FILE *fp; 
-  enum {buf_len = 10000};
-  char buf[buf_len];
   double *xx, *x;
 
-  int l1 = 0, l2 = 70;
-  
-  if (lightness && sscanf(lightness, "%d,%d", &l1, &l2) == 2){
-    if (l1 < 0) l1 = 0;
-    if (l2 > 100) l2 = 100;
-    if (l1 > l2) l1 = l2;
-  } else {
-    l1 = 0; l2 = 70;
-  }
+  int l1 = lightness[0];
+  int l2 = lightness[1];
 
-
-  *n = 0;
+  if (l1 < 0) l1 = 0;
+  if (l2 > 100) l2 = 100;
+  if (l1 > l2) l1 = l2;
 
   if (Verbose)
     fprintf(stderr,"LAB color lightness range = %d,%d\n", l1, l2);
 
-  fp = fopen(gamut_file, "r");
-  if (!fp) return NULL;
-  while (fgets(buf, buf_len, fp)){
-    (*n)++;
-  }
-  rewind(fp);
-
-  x = malloc(sizeof(double)*3*(*n));
-  xx = x;
-  *n = 0;
-  while (fgets(buf, buf_len, fp)){
-    sscanf(buf,"%lf %lf %lf", xx, xx+1, xx+2);
-    if (*xx >= l1 && *xx <= l2){
-      xx += 3;
-      (*n)++;
-    }
-  }
-  fclose(fp);
-  return x;
-}
-
-
-double *lab_gamut(const char *lightness, int *n){
-  /* give a list of n points  in the file defining the LAB color gamut. return NULL if the mgamut file is not found.
-     lightness is a string of the form 0,70, or NULL.
-   */
-  double *xx, *x;
-
-  int l1 = 0, l2 = 70, m, i;
-
-
-  if (lightness && sscanf(lightness, "%d,%d", &l1, &l2) == 2){
-    if (l1 < 0) l1 = 0;
-    if (l2 > 100) l2 = 100;
-    if (l1 > l2) l1 = l2;
-  } else {
-    l1 = 0; l2 = 70;
-  }
-
-
   if (Verbose)
-    fprintf(stderr,"LAB color lightness range = %d,%d\n", l1, l2);
+    fprintf(stderr,"size of lab gamut = %" PRISIZE_T "\n", lab_gamut_data_size);
 
-  m = lab_gamut_data_size; 
-
-  if (Verbose)
-    fprintf(stderr,"size of lab gamut = %d\n", m);
+  // each L* value can be paired with 256 a* values and 256 b* values, so
+  // compute the maximum number of doubles we will need to span the space
+  size_t m = ((size_t)l2 - (size_t)l1 + 1) * 256 * 256 * 3;
 
   x = malloc(sizeof(double)*m);
   xx = x;
   *n = 0;
-  for (i = 0; i < m; i += 3){
+  for (size_t i = 0; i < lab_gamut_data_size; i += 4){
     if (lab_gamut_data[i] >= l1 && lab_gamut_data[i] <= l2){
-      xx[0] = lab_gamut_data[i];
-      xx[1] = lab_gamut_data[i+1];
-      xx[2] = lab_gamut_data[i+2];
-      xx += 3;
-      (*n)++;
+      int b_lower = lab_gamut_data[i + 2];
+      int b_upper = lab_gamut_data[i + 3];
+      for (int b = b_lower; b <= b_upper; ++b) {
+        xx[0] = lab_gamut_data[i];
+        xx[1] = lab_gamut_data[i+1];
+        xx[2] = b;
+        xx += 3;
+        (*n)++;
+      }
     }
   }
 
   return x;
 }
 
-QuadTree lab_gamut_quadtree(char *gamut_file, const char *lightness, int max_qtree_level){
-  /* read the color gamut points list in the form "x y z\n ..." and store in the octtree. return NULL if file not openable */
+QuadTree lab_gamut_quadtree(const int *lightness,
+                            int max_qtree_level) {
+  /* read the color gamut points list in the form "x y z\n ..." and store in the octtree */
   int n;
-  //  double *x = lab_gamut_from_file(gamut_file, lightness, &n);
   double *x = lab_gamut(lightness, &n);
   QuadTree qt;
   int dim = 3;
 
   if (!x) return NULL;
-  qt = QuadTree_new_from_point_list(dim, n, max_qtree_level, x, NULL);
+  qt = QuadTree_new_from_point_list(dim, n, max_qtree_level, x);
 
 
-  FREE(x);
+  free(x);
   return qt;
 }
 
@@ -269,19 +209,16 @@ static void lab_interpolate(color_lab lab1, color_lab lab2, double t, double *co
   colors[2] = lab1.b + t*(lab2.b - lab1.b);
 }
 
-void color_blend_rgb2lab(char *color_list, const int maxpoints, double **colors0){
+double *color_blend_rgb2lab(char *color_list, const int maxpoints) {
   /* give a color list of the form "#ff0000,#00ff00,...", get a list of around maxpoints
      colors in an array colors0 of size [maxpoints*3] of the form {{l,a,b},...}.
-     If *colors0 is NULL, it will be allocated.
      color_list: either "#ff0000,#00ff00,...", or "pastel"
   */
 
   int nc = 1, r, g, b, i, ii, jj, cdim = 3;
   char *cl;
-  color_lab *lab;
   color_rgb rgb;
-  double *dists, step, dist_current;
-  double *colors = NULL;
+  double step, dist_current;
   char *cp;
 
   cp = color_palettes_get(color_list);
@@ -289,13 +226,13 @@ void color_blend_rgb2lab(char *color_list, const int maxpoints, double **colors0
     color_list = cp;
   }
 
-  if (maxpoints <= 0) return;
+  if (maxpoints <= 0) return NULL;
 
   cl = color_list;
-  while ((cl=strstr(cl, ",")) != NULL){
+  while ((cl=strchr(cl, ',')) != NULL){
     cl++; nc++;
   }
-  lab = malloc(sizeof(color_lab)*MAX(nc,1));
+  color_lab *lab = gv_calloc(MAX(nc, 1), sizeof(color_lab));
 
   cl = color_list - 1;
   nc = 0;
@@ -304,9 +241,9 @@ void color_blend_rgb2lab(char *color_list, const int maxpoints, double **colors0
     if (sscanf(cl,"#%02X%02X%02X", &r, &g, &b) != 3) break;
     rgb.r = r; rgb.g = g; rgb.b = b;
     lab[nc++] = RGB2LAB(rgb);
-  } while ((cl=strstr(cl, ",")) != NULL);
+  } while ((cl=strchr(cl, ',')) != NULL);
 
-  dists = malloc(sizeof(double)*MAX(1, nc));
+  double *dists = gv_calloc(MAX(1, nc), sizeof(double));
   dists[0] = 0;
   for (i = 0; i < nc - 1; i++){
     dists[i+1] = lab_dist(lab[i], lab[i+1]);
@@ -318,10 +255,7 @@ void color_blend_rgb2lab(char *color_list, const int maxpoints, double **colors0
   if (Verbose)
     fprintf(stderr,"sum = %f\n", dists[nc-1]);
 
-  if (!(*colors0)){
-    *colors0 = malloc(sizeof(double)*maxpoints*cdim);
-  }
-  colors = *colors0; 
+  double *colors = gv_calloc(maxpoints * cdim, sizeof(double));
   if (maxpoints == 1){
     colors[0] = lab[0].l;
     colors[1] = lab[0].a;
@@ -331,112 +265,17 @@ void color_blend_rgb2lab(char *color_list, const int maxpoints, double **colors0
     ii = 0; jj = 0; dist_current = 0;
     while (dists[jj] < dists[ii] + step) jj++;
     
+    double *colors_ptr = colors;
     for (i = 0; i < maxpoints; i++){
-      lab_interpolate(lab[ii], lab[jj], (dist_current - dists[ii])/MAX(0.001, (dists[jj] - dists[ii])), colors);
+      lab_interpolate(lab[ii], lab[jj], (dist_current - dists[ii]) /
+                      MAX(0.001, (dists[jj] - dists[ii])), colors_ptr);
       dist_current += step;
-      colors += cdim;
+      colors_ptr += cdim;
       if (dist_current > dists[jj]) ii = jj;
       while (jj < nc -1 && dists[jj] < dists[ii] + step) jj++;
     }
   }
-  FREE(dists);
-  FREE(lab);  
-}
-
-
-
-
-
-color_rgb color_blend_rgb(char *color_list, real ratio, int *flag){
-  /* give a color list of the form "#ff0000,#00ff00,...", get a blend at ratio*100 percent of the position in that list and return in string color0 of the form #abcdef
-     If *colors0 is NULL, it will be allocated.
-     color_list: either "#ff0000,#00ff00,...", or "pastel"
-  */
-
-  int nc = 1, r, g, b, i, ii;
-  char *cl;
-  color_lab *lab = NULL;
-  color_rgb rgb;
-  double *dists = NULL;
-  char *cp;
-  color_lab clab;
-  double color[3];
-
-  *flag = 0;
-
-  ratio = MAX(ratio, 0);
-  ratio = MIN(ratio, 1);
-
-  cp = color_palettes_get(color_list);
-  if (cp){
-    color_list = cp;
-  }
-
-  cl = color_list;
-  while ((cl=strstr(cl, ",")) != NULL){
-    cl++; nc++;
-  }
-
-  lab = malloc(sizeof(color_lab)*MAX(nc,1));
-
-  cl = color_list - 1;
-  nc = 0;
-  do {
-    cl++;
-    if (sscanf(cl,"#%02X%02X%02X", &r, &g, &b) != 3) break;
-    rgb.r = r; rgb.g = g; rgb.b = b;
-    lab[nc++] = RGB2LAB(rgb);
-  } while ((cl=strstr(cl, ",")) != NULL);
-
-  if (nc == 1 || ratio == 0){
-    rgb = LAB2RGB(lab[0]);
-    goto RETURN;
-  } else if (nc == 0){
-    fprintf(stderr, "no color\n");
-    *flag = -1;
-    goto RETURN;
-  }
-
-  dists = malloc(sizeof(double)*MAX(1, nc));
-  dists[0] = 0;
-  for (i = 0; i < nc - 1; i++){
-    dists[i+1] = lab_dist(lab[i], lab[i+1]);
-  }
-  /* dists[i] is now the summed color distance from  the 0-th color to the i-th color */
-  for (i = 0; i < nc - 1; i++){
-    dists[i+1] += dists[i];
-  }
-  if (dists[nc-1] == 0){/* same color in the list */
-    rgb = LAB2RGB(lab[0]);
-    goto RETURN;
-  }
-  for (i = 0; i < nc; i++){
-    dists[i] /= dists[nc - 1];
-  }
-
-  ii = 0;
-  while (dists[ii] < ratio) ii++;
-    
-  assert(ii < nc && ii > 0);
-
-  lab_interpolate(lab[ii - 1], lab[ii], (ratio - dists[ii - 1])/MAX(0.001, (dists[ii] - dists[ii - 1])), color);
-  clab = color_lab_init(color[0], color[1], color[2]);
-  rgb = LAB2RGB(clab);
-
-  
-
-  RETURN:
-  if (dists) FREE(dists);
-  if (lab) FREE(lab);  
-  return rgb;
-}
-
-void color_blend_rgbstring(char *color_list, real ratio, char **color0, int *flag){
-  color_rgb rgb;
-
-  if (!(*color0)){
-    *color0 = malloc(sizeof(char)*7);
-  }
-  rgb = color_blend_rgb(color_list, ratio, flag);
-  sprintf(*color0, "%02X%02X%02X", (int) (rgb.r), (int) (rgb.g), (int) (rgb.b));
+  free(dists);
+  free(lab);
+  return colors;
 }

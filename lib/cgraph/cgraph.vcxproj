@@ -51,16 +51,15 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib\cdt</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>EXPORT_CGRAPH;EXPORT_AGXBUF;EXPORT_CGHDR;YY_NO_UNISTD_H;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <MinimalRebuild>true</MinimalRebuild>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib;$(SolutionDir)lib\cdt</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>GVDLL;EXPORT_CGRAPH;EXPORT_CGHDR;YY_NO_UNISTD_H;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <AdditionalDependencies />
@@ -70,18 +69,18 @@
       <TargetMachine>MachineX86</TargetMachine>
     </Link>
     <PreBuildEvent>
-      <Command>bison -dy grammar.y -o grammar.c
-flex -oscan.c scan.l</Command>
+      <Command>win_bison -dy -Wno-yacc grammar.y -o grammar.c
+win_flex --case-insensitive --outfile=scan.c scan.l</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib\cdt</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>EXPORT_CGRAPH;EXPORT_AGXBUF;EXPORT_CGHDR;YY_NO_UNISTD_H;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib;$(SolutionDir)lib\cdt</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>GVDLL;EXPORT_CGRAPH;EXPORT_CGHDR;YY_NO_UNISTD_H;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <AdditionalDependencies />
@@ -93,36 +92,56 @@ flex -oscan.c scan.l</Command>
       <TargetMachine>MachineX86</TargetMachine>
     </Link>
     <PreBuildEvent>
-      <Command>bison -dy grammar.y -o grammar.c
-flex -oscan.c scan.l</Command>
+      <Command>win_bison -dy -Wno-yacc grammar.y -o grammar.c
+win_flex --case-insensitive --outfile=scan.c scan.l</Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="agxbuf.h" />
+    <ClInclude Include="alloc.h" />
+    <ClInclude Include="bitarray.h" />
     <ClInclude Include="cghdr.h" />
     <ClInclude Include="cgraph.h" />
-    <ClInclude Include="malloc.h" />
+    <ClInclude Include="exit.h" />
+    <ClInclude Include="gv_ctype.h" />
+    <ClInclude Include="gv_math.h" />
+    <ClInclude Include="ingraphs.h" />
+    <ClInclude Include="list.h" />
+    <ClInclude Include="overflow.h" />
+    <ClInclude Include="prisize_t.h" />
+    <ClInclude Include="queue.h" />
+    <ClInclude Include="sort.h" />
+    <ClInclude Include="stack.h" />
+    <ClInclude Include="startswith.h" />
+    <ClInclude Include="strcasecmp.h" />
+    <ClInclude Include="streq.h" />
+    <ClInclude Include="strview.h" />
+    <ClInclude Include="tokenize.h" />
+    <ClInclude Include="unreachable.h" />
+    <ClInclude Include="unused.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="acyclic.c" />
     <ClCompile Include="agerror.c" />
-    <ClCompile Include="agxbuf.c" />
     <ClCompile Include="apply.c" />
     <ClCompile Include="attr.c" />
     <ClCompile Include="edge.c" />
-    <ClCompile Include="flatten.c" />
     <ClCompile Include="grammar.c" />
     <ClCompile Include="graph.c" />
     <ClCompile Include="id.c" />
     <ClCompile Include="imap.c" />
+    <ClCompile Include="ingraphs.c" />
     <ClCompile Include="io.c" />
     <ClCompile Include="mem.c" />
     <ClCompile Include="node.c" />
+    <ClCompile Include="node_induce.c" />
     <ClCompile Include="obj.c" />
-    <ClCompile Include="pend.c" />
     <ClCompile Include="rec.c" />
     <ClCompile Include="refstr.c" />
     <ClCompile Include="scan.c" />
     <ClCompile Include="subg.c" />
+    <ClCompile Include="tred.c" />
+    <ClCompile Include="unflatten.c" />
     <ClCompile Include="utils.c" />
     <ClCompile Include="write.c" />
   </ItemGroup>

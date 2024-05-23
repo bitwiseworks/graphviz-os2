@@ -1,21 +1,18 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
 #include <assert.h>
-
-#include "circular.h"
-#include "block.h"
+#include <cgraph/alloc.h>
+#include <circogen/circular.h>
+#include <circogen/block.h>
 
 void initBlocklist(blocklist_t * bl)
 {
@@ -23,26 +20,9 @@ void initBlocklist(blocklist_t * bl)
     bl->last = NULL;
 }
 
-/*
-void
-cleanBlocklist(blocklist_t* sp)
-{
-	block_t*  bp;
-	block_t*  temp;
-
-    if (!sp) return;
-	for(bp = sp->first; bp; bp = temp) {
-		temp = bp->next;
-		freeBlock(bp);
-	}
-}
-*/
-
 block_t *mkBlock(Agraph_t * g)
 {
-    block_t *sn;
-
-    sn = NEW(block_t);
+    block_t *sn = gv_alloc(sizeof(block_t));
     initBlocklist(&sn->children);
     sn->sub_graph = g;
     return sn;
@@ -52,7 +32,7 @@ void freeBlock(block_t * sp)
 {
     if (!sp)
 	return;
-    freeNodelist(sp->circle_list);
+    nodelist_free(&sp->circle_list);
     free(sp);
 }
 
@@ -61,9 +41,7 @@ int blockSize(block_t * sp)
     return agnnodes (sp->sub_graph);
 }
 
-/* appendBlock:
- * add block at end
- */
+/// add block at end
 void appendBlock(blocklist_t * bl, block_t * bp)
 {
     bp->next = NULL;
@@ -76,9 +54,7 @@ void appendBlock(blocklist_t * bl, block_t * bp)
     }
 }
 
-/* insertBlock:
- * add block at beginning
- */
+/// add block at beginning
 void insertBlock(blocklist_t * bl, block_t * bp)
 {
     if (bl->first) {

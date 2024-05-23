@@ -1,34 +1,29 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include "matrix_ops.h"
-#include "memory.h"
+#include <cgraph/alloc.h>
+#include <neatogen/matrix_ops.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
 
 static double p_iteration_threshold = 1e-3;
 
-int
-power_iteration(double **square_mat, int n, int neigs, double **eigs,
-		double *evals, int initialize)
-{
+bool power_iteration(double **square_mat, int n, int neigs, double **eigs,
+		double *evals) {
     /* compute the 'neigs' top eigenvectors of 'square_mat' using power iteration */
 
     int i, j;
-    double *tmp_vec = N_GNEW(n, double);
-    double *last_vec = N_GNEW(n, double);
+    double *tmp_vec = gv_calloc(n, sizeof(double));
+    double *last_vec = gv_calloc(n, sizeof(double));
     double *curr_vector;
     double len;
     double angle;
@@ -48,42 +43,41 @@ power_iteration(double **square_mat, int n, int neigs, double **eigs,
 	curr_vector = eigs[i];
 	/* guess the i-th eigen vector */
       choose:
-	if (initialize)
-	    for (j = 0; j < n; j++)
-		curr_vector[j] = rand() % 100;
+        for (j = 0; j < n; j++)
+            curr_vector[j] = rand() % 100;
 	/* orthogonalize against higher eigenvectors */
 	for (j = 0; j < i; j++) {
-	    alpha = -dot(eigs[j], 0, n - 1, curr_vector);
-	    scadd(curr_vector, 0, n - 1, alpha, eigs[j]);
+	    alpha = -vectors_inner_product(n, eigs[j], curr_vector);
+	    scadd(curr_vector, n - 1, alpha, eigs[j]);
 	}
-	len = norm(curr_vector, 0, n - 1);
+	len = norm(curr_vector, n - 1);
 	if (len < 1e-10) {
-	    /* We have chosen a vector colinear with prvious ones */
+	    // we have chosen a vector colinear with previous ones
 	    goto choose;
 	}
-	vecscale(curr_vector, 0, n - 1, 1.0 / len, curr_vector);
+	vectors_scalar_mult(n, curr_vector, 1.0 / len, curr_vector);
 	iteration = 0;
 	do {
 	    iteration++;
-	    cpvec(last_vec, 0, n - 1, curr_vector);
+	    copy_vector(n, curr_vector, last_vec);
 
 	    right_mult_with_vector_d(square_mat, n, n, curr_vector,
 				     tmp_vec);
-	    cpvec(curr_vector, 0, n - 1, tmp_vec);
+	    copy_vector(n, tmp_vec, curr_vector);
 
 	    /* orthogonalize against higher eigenvectors */
 	    for (j = 0; j < i; j++) {
-		alpha = -dot(eigs[j], 0, n - 1, curr_vector);
-		scadd(curr_vector, 0, n - 1, alpha, eigs[j]);
+		alpha = -vectors_inner_product(n, eigs[j], curr_vector);
+		scadd(curr_vector, n - 1, alpha, eigs[j]);
 	    }
-	    len = norm(curr_vector, 0, n - 1);
+	    len = norm(curr_vector, n - 1);
 	    if (len < 1e-10 || iteration > Max_iterations) {
 		/* We have reached the null space (e.vec. associated with e.val. 0) */
 		goto exit;
 	    }
 
-	    vecscale(curr_vector, 0, n - 1, 1.0 / len, curr_vector);
-	    angle = dot(curr_vector, 0, n - 1, last_vec);
+	    vectors_scalar_mult(n, curr_vector, 1.0 / len, curr_vector);
+	    angle = vectors_inner_product(n, curr_vector, last_vec);
 	} while (fabs(angle) < tol);
 	evals[i] = angle * len;	/* this is the Rayleigh quotient (up to errors due to orthogonalization):
 				   u*(A*u)/||A*u||)*||A*u||, where u=last_vec, and ||u||=1
@@ -100,15 +94,14 @@ power_iteration(double **square_mat, int n, int neigs, double **eigs,
 	    curr_vector[j] = rand() % 100;
 	/* orthogonalize against higher eigenvectors */
 	for (j = 0; j < i; j++) {
-	    alpha = -dot(eigs[j], 0, n - 1, curr_vector);
-	    scadd(curr_vector, 0, n - 1, alpha, eigs[j]);
+	    alpha = -vectors_inner_product(n, eigs[j], curr_vector);
+	    scadd(curr_vector, n - 1, alpha, eigs[j]);
 	}
-	len = norm(curr_vector, 0, n - 1);
-	vecscale(curr_vector, 0, n - 1, 1.0 / len, curr_vector);
+	len = norm(curr_vector, n - 1);
+	vectors_scalar_mult(n, curr_vector, 1.0 / len, curr_vector);
 	evals[i] = 0;
 
     }
-
 
     /* sort vectors by their evals, for overcoming possible mis-convergence: */
     for (i = 0; i < neigs - 1; i++) {
@@ -121,9 +114,9 @@ power_iteration(double **square_mat, int n, int neigs, double **eigs,
 	    }
 	}
 	if (largest_index != i) {	/* exchange eigenvectors: */
-	    cpvec(tmp_vec, 0, n - 1, eigs[i]);
-	    cpvec(eigs[i], 0, n - 1, eigs[largest_index]);
-	    cpvec(eigs[largest_index], 0, n - 1, tmp_vec);
+	    copy_vector(n, eigs[i], tmp_vec);
+	    copy_vector(n, eigs[largest_index], eigs[i]);
+	    copy_vector(n, tmp_vec, eigs[largest_index]);
 
 	    evals[largest_index] = evals[i];
 	    evals[i] = largest_eval;
@@ -136,27 +129,16 @@ power_iteration(double **square_mat, int n, int neigs, double **eigs,
     return (iteration <= Max_iterations);
 }
 
-
-
 void
 mult_dense_mat(double **A, float **B, int dim1, int dim2, int dim3,
 	       float ***CC)
 {
-/*
-  A is dim1 x dim2, B is dim2 x dim3, C = A x B 
-*/
+  // A is dim1 × dim2, B is dim2 × dim3, C = A × B
 
     double sum;
     int i, j, k;
-    float *storage;
-    float **C = *CC;
-    if (C != NULL) {
-	storage = (float *) realloc(C[0], dim1 * dim3 * sizeof(A[0]));
-	*CC = C = (float **) realloc(C, dim1 * sizeof(A));
-    } else {
-	storage = (float *) malloc(dim1 * dim3 * sizeof(A[0]));
-	*CC = C = (float **) malloc(dim1 * sizeof(A));
-    }
+    float *storage = gv_calloc(dim1 * dim3, sizeof(A[0]));
+    float **C = *CC = gv_calloc(dim1, sizeof(A));
 
     for (i = 0; i < dim1; i++) {
 	C[i] = storage;
@@ -178,21 +160,13 @@ void
 mult_dense_mat_d(double **A, float **B, int dim1, int dim2, int dim3,
 		 double ***CC)
 {
-/*
-  A is dim1 x dim2, B is dim2 x dim3, C = A x B 
-*/
-    double **C = *CC;
-    double *storage;
+  // A is dim1 × dim2, B is dim2 × dim3, C = A × B
+
     int i, j, k;
     double sum;
 
-    if (C != NULL) {
-	storage = (double *) realloc(C[0], dim1 * dim3 * sizeof(double));
-	*CC = C = (double **) realloc(C, dim1 * sizeof(double *));
-    } else {
-	storage = (double *) malloc(dim1 * dim3 * sizeof(double));
-	*CC = C = (double **) malloc(dim1 * sizeof(double *));
-    }
+    double *storage = gv_calloc(dim1 * dim3, sizeof(double));
+    double **C = *CC = gv_calloc(dim1, sizeof(double *));
 
     for (i = 0; i < dim1; i++) {
 	C[i] = storage;
@@ -214,24 +188,14 @@ void
 mult_sparse_dense_mat_transpose(vtx_data * A, double **B, int dim1,
 				int dim2, float ***CC)
 {
-/*
-  A is dim1 x dim1 and sparse, B is dim2 x dim1, C = A x B 
-*/
+  // A is dim1 × dim1 and sparse, B is dim2 × dim1, C = A × B
 
-    float *storage;
-    int i, j, k;
+    int i, j;
     double sum;
     float *ewgts;
     int *edges;
-    int nedges;
-    float **C = *CC;
-    if (C != NULL) {
-	storage = (float *) realloc(C[0], dim1 * dim2 * sizeof(A[0]));
-	*CC = C = (float **) realloc(C, dim1 * sizeof(A));
-    } else {
-	storage = (float *) malloc(dim1 * dim2 * sizeof(A[0]));
-	*CC = C = (float **) malloc(dim1 * sizeof(A));
-    }
+    float *storage = gv_calloc(dim1 * dim2, sizeof(A[0]));
+    float **C = *CC = gv_calloc(dim1, sizeof(A));
 
     for (i = 0; i < dim1; i++) {
 	C[i] = storage;
@@ -241,10 +205,10 @@ mult_sparse_dense_mat_transpose(vtx_data * A, double **B, int dim1,
     for (i = 0; i < dim1; i++) {
 	edges = A[i].edges;
 	ewgts = A[i].ewgts;
-	nedges = A[i].nedges;
+	const size_t nedges = A[i].nedges;
 	for (j = 0; j < dim2; j++) {
 	    sum = 0;
-	    for (k = 0; k < nedges; k++) {
+	    for (size_t k = 0; k < nedges; k++) {
 		sum += ewgts[k] * B[j][edges[k]];
 	    }
 	    C[i][j] = (float) (sum);
@@ -252,70 +216,20 @@ mult_sparse_dense_mat_transpose(vtx_data * A, double **B, int dim1,
     }
 }
 
-
-
-/* Copy a range of a double vector to a double vector */
-void cpvec(double *copy, int beg, int end, double *vec)
-{
-    int i;
-
-    copy = copy + beg;
-    vec = vec + beg;
-    for (i = end - beg + 1; i; i--) {
-	*copy++ = *vec++;
-    }
-}
-
-/* Returns scalar product of two double n-vectors. */
-double dot(double *vec1, int beg, int end, double *vec2)
-{
-    int i;
-    double sum;
-
-    sum = 0.0;
-    vec1 = vec1 + beg;
-    vec2 = vec2 + beg;
-    for (i = end - beg + 1; i; i--) {
-	sum += (*vec1++) * (*vec2++);
-    }
-    return (sum);
-}
-
-
 /* Scaled add - fills double vec1 with vec1 + alpha*vec2 over range*/
-void scadd(double *vec1, int beg, int end, double fac, double *vec2)
-{
+void scadd(double *vec1, int end, double fac, double *vec2) {
     int i;
 
-    vec1 = vec1 + beg;
-    vec2 = vec2 + beg;
-    for (i = end - beg + 1; i; i--) {
+    for (i = end + 1; i; i--) {
 	(*vec1++) += fac * (*vec2++);
     }
 }
 
-/* Scale - fills vec1 with alpha*vec2 over range, double version */
-void vecscale(double *vec1, int beg, int end, double alpha, double *vec2)
-{
-    int i;
-
-    vec1 += beg;
-    vec2 += beg;
-    for (i = end - beg + 1; i; i--) {
-	(*vec1++) = alpha * (*vec2++);
-    }
-}
-
 /* Returns 2-norm of a double n-vector over range. */
-double norm(double *vec, int beg, int end)
-{
-    return (sqrt(dot(vec, beg, end, vec)));
+double norm(double *vec, int end) {
+  return sqrt(vectors_inner_product(end + 1, vec, vec));
 }
 
-
-#ifndef __cplusplus
-
-/* inline */
 void orthog1(int n, double *vec	/* vector to be orthogonalized against 1 */
     )
 {
@@ -337,7 +251,6 @@ void orthog1(int n, double *vec	/* vector to be orthogonalized against 1 */
 
 #define RANGE 500
 
-/* inline */
 void init_vec_orth1(int n, double *vec)
 {
     /* randomly generate a vector orthogonal to 1 (i.e., with mean 0) */
@@ -349,24 +262,21 @@ void init_vec_orth1(int n, double *vec)
     orthog1(n, vec);
 }
 
-/* inline */
 void
 right_mult_with_vector(vtx_data * matrix, int n, double *vector,
 		       double *result)
 {
-    int i, j;
+    int i;
 
     double res;
     for (i = 0; i < n; i++) {
 	res = 0;
-	for (j = 0; j < matrix[i].nedges; j++)
+	for (size_t j = 0; j < matrix[i].nedges; j++)
 	    res += matrix[i].ewgts[j] * vector[matrix[i].edges[j]];
 	result[i] = res;
     }
-    /* orthog1(n,vector); */
 }
 
-/* inline */
 void
 right_mult_with_vector_f(float **matrix, int n, double *vector,
 			 double *result)
@@ -380,10 +290,8 @@ right_mult_with_vector_f(float **matrix, int n, double *vector,
 	    res += matrix[i][j] * vector[j];
 	result[i] = res;
     }
-    /* orthog1(n,vector); */
 }
 
-/* inline */
 void
 vectors_subtraction(int n, double *vector1, double *vector2,
 		    double *result)
@@ -394,7 +302,6 @@ vectors_subtraction(int n, double *vector1, double *vector2,
     }
 }
 
-/* inline */
 void
 vectors_addition(int n, double *vector1, double *vector2, double *result)
 {
@@ -404,40 +311,22 @@ vectors_addition(int n, double *vector1, double *vector2, double *result)
     }
 }
 
-#ifdef UNUSED
-/* inline */
-void
-vectors_mult_addition(int n, double *vector1, double alpha,
-		      double *vector2)
-{
-    int i;
-    for (i = 0; i < n; i++) {
-	vector1[i] = vector1[i] + alpha * vector2[i];
-    }
-}
-#endif
-
-/* inline */
-void
-vectors_scalar_mult(int n, double *vector, double alpha, double *result)
-{
+void vectors_scalar_mult(int n, const double *vector, double alpha,
+                         double *result) {
     int i;
     for (i = 0; i < n; i++) {
 	result[i] = vector[i] * alpha;
     }
 }
 
-/* inline */
-void copy_vector(int n, double *source, double *dest)
-{
+void copy_vector(int n, const double *source, double *dest) {
     int i;
     for (i = 0; i < n; i++)
 	dest[i] = source[i];
 }
 
-/* inline */
-double vectors_inner_product(int n, double *vector1, double *vector2)
-{
+double vectors_inner_product(int n, const double *vector1,
+                             const double *vector2) {
     int i;
     double result = 0;
     for (i = 0; i < n; i++) {
@@ -447,64 +336,23 @@ double vectors_inner_product(int n, double *vector1, double *vector2)
     return result;
 }
 
-/* inline */
 double max_abs(int n, double *vector)
 {
     double max_val = -1e50;
     int i;
     for (i = 0; i < n; i++)
-	if (fabs(vector[i]) > max_val)
-	    max_val = fabs(vector[i]);
+	max_val = fmax(max_val, fabs(vector[i]));
 
     return max_val;
 }
 
-#ifdef UNUSED
-/* inline */
-void orthogvec(int n, double *vec1,	/* vector to be orthogonalized */
-	       double *vec2	/* normalized vector to be orthogonalized against */
-    )
-{
-    double alpha;
-    if (vec2 == NULL) {
-	return;
-    }
-
-    alpha = -vectors_inner_product(n, vec1, vec2);
-
-    vectors_mult_addition(n, vec1, alpha, vec2);
-}
-
- /* sparse matrix extensions: */
-
-/* inline */
-void mat_mult_vec(vtx_data * L, int n, double *vec, double *result)
-{
-    /* compute result= -L*vec */
-    int i, j;
-    double sum;
-    int *edges;
-    float *ewgts;
-
-    for (i = 0; i < n; i++) {
-	sum = 0;
-	edges = L[i].edges;
-	ewgts = L[i].ewgts;
-	for (j = 0; j < L[i].nedges; j++) {
-	    sum -= ewgts[j] * vec[edges[j]];
-	}
-	result[i] = sum;
-    }
-}
-#endif
-
-/* inline */
 void
 right_mult_with_vector_transpose(double **matrix,
 				 int dim1, int dim2,
 				 double *vector, double *result)
 {
-    /* matrix is dim2 x dim1, vector has dim2 components, result=matrix^T x vector */
+    // matrix is dim2 × dim1, vector has dim2 components,
+    // result = matrixᵀ × vector
     int i, j;
 
     double res;
@@ -516,13 +364,13 @@ right_mult_with_vector_transpose(double **matrix,
     }
 }
 
-/* inline */
 void
 right_mult_with_vector_d(double **matrix,
 			 int dim1, int dim2,
 			 double *vector, double *result)
 {
-    /* matrix is dim1 x dim2, vector has dim2 components, result=matrix x vector */
+    // matrix is dim1 × dim2, vector has dim2 components,
+    // result = matrix × vector
     int i, j;
 
     double res;
@@ -534,13 +382,11 @@ right_mult_with_vector_d(double **matrix,
     }
 }
 
-
 /*****************************
 ** Single precision (float) **
 ** version                  **
 *****************************/
 
-/* inline */
 void orthog1f(int n, float *vec)
 {
     int i;
@@ -559,37 +405,6 @@ void orthog1f(int n, float *vec)
     }
 }
 
-#ifdef UNUSED
-/* inline */
-void right_mult_with_vectorf
-    (vtx_data * matrix, int n, float *vector, float *result) {
-    int i, j;
-
-    float res;
-    for (i = 0; i < n; i++) {
-	res = 0;
-	for (j = 0; j < matrix[i].nedges; j++)
-	    res += matrix[i].ewgts[j] * vector[matrix[i].edges[j]];
-	result[i] = res;
-    }
-}
-
-/* inline */
-void right_mult_with_vector_fd
-    (float **matrix, int n, float *vector, double *result) {
-    int i, j;
-
-    float res;
-    for (i = 0; i < n; i++) {
-	res = 0;
-	for (j = 0; j < n; j++)
-	    res += matrix[i][j] * vector[j];
-	result[i] = res;
-    }
-}
-#endif
-
-/* inline */
 void right_mult_with_vector_ff
     (float *packed_matrix, int n, float *vector, float *result) {
     /* packed matrix is the upper-triangular part of a symmetric matrix arranged in a vector row-wise */
@@ -614,9 +429,8 @@ void right_mult_with_vector_ff
     }
 }
 
-/* inline */
 void
-vectors_substractionf(int n, float *vector1, float *vector2, float *result)
+vectors_subtractionf(int n, float *vector1, float *vector2, float *result)
 {
     int i;
     for (i = 0; i < n; i++) {
@@ -624,7 +438,6 @@ vectors_substractionf(int n, float *vector1, float *vector2, float *result)
     }
 }
 
-/* inline */
 void
 vectors_additionf(int n, float *vector1, float *vector2, float *result)
 {
@@ -634,7 +447,6 @@ vectors_additionf(int n, float *vector1, float *vector2, float *result)
     }
 }
 
-/* inline */
 void
 vectors_mult_additionf(int n, float *vector1, float alpha, float *vector2)
 {
@@ -644,16 +456,6 @@ vectors_mult_additionf(int n, float *vector1, float alpha, float *vector2)
     }
 }
 
-/* inline */
-void vectors_scalar_multf(int n, float *vector, float alpha, float *result)
-{
-    int i;
-    for (i = 0; i < n; i++) {
-	result[i] = (float) vector[i] * alpha;
-    }
-}
-
-/* inline */
 void copy_vectorf(int n, float *source, float *dest)
 {
     int i;
@@ -661,7 +463,6 @@ void copy_vectorf(int n, float *source, float *dest)
 	dest[i] = source[i];
 }
 
-/* inline */
 double vectors_inner_productf(int n, float *vector1, float *vector2)
 {
     int i;
@@ -673,7 +474,6 @@ double vectors_inner_productf(int n, float *vector1, float *vector2)
     return result;
 }
 
-/* inline */
 void set_vector_val(int n, double val, double *result)
 {
     int i;
@@ -681,7 +481,6 @@ void set_vector_val(int n, double val, double *result)
 	result[i] = val;
 }
 
-/* inline */
 void set_vector_valf(int n, float val, float* result)
 {
     int i;
@@ -689,19 +488,16 @@ void set_vector_valf(int n, float val, float* result)
 	result[i] = val;
 }
 
-/* inline */
 double max_absf(int n, float *vector)
 {
     int i;
     float max_val = -1e30f;
     for (i = 0; i < n; i++)
-	if (fabs(vector[i]) > max_val)
-	    max_val = (float) (fabs(vector[i]));
+	max_val = fmaxf(max_val, fabsf(vector[i]));
 
     return max_val;
 }
 
-/* inline */
 void square_vec(int n, float *vec)
 {
     int i;
@@ -710,94 +506,32 @@ void square_vec(int n, float *vec)
     }
 }
 
-/* inline */
 void invert_vec(int n, float *vec)
 {
     int i;
-    float v;
     for (i = 0; i < n; i++) {
-	if ((v = vec[i]) != 0.0)
-	    vec[i] = 1.0f / v;
+	if (vec[i] != 0.0) {
+	    vec[i] = 1.0f / vec[i];
+	}
     }
 }
 
-/* inline */
-void sqrt_vec(int n, float *vec)
-{
-    int i;
-    double d;
-    for (i = 0; i < n; i++) {
-	/* do this in two steps to avoid a bug in gcc-4.00 on AIX */
-	d = sqrt(vec[i]);
-	vec[i] = (float) d;
-    }
-}
-
-/* inline */
 void sqrt_vecf(int n, float *source, float *target)
 {
     int i;
-    double d;
-    float v;
     for (i = 0; i < n; i++) {
-	if ((v = source[i]) >= 0.0) {
-	    /* do this in two steps to avoid a bug in gcc-4.00 on AIX */
-	    d = sqrt(v);
-	    target[i] = (float) d;
+	if (source[i] >= 0.0) {
+	    target[i] = sqrtf(source[i]);
 	}
     }
 }
 
-/* inline */
 void invert_sqrt_vec(int n, float *vec)
 {
     int i;
-    double d;
-    float v;
     for (i = 0; i < n; i++) {
-	if ((v = vec[i]) > 0.0) {
-	    /* do this in two steps to avoid a bug in gcc-4.00 on AIX */
-	    d = 1. / sqrt(v);
-	    vec[i] = (float) d;
+	if (vec[i] > 0.0) {
+	    vec[i] = 1.0f / sqrtf(vec[i]);
 	}
     }
 }
-
-#ifdef UNUSED
-/* inline */
-void init_vec_orth1f(int n, float *vec)
-{
-    /* randomly generate a vector orthogonal to 1 (i.e., with mean 0) */
-    int i;
-
-    for (i = 0; i < n; i++)
-	vec[i] = (float) (rand() % RANGE);
-
-    orthog1f(n, vec);
-}
-
-
- /* sparse matrix extensions: */
-
-/* inline */
-void mat_mult_vecf(vtx_data * L, int n, float *vec, float *result)
-{
-    /* compute result= -L*vec */
-    int i, j;
-    float sum;
-    int *edges;
-    float *ewgts;
-
-    for (i = 0; i < n; i++) {
-	sum = 0;
-	edges = L[i].edges;
-	ewgts = L[i].ewgts;
-	for (j = 0; j < L[i].nedges; j++) {
-	    sum -= ewgts[j] * vec[edges[j]];
-	}
-	result[i] = sum;
-    }
-}
-#endif
-
-#endif

@@ -1,22 +1,18 @@
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
  * Contributors: See CVS logs. Details at http://www.graphviz.org/
  *************************************************************************/
 
-#include "config.h"
-
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 #include "cgraph.h"
+#include "exit.h"
 #include "ingraphs.h"
 
 #include <getopt.h>
@@ -49,7 +45,7 @@ typedef struct {
 
 static void initStack(Stack * sp, int sz)
 {
-	sp->data = (Agnode_t **) malloc(sz * sizeof(Agnode_t *));
+	sp->data = malloc(sz * sizeof(Agnode_t *));
 	sp->ptr = sp->data;
 }
 
@@ -99,14 +95,13 @@ static void nodeInduce(Agraph_t * g, Agraph_t * map)
 
 	for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 		for (e = agfstout(rootg, n); e; e = agnxtout(rootg, e)) {
-			if (agsubnode(g, aghead(e), FALSE))
-				agsubedge(g, e, TRUE);
+			if (agsubnode(g, aghead(e), 0))
+				agsubedge(g, e, 1);
 			else {
 				Agraph_t *tscc = getscc(agtail(e));
 				Agraph_t *hscc = getscc(aghead(e));
 				if (tscc && hscc)
-					agedge(map, getrep(tscc),
-						   getrep(hscc), NIL(char *), TRUE);
+					agedge(map, getrep(tscc), getrep(hscc), NULL, 1);
 			}
 		}
 	}
@@ -140,13 +135,13 @@ static int visit(Agnode_t * n, Agraph_t * map, Stack * sp, sccstate * st)
 		} else {
 			char name[32];
 			Agraph_t *G = agraphof(n);;
-			sprintf(name, "cluster_%d", (st->Comp)++);
-			subg = agsubg(G, name, TRUE);
-			agbindrec(subg, "scc_graph", sizeof(Agraphinfo_t), TRUE);
-			setrep(subg, agnode(map, name, TRUE));
+			snprintf(name, sizeof(name), "cluster_%d", (st->Comp)++);
+			subg = agsubg(G, name, 1);
+			agbindrec(subg, "scc_graph", sizeof(Agraphinfo_t), true);
+			setrep(subg, agnode(map, name, 1));
 			do {
 				t = pop(sp);
-				agsubnode(subg, t, TRUE);
+				agsubnode(subg, t, 1);
 				setval(t, INF);
 				setscc(t, subg);
 				st->N_nodes_in_nontriv_SCC++;
@@ -198,7 +193,7 @@ countComponents(Agraph_t * g, int *max_degree, float *nontree_frac)
 	if (max_degree) {
 		int maxd = 0;
 		for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-			deg = agdegree(g, n, TRUE, TRUE);
+			deg = agdegree(g, n, 1, 1);
 			if (maxd < deg)
 				maxd = deg;
 			setval(n, 0);
@@ -224,8 +219,8 @@ static void process(Agraph_t * G)
 	Stack stack;
 	sccstate state;
 
-	aginit(G, AGRAPH, "scc_graph", sizeof(Agraphinfo_t), TRUE);
-	aginit(G, AGNODE, "scc_node", sizeof(Agnodeinfo_t), TRUE);
+	aginit(G, AGRAPH, "scc_graph", sizeof(Agraphinfo_t), true);
+	aginit(G, AGNODE, "scc_node", sizeof(Agnodeinfo_t), true);
 	state.Comp = state.ID = 0;
 	state.N_nodes_in_nontriv_SCC = 0;
 
@@ -253,20 +248,14 @@ static void process(Agraph_t * G)
 
 }
 
-static FILE *openFile(char *name, char *mode)
+static FILE *openFile(const char *name)
 {
 	FILE *fp;
-	char *modestr;
 
-	fp = fopen(name, mode);
+	fp = fopen(name, "w");
 	if (!fp) {
-		if (*mode == 'r')
-			modestr = "reading";
-		else
-			modestr = "writing";
-		fprintf(stderr, "gvpack: could not open file %s for %s\n",
-				name, modestr);
-		exit(1);
+		fprintf(stderr, "gvpack: could not open file %s for writing\n", name);
+		graphviz_exit(1);
 	}
 	return (fp);
 }
@@ -283,7 +272,7 @@ If no files are specified, stdin is used\n";
 static void usage(int v)
 {
 	printf(useString, CmdName);
-	exit(v);
+	graphviz_exit(v);
 }
 
 static void scanArgs(int argc, char **argv)
@@ -292,7 +281,7 @@ static void scanArgs(int argc, char **argv)
 
 	CmdName = argv[0];
 	opterr = 0;
-	while ((c = getopt(argc, argv, ":o:sdvS")) != EOF) {
+	while ((c = getopt(argc, argv, ":o:sdvS?")) != EOF) {
 		switch (c) {
 		case 's':
 			StatsOnly = 1;
@@ -301,7 +290,7 @@ static void scanArgs(int argc, char **argv)
 			wantDegenerateComp = 1;
 			break;
 		case 'o':
-			outfp = openFile(optarg, "w");
+			outfp = openFile(optarg);
 			break;
 		case 'v':
 			Verbose = 1;
@@ -311,11 +300,13 @@ static void scanArgs(int argc, char **argv)
 			Silent = 1;
 			break;
 		case '?':
-			if (optopt == '?')
+			if (optopt == '\0')
 				usage(0);
-			else
-				fprintf(stderr, "%s: option -%c unrecognized - ignored\n",
+			else {
+				fprintf(stderr, "%s: option -%c unrecognized\n",
 						CmdName, optopt);
+				usage(1);
+			}
 			break;
 		}
 	}
@@ -328,18 +319,13 @@ static void scanArgs(int argc, char **argv)
 		outfp = stdout;			/* stdout the default */
 }
 
-static Agraph_t *gread(FILE * fp)
-{
-	return agread(fp, (Agdisc_t *) 0);
-}
-
 int main(int argc, char **argv)
 {
 	Agraph_t *g;
 	ingraph_state ig;
 
 	scanArgs(argc, argv);
-	newIngraph(&ig, Files, gread);
+	newIngraph(&ig, Files);
 
 	while ((g = nextGraph(&ig)) != 0) {
 		if (agisdirected(g))

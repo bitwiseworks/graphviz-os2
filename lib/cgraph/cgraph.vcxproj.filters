@@ -18,21 +18,75 @@
     <ClInclude Include="agxbuf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="alloc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="bitarray.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="cghdr.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="cgraph.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="malloc.h">
+    <ClInclude Include="exit.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gv_ctype.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gv_math.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ingraphs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="list.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="overflow.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="prisize_t.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="queue.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sort.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="stack.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="startswith.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="strcasecmp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="streq.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="strview.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tokenize.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="unreachable.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="unused.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="agerror.c">
+    <ClCompile Include="acyclic.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="agxbuf.c">
+    <ClCompile Include="agerror.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="apply.c">
@@ -42,9 +96,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="edge.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="flatten.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="grammar.c">
@@ -59,6 +110,9 @@
     <ClCompile Include="imap.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="ingraphs.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="io.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -68,10 +122,10 @@
     <ClCompile Include="node.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="obj.c">
+    <ClCompile Include="node_induce.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="pend.c">
+    <ClCompile Include="obj.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="rec.c">
@@ -84,6 +138,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="subg.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tred.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="unflatten.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="utils.c">

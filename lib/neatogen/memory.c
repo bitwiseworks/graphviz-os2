@@ -1,18 +1,16 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "geometry.h"
-#include "render.h"
+#include <cgraph/alloc.h>
+#include <neatogen/geometry.h>
+#include <common/render.h>
 
 typedef struct freenode {
     struct freenode *nextfree;
@@ -23,7 +21,7 @@ typedef struct freeblock {
     struct freenode *nodes;
 } Freeblock;
 
-#include "mem.h"
+#include <neatogen/mem.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -63,14 +61,13 @@ void *getfree(Freelist * fl)
 {
     int i;
     Freenode *t;
-    Freeblock *mem;
 
     if (fl->head == NULL) {
 	int size = fl->nodesize;
 	char *cp;
 
-	mem = GNEW(Freeblock);
-	mem->nodes = gmalloc(sqrt_nsites * size);
+	Freeblock *mem = gv_alloc(sizeof(Freeblock));
+	mem->nodes = gv_calloc(sqrt_nsites, size);
 	cp = (char *) (mem->nodes);
 	for (i = 0; i < sqrt_nsites; i++) {
 	    makefree(cp + i * size, fl);
@@ -80,11 +77,11 @@ void *getfree(Freelist * fl)
     }
     t = fl->head;
     fl->head = t->nextfree;
-    return ((void *) t);
+    return t;
 }
 
 void makefree(void *curr, Freelist * fl)
 {
     ((Freenode *) curr)->nextfree = fl->head;
-    fl->head = (Freenode *) curr;
+    fl->head = curr;
 }

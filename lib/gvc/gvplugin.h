@@ -1,20 +1,21 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup plugin_api
+/// @defgroup plugin_api Plugin API
+/// @ingroup public_apis
+/// @{
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /* Header used by plugins */
 
-#ifndef GVPLUGIN_H
-#define GVPLUGIN_H
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,6 +31,7 @@ extern "C" {
  *          type      - e.g. "png", "ps"
  */
 
+/// ingroup plugin_api
     typedef struct {
 	int id;         /* an id that is only unique within a package 
 			of plugins of the same api.
@@ -56,8 +58,8 @@ extern "C" {
 					no pathname */
 	gvplugin_api_t *apis;
     } gvplugin_library_t;
+/// @}
 
 #ifdef __cplusplus
 }
 #endif
-#endif				/* GVPLUGIN_H */

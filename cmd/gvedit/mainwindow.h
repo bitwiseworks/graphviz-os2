@@ -1,14 +1,11 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /*
@@ -16,8 +13,7 @@ Core structures of mdi windowing code is either inspired or directly copied from
 These examples are published under the terms of the BSD
 */
 
-#ifndef CMAINWINDOW_H
-#define CMAINWINDOW_H
+#pragma once
 
 #include <QMainWindow>
 #include <QTextStream>
@@ -41,13 +37,12 @@ class CMainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    CMainWindow(char*** Files=NULL);
+    CMainWindow(char **files = nullptr);
     QMdiArea *mdiArea;
     void addFile (QString fileName);
-    std::vector <QString> initFiles;
 private slots:
     void slotSettings();
-    void slotRun(MdiChild * m=NULL);
+    void slotRun(MdiChild* m = nullptr);
     void slotNew();
     void slotOpen();
     void slotSave();
@@ -77,7 +72,6 @@ private:
     void toolBars();
     void readSettings();
     void writeSettings();
-    void loadPlugins();
     MdiChild *activeMdiChild();
     MdiChild* prevChild;
     QMdiSubWindow *findMdiChild(const QString &fileName);
@@ -117,5 +111,3 @@ private:
     QMenu *mHelp;
 
 };
-
-#endif

@@ -1,36 +1,30 @@
-# $Id$ $Revision$
 ## Process this file with automake to produce Makefile.in
 
-pdfdir = $(pkgdatadir)/doc/pdf
-#pkgconfigdir = $(libdir)/pkgconfig
-
-AM_CPPFLAGS = -I$(top_srcdir) \
-        -I$(top_srcdir)/lib/common \
+AM_CPPFLAGS = \
+	-I$(top_srcdir)/lib \
+	-I$(top_srcdir)/lib/common \
 	-I$(top_srcdir)/lib/gvc \
-	-I$(top_srcdir)/lib/neatogen \
 	-I$(top_srcdir)/lib/pathplan \
 	-I$(top_srcdir)/lib/cgraph \
 	-I$(top_srcdir)/lib/cdt
 
 if WITH_WIN32
-AM_CFLAGS = -D_BLD_gvc=1
+AM_CFLAGS = -DGVC_EXPORTS=1
 endif
 
 pkginclude_HEADERS = pack.h
 noinst_LTLIBRARIES = libpack_C.la
-man_MANS = pack.3
+dist_man_MANS = pack.3
+if ENABLE_MAN_PDFS
 pdf_DATA = pack.3.pdf
-#pkgconfig_DATA = libpack.pc
+endif
 
 libpack_C_la_SOURCES = ccomps.c pack.c
 
-pack.3.pdf: pack.3.ps
-	@PS2PDF@ $< $@
+.3.3.pdf:
+	rm -f $@; pdffile=$@; psfile=$${pdffile%pdf}ps; \
+	$(GROFF) -Tps -man $< > $$psfile || { rm -f $$psfile; exit 1; }; \
+	$(PS2PDF) $$psfile && rm -f $$psfile || { rm -f $$psfile; exit 1; }
+SUFFIXES = .3 .3.pdf
 
-pack.3.ps: $(srcdir)/pack.3
-	@GROFF@ -Tps -man $< >$@
-
-EXTRA_DIST = $(man_MANS) $(pdf_DATA) ptest.c
-
-DISTCLEANFILES = $(pdf_DATA) pack.3.ps
-
+DISTCLEANFILES = $(pdf_DATA)

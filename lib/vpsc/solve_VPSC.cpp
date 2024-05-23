@@ -1,4 +1,5 @@
 /**
+ * \file
  * \brief Solve an instance of the "Variable Placement with Separation
  * Constraints" problem.
  *
@@ -10,60 +11,58 @@
  * This version is released under the CPL (Common Public License) with
  * the Graphviz distribution.
  * A version is also available under the LGPL as part of the Adaptagrams
- * project: http://sourceforge.net/projects/adaptagrams.  
+ * project: https://github.com/mjwybrow/adaptagrams.  
  * If you make improvements or bug fixes to this code it would be much
  * appreciated if you could also contribute those changes back to the
  * Adaptagrams repository.
  */
 
 #include <cassert>
-#include "constraint.h"
-#include "block.h"
-#include "blocks.h"
-#include "solve_VPSC.h"
+#include <vpsc/constraint.h>
+#include <vpsc/block.h>
+#include <vpsc/blocks.h>
+#include <vpsc/solve_VPSC.h>
 #include <math.h>
+#include <memory>
 #include <sstream>
-#ifdef RECTANGLE_OVERLAP_LOGGING
 #include <fstream>
 using std::ios;
 using std::ofstream;
-using std::endl;
-#endif
 
 using std::ostringstream;
 using std::list;
 using std::set;
 
+#ifndef RECTANGLE_OVERLAP_LOGGING
+	#define RECTANGLE_OVERLAP_LOGGING 0
+#endif
+
 IncVPSC::IncVPSC(const unsigned n, Variable *vs[], const unsigned m, Constraint *cs[]) 
 	: VPSC(n,vs,m,cs) {
 	inactive.assign(cs,cs+m);
-	for(ConstraintList::iterator i=inactive.begin();i!=inactive.end();i++) {
-		(*i)->active=false;
+	for(Constraint *c : inactive) {
+		c->active=false;
 	}
 }
-VPSC::VPSC(const unsigned n, Variable *vs[], const unsigned m, Constraint *cs[]) : cs(cs), m(m) {
-	bs=new Blocks(n, vs);
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	printBlocks();
-	assert(!constraintGraphIsCyclic(n,vs));
-#endif
-}
-VPSC::~VPSC() {
-	delete bs;
+VPSC::VPSC(const unsigned n, Variable *vs[], const unsigned m, Constraint *cs[])
+  : bs(n, vs), cs(cs), m(m) {
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		printBlocks();
+		assert(!constraintGraphIsCyclic(n,vs));
+	}
 }
 
 // useful in debugging
 void VPSC::printBlocks() {
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	ofstream f(LOGFILE,ios::app);
-	for(set<Block*>::iterator i=bs->begin();i!=bs->end();i++) {
-		Block *b=*i;
-		f<<"  "<<*b<<endl;
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		for(Block *b : bs) {
+			f<<"  "<<*b<<"\n";
+		}
+		for(unsigned i=0;i<m;i++) {
+			f<<"  "<<*cs[i]<<"\n";
+		}
 	}
-	for(unsigned i=0;i<m;i++) {
-		f<<"  "<<*cs[i]<<endl;
-	}
-#endif
 }
 /**
 * Produces a feasible - though not necessarily optimal - solution by
@@ -76,52 +75,44 @@ void VPSC::printBlocks() {
 * another so that constraints internal to the block are satisfied.
 */
 void VPSC::satisfy() {
-	list<Variable*> *vs=bs->totalOrder();
-	for(list<Variable*>::iterator i=vs->begin();i!=vs->end();i++) {
-		Variable *v=*i;
+	list<Variable*> vs=bs.totalOrder();
+	for(Variable *v : vs) {
 		if(!v->block->deleted) {
-			bs->mergeLeft(v->block);
+			bs.mergeLeft(v->block);
 		}
 	}
-	bs->cleanup();
+	bs.cleanup();
 	for(unsigned i=0;i<m;i++) {
 		if(cs[i]->slack()<-0.0000001) {
-#ifdef RECTANGLE_OVERLAP_LOGGING
-			ofstream f(LOGFILE,ios::app);
-			f<<"Error: Unsatisfied constraint: "<<*cs[i]<<endl;
-#endif
+			if (RECTANGLE_OVERLAP_LOGGING) {
+				ofstream f(LOGFILE,ios::app);
+				f<<"Error: Unsatisfied constraint: "<<*cs[i]<<"\n";
+			}
 			//assert(cs[i]->slack()>-0.0000001);
 			throw "Unsatisfied constraint";
 		}
 	}
-	delete vs;
 }
 
 void VPSC::refine() {
 	bool solved=false;
-	// Solve shouldn't loop indefinitely
-	// ... but just to make sure we limit the number of iterations
-	unsigned maxtries=100;
-	while(!solved&&maxtries>=0) {
+	while(!solved) {
 		solved=true;
-		maxtries--;
-		for(set<Block*>::const_iterator i=bs->begin();i!=bs->end();i++) {
-			Block *b=*i;
+		for(Block *b : bs) {
 			b->setUpInConstraints();
 			b->setUpOutConstraints();
 		}
-		for(set<Block*>::const_iterator i=bs->begin();i!=bs->end();i++) {
-			Block *b=*i;
+		for(Block *b : bs) {
 			Constraint *c=b->findMinLM();
-			if(c!=NULL && c->lm<0) {
-#ifdef RECTANGLE_OVERLAP_LOGGING
-				ofstream f(LOGFILE,ios::app);
-				f<<"Split on constraint: "<<*c<<endl;
-#endif
+			if(c!=nullptr && c->lm<0) {
+				if (RECTANGLE_OVERLAP_LOGGING) {
+					ofstream f(LOGFILE,ios::app);
+					f<<"Split on constraint: "<<*c<<"\n";
+				}
 				// Split on c
-				Block *l=NULL, *r=NULL;
-				bs->split(b,l,r,c);
-				bs->cleanup();
+				Block *l=nullptr, *r=nullptr;
+				bs.split(b,l,r,c);
+				bs.cleanup();
 				// split alters the block set so we have to restart
 				solved=false;
 				break;
@@ -147,19 +138,20 @@ void VPSC::solve() {
 }
 
 void IncVPSC::solve() {
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	ofstream f(LOGFILE,ios::app);
-	f<<"solve_inc()..."<<endl;
-#endif
-	double lastcost,cost = bs->cost();
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"solve_inc()...\n";
+	}
+	double lastcost,cost = bs.cost();
 	do {
 		lastcost=cost;
 		satisfy();
 		splitBlocks();
-		cost = bs->cost();
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	f<<"  cost="<<cost<<endl;
-#endif
+		cost = bs.cost();
+		if (RECTANGLE_OVERLAP_LOGGING) {
+			ofstream f(LOGFILE,ios::app);
+			f<<"  cost="<<cost<<"\n";
+		}
 	} while(fabs(lastcost-cost)>0.0001);
 }
 /**
@@ -176,13 +168,13 @@ void IncVPSC::solve() {
  * constraint with the most negative lagrangian multiplier. 
  */
 void IncVPSC::satisfy() {
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	ofstream f(LOGFILE,ios::app);
-	f<<"satisfy_inc()..."<<endl;
-#endif
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"satisfy_inc()...\n";
+	}
 	splitBlocks();
 	long splitCtr = 0;
-	Constraint* v = NULL;
+	Constraint* v = nullptr;
 	while(mostViolated(inactive,v)<-0.0000001) {
 		assert(!v->active);
 		Block *lb = v->left->block, *rb = v->right->block;
@@ -195,13 +187,14 @@ void IncVPSC::satisfy() {
 			// constraint is within block, need to split first
 			inactive.push_back(lb->splitBetween(v->left,v->right,lb,rb));
 			lb->merge(rb,v);
-			bs->insert(lb);
+			bs.insert(lb);
 		}
 	}
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	f<<"  finished merges."<<endl;
-#endif
-	bs->cleanup();
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"  finished merges.\n";
+	}
+	bs.cleanup();
 	for(unsigned i=0;i<m;i++) {
 		v=cs[i];
 		if(v->slack()<-0.0000001) {
@@ -211,60 +204,60 @@ void IncVPSC::satisfy() {
 			throw s.str().c_str();
 		}
 	}
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	f<<"  finished cleanup."<<endl;
-	printBlocks();
-#endif
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"  finished cleanup.\n";
+		printBlocks();
+	}
 }
 void IncVPSC::moveBlocks() {
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	ofstream f(LOGFILE,ios::app);
-	f<<"moveBlocks()..."<<endl;
-#endif
-	for(set<Block*>::const_iterator i(bs->begin());i!=bs->end();i++) {
-		Block *b = *i;
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"moveBlocks()...\n";
+	}
+	for(Block *b : bs) {
 		b->wposn = b->desiredWeightedPosition();
 		b->posn = b->wposn / b->weight;
 	}
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	f<<"  moved blocks."<<endl;
-#endif
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"  moved blocks.\n";
+	}
 }
 void IncVPSC::splitBlocks() {
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	ofstream f(LOGFILE,ios::app);
-#endif
 	moveBlocks();
 	splitCnt=0;
 	// Split each block if necessary on min LM
-	for(set<Block*>::const_iterator i(bs->begin());i!=bs->end();i++) {
-		Block* b = *i;
+	for(Block *b : bs) {
 		Constraint* v=b->findMinLM();
-		if(v!=NULL && v->lm < -0.0000001) {
-#ifdef RECTANGLE_OVERLAP_LOGGING
-			f<<"    found split point: "<<*v<<" lm="<<v->lm<<endl;
-#endif
+		if(v!=nullptr && v->lm < -0.0000001) {
+			if (RECTANGLE_OVERLAP_LOGGING) {
+				ofstream f(LOGFILE,ios::app);
+				f<<"    found split point: "<<*v<<" lm="<<v->lm<<"\n";
+			}
 			splitCnt++;
-			Block *b = v->left->block, *l=NULL, *r=NULL;
+			Block *b2 = v->left->block, *l=nullptr, *r=nullptr;
 			assert(v->left->block == v->right->block);
-			double pos = b->posn;
-			b->split(l,r,v);
+			double pos = b2->posn;
+			b2->split(l,r,v);
 			l->posn=r->posn=pos;
 			l->wposn = l->posn * l->weight;
 			r->wposn = r->posn * r->weight;
-			bs->insert(l);
-			bs->insert(r);
-			b->deleted=true;
+			bs.insert(l);
+			bs.insert(r);
+			b2->deleted=true;
 			inactive.push_back(v);
-#ifdef RECTANGLE_OVERLAP_LOGGING
-			f<<"  new blocks: "<<*l<<" and "<<*r<<endl;
-#endif
+			if (RECTANGLE_OVERLAP_LOGGING) {
+				ofstream f(LOGFILE,ios::app);
+				f<<"  new blocks: "<<*l<<" and "<<*r<<"\n";
+			}
 		}
 	}
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	f<<"  finished splits."<<endl;
-#endif
-	bs->cleanup();
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"  finished splits.\n";
+	}
+	bs.cleanup();
 }
 
 /**
@@ -273,20 +266,19 @@ void IncVPSC::splitBlocks() {
  */
 double IncVPSC::mostViolated(ConstraintList &l, Constraint* &v) {
 	double minSlack = DBL_MAX;
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	ofstream f(LOGFILE,ios::app);
-	f<<"Looking for most violated..."<<endl;
-#endif
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"Looking for most violated...\n";
+	}
 	ConstraintList::iterator end = l.end();
 	ConstraintList::iterator deletePoint = end;
 	for(ConstraintList::iterator i=l.begin();i!=end;i++) {
 		Constraint *c=*i;
 		double slack = c->slack();
-		if(c->equality || slack < minSlack) {
+		if (slack < minSlack) {
 			minSlack=slack;	
 			v=c;
 			deletePoint=i;
-			if(c->equality) break;
 		}
 	}
 	// Because the constraint list is not order dependent we just
@@ -297,9 +289,10 @@ double IncVPSC::mostViolated(ConstraintList &l, Constraint* &v) {
 		*deletePoint = l[l.size()-1];
 		l.resize(l.size()-1);
 	}
-#ifdef RECTANGLE_OVERLAP_LOGGING
-	f<<"  most violated is: "<<*v<<endl;
-#endif
+	if (RECTANGLE_OVERLAP_LOGGING) {
+		ofstream f(LOGFILE,ios::app);
+		f<<"  most violated is: "<<*v<<"\n";
+	}
 	return minSlack;
 }
 
@@ -313,46 +306,40 @@ struct node {
 // useful in debugging - cycles would be BAD
 bool VPSC::constraintGraphIsCyclic(const unsigned n, Variable *vs[]) {
 	map<Variable*, node*> varmap;
-	vector<node*> graph;
+	vector<std::unique_ptr<node>> graph;
 	for(unsigned i=0;i<n;i++) {
-		node *u=new node;
-		graph.push_back(u);
-		varmap[vs[i]]=u;
+		graph.emplace_back(new node);
+		varmap[vs[i]]=graph.back().get();
 	}
 	for(unsigned i=0;i<n;i++) {
-		for(vector<Constraint*>::iterator c=vs[i]->in.begin();c!=vs[i]->in.end();c++) {
-			Variable *l=(*c)->left;
+		for(Constraint *c : vs[i]->in) {
+			Variable *l=c->left;
 			varmap[vs[i]]->in.insert(varmap[l]);
 		}
 
-		for(vector<Constraint*>::iterator c=vs[i]->out.begin();c!=vs[i]->out.end();c++) {
-			Variable *r=(*c)->right;
+		for(Constraint *c : vs[i]->out) {
+			Variable *r=c->right;
 			varmap[vs[i]]->out.insert(varmap[r]);
 		}
 	}
-	while(graph.size()>0) {
-		node *u=NULL;
-		vector<node*>::iterator i=graph.begin();
+	while(!graph.empty()) {
+		node *u=nullptr;
+		vector<std::unique_ptr<node>>::iterator i=graph.begin();
 		for(;i!=graph.end();i++) {
-			u=*i;
-			if(u->in.size()==0) {
+			u=(*i).get();
+			if(u->in.empty()) {
 				break;
 			}
 		}
-		if(i==graph.end() && graph.size()>0) {
+		if(i==graph.end()) {
 			//cycle found!
 			return true;
 		} else {
 			graph.erase(i);
-			for(set<node*>::iterator j=u->out.begin();j!=u->out.end();j++) {
-				node *v=*j;
+			for(node *v : u->out) {
 				v->in.erase(u);
 			}
-			delete u;
 		}
-	}
-	for(unsigned i=0; i<graph.size(); i++) {
-		delete graph[i];
 	}
 	return false;
 }
@@ -360,18 +347,15 @@ bool VPSC::constraintGraphIsCyclic(const unsigned n, Variable *vs[]) {
 // useful in debugging - cycles would be BAD
 bool VPSC::blockGraphIsCyclic() {
 	map<Block*, node*> bmap;
-	vector<node*> graph;
-	for(set<Block*>::const_iterator i=bs->begin();i!=bs->end();i++) {
-		Block *b=*i;
-		node *u=new node;
-		graph.push_back(u);
-		bmap[b]=u;
+	vector<std::unique_ptr<node>> graph;
+	for(Block *b : bs) {
+		graph.emplace_back(new node);
+		bmap[b]=graph.back().get();
 	}
-	for(set<Block*>::const_iterator i=bs->begin();i!=bs->end();i++) {
-		Block *b=*i;
+	for(Block *b : bs) {
 		b->setUpInConstraints();
 		Constraint *c=b->findMinInConstraint();
-		while(c!=NULL) {
+		while(c!=nullptr) {
 			Block *l=c->left->block;
 			bmap[b]->in.insert(bmap[l]);
 			b->deleteMinInConstraint();
@@ -380,37 +364,46 @@ bool VPSC::blockGraphIsCyclic() {
 
 		b->setUpOutConstraints();
 		c=b->findMinOutConstraint();
-		while(c!=NULL) {
+		while(c!=nullptr) {
 			Block *r=c->right->block;
 			bmap[b]->out.insert(bmap[r]);
 			b->deleteMinOutConstraint();
 			c=b->findMinOutConstraint();
 		}
 	}
-	while(graph.size()>0) {
-		node *u=NULL;
-		vector<node*>::iterator i=graph.begin();
+	while(!graph.empty()) {
+		node *u=nullptr;
+		vector<std::unique_ptr<node>>::iterator i=graph.begin();
 		for(;i!=graph.end();i++) {
-			u=*i;
-			if(u->in.size()==0) {
+			u=(*i).get();
+			if(u->in.empty()) {
 				break;
 			}
 		}
-		if(i==graph.end() && graph.size()>0) {
+		if(i==graph.end()) {
 			//cycle found!
 			return true;
-		} else {
-			graph.erase(i);
-			for(set<node*>::iterator j=u->out.begin();j!=u->out.end();j++) {
-				node *v=*j;
-				v->in.erase(u);
-			}
-			delete u;
 		}
-	}
-	for(unsigned i=0; i<graph.size(); i++) {
-		delete graph[i];
+		graph.erase(i);
+		for(node *v : u->out) {
+			v->in.erase(u);
+		}
 	}
 	return false;
 }
-
+/**
+ * @dir lib/vpsc
+ * @brief library for solving the
+ *        %Variable Placement with Separation Constraints problem
+ *        for lib/neatogen
+ *
+ * This is a quadratic programming problem in which the squared differences
+ * between a placement vector and some ideal placement are minimized subject
+ * to a set of separation constraints. This is very useful in a number of layout problems.
+ *
+ * References:
+ * - https://www.adaptagrams.org/documentation/libvpsc.html
+ * - Tim Dwyer, Kim Marriott, and Peter J. Stuckey. Fast node overlap removal.
+ *   In Proceedings 13th International Symposium on Graph Drawing (GD '05),
+ *   volume 3843 of LNCS, pages 153-164. Springer, 2006.
+ */

@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 %module gv
@@ -56,12 +53,8 @@
 #undef PACKAGE_VERSION
 #undef PACKAGE_NAME
 
-#ifdef SWIGOCAML
-#include <stdint.h>
-#endif
-
 #include "config.h"
-#include "gvc.h"
+#include <gvc/gvc.h>
 
 /** New graphs */
 /*** New empty graph */
@@ -115,7 +108,6 @@ extern char *getv(Agedge_t *e, Agsym_t *a);
 /** Obtain names from handles */
 extern char *nameof(Agraph_t *g);
 extern char *nameof(Agnode_t *n);
-//extern char *nameof(Agedge_t *e);
 extern char *nameof(Agsym_t *a);
 
 /** Find handles from names */
@@ -232,10 +224,10 @@ extern char* renderresult(Agraph_t *ing, const char *format);
 extern void renderresult(Agraph_t *g, const char *format, char *outdata);
 /*** Render to an open channel */
 extern bool renderchannel(Agraph_t *g, const char *format, const char *channelname);
+#endif
 /*** Render a layout to a malloc'ed string, to be free'd by the caller */
 /*** (deprecated - too easy to leak memory) */
 /*** (still needed for "eval [gv::renderdata $G tk]" ) */
-#endif
 extern char* renderdata(Agraph_t *g, const char *format);
 
 /*** Writing graph back to file */

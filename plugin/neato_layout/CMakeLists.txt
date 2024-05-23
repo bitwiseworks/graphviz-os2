@@ -1,53 +1,51 @@
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${GRAPHVIZ_LIB_DIR}/cdt
-    ${GRAPHVIZ_LIB_DIR}/cgraph
-    ${GRAPHVIZ_LIB_DIR}/common
-    ${GRAPHVIZ_LIB_DIR}/gvc
-    ${GRAPHVIZ_LIB_DIR}/pathplan
-)
-
 add_library(gvplugin_neato_layout SHARED
-    # Source files
-	gvplugin_neato_layout.c
-	gvlayout_neato_layout.c
+  # Source files
+  gvplugin_neato_layout.c
+  gvlayout_neato_layout.c
 )
 
-target_link_libraries(gvplugin_neato_layout
-    cdt
-    cgraph
-    circogen
-    fdpgen
-    gvc
-    neatogen
-    osage
-    patchwork
-    pathplan
-    rbtree
-    sparse
-    twopigen
+target_include_directories(gvplugin_neato_layout PRIVATE
+  ../../lib
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ../../lib/cdt
+  ../../lib/cgraph
+  ../../lib/common
+  ../../lib/gvc
+  ../../lib/pathplan
 )
 
-if (with_ipsepcola)
-    target_link_libraries(gvplugin_neato_layout vpsc)
-endif (with_ipsepcola)
+target_link_libraries(gvplugin_neato_layout PRIVATE
+  circogen
+  fdpgen
+  gvc
+  neatogen
+  osage
+  patchwork
+  rbtree
+  sparse
+  twopigen
+)
 
-if (with_sfdp)
-    target_link_libraries(gvplugin_neato_layout sfdpgen)
-endif (with_sfdp)
+if(with_ipsepcola)
+  target_link_libraries(gvplugin_neato_layout PRIVATE vpsc)
+endif()
+
+if(with_sfdp)
+  target_link_libraries(gvplugin_neato_layout PRIVATE sfdpgen)
+endif()
 
 # Installation location of library files
 install(
-    TARGETS gvplugin_neato_layout
-    RUNTIME DESTINATION ${BINARY_INSTALL_DIR}
-    LIBRARY DESTINATION ${PLUGIN_INSTALL_DIR}
-    ARCHIVE DESTINATION ${LIBRARY_INSTALL_DIR}
+  TARGETS gvplugin_neato_layout
+  RUNTIME DESTINATION ${BINARY_INSTALL_DIR}
+  LIBRARY DESTINATION ${PLUGIN_INSTALL_DIR}
+  ARCHIVE DESTINATION ${LIBRARY_INSTALL_DIR}
 )
 
 # Specify library version and soversion
 set_target_properties(gvplugin_neato_layout PROPERTIES
-    VERSION ${GRAPHVIZ_PLUGIN_VERSION}.0.0
-    SOVERSION ${GRAPHVIZ_PLUGIN_VERSION}
+  VERSION ${GRAPHVIZ_PLUGIN_VERSION}.0.0
+  SOVERSION ${GRAPHVIZ_PLUGIN_VERSION}
 )
 
 if(OS2)
@@ -63,4 +61,11 @@ if(OS2)
     add_custom_target(sym_${plug_name} ALL COMMAND
         ${CMAKE_COMMAND} -E create_symlink ${plug_shortname}${plug_so}.dll ./${plug_name}.dll)
     INSTALL (FILES ${CMAKE_CURRENT_BINARY_DIR}/${plug_name}.dll DESTINATION ${PLUGIN_INSTALL_DIR})
+endif()
+
+if(MINGW)
+  # work around https://gitlab.kitware.com/cmake/cmake/-/issues/21716
+  set_target_properties(gvplugin_neato_layout PROPERTIES
+    RUNTIME_OUTPUT_NAME gvplugin_neato_layout-${GRAPHVIZ_PLUGIN_VERSION}
+  )
 endif()

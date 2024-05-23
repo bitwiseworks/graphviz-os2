@@ -1,33 +1,26 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
- * Copyright (c) 2011 AT&T Intellectual Property 
+ * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <memory>
 #include <stdlib.h>
 #include <string.h>
 
-#include "gvplugin_textlayout.h"
+#include <gvc/gvplugin_textlayout.h>
 #include "gvplugin_gdiplus.h"
-
-static int count = 0;
 
 using namespace Gdiplus;
 
-static int CALLBACK fetch_first_font(
-	const LOGFONTA *logFont,
-	const TEXTMETRICA *textMetrics,
-	DWORD fontType,
-	LPARAM lParam)
+static int CALLBACK fetch_first_font(const LOGFONTA *logFont,
+                                     const TEXTMETRICA *, DWORD, LPARAM lParam)
 {
 	/* save the first font we see in the font enumeration */
 	*((LOGFONTA *)lParam) = *logFont;
@@ -58,30 +51,25 @@ Layout::Layout(char *fontname, double fontsize, char* string)
 		0) == 0) {
 		found_font.lfHeight = (LONG)-fontsize;
 		found_font.lfWidth = 0;
-		font = new Font(reference.hdc, &found_font);
+		font = std::unique_ptr<Font>(new Font(reference.hdc, &found_font));
 	}
 	else
-		font = new Font(FontFamily::GenericSerif(), fontsize);
-}
-
-Layout::~Layout()
-{
-	delete font;
+		font = std::unique_ptr<Font>(new Font(FontFamily::GenericSerif(), fontsize));
 }
 
 void gdiplus_free_layout(void *layout)
 {
 	if (layout)
-		delete (Layout*)layout;
+		delete reinterpret_cast<Layout*>(layout);
 };
 
-boolean gdiplus_textlayout(textspan_t *span, char **fontpath)
+bool gdiplus_textlayout(textspan_t *span, char **)
 {
 	/* ensure GDI+ is started up: since we get called outside of a job, we can't rely on GDI+ startup then */
 	UseGdiplus();
-	
+
 	Layout* layout = new Layout(span->font->name, span->font->size, span->str);
-	
+
 	/* measure the text */
 	/* NOTE: use TextRenderingHintAntiAlias + GetGenericTypographic to get a layout without extra space at beginning and end */
 	RectF boundingBox;
@@ -91,22 +79,22 @@ boolean gdiplus_textlayout(textspan_t *span, char **fontpath)
 	measureGraphics.MeasureString(
 		&layout->text[0],
 		layout->text.size(),
-		layout->font,
+		layout->font.get(),
 		PointF(0.0f, 0.0f),
 		GetGenericTypographic(),
 		&boundingBox);
-		
+
 	FontFamily fontFamily;
 	layout->font->GetFamily(&fontFamily);
 	int style = layout->font->GetStyle();
-		
-	span->layout = (void*)layout;
+
+	span->layout = layout;
 	span->free_layout = &gdiplus_free_layout;
 	span->size.x = boundingBox.Width;
 	span->size.y = layout->font->GetHeight(&measureGraphics);
 	span->yoffset_layout = fontFamily.GetCellAscent(style) * span->font->size / fontFamily.GetEmHeight(style); /* convert design units to pixels */
 	span->yoffset_centerline = 0;
-	return TRUE;
+	return true;
 };
 
 static gvtextlayout_engine_t gdiplus_textlayout_engine = {
@@ -114,6 +102,6 @@ static gvtextlayout_engine_t gdiplus_textlayout_engine = {
 };
 
 gvplugin_installed_t gvtextlayout_gdiplus_types[] = {
-    {0, "textlayout", 8, &gdiplus_textlayout_engine, NULL},
-    {0, NULL, 0, NULL, NULL}
+    {0, "textlayout", 8, &gdiplus_textlayout_engine, nullptr},
+    {0, nullptr, 0, nullptr, nullptr}
 };

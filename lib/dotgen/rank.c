@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -26,16 +23,21 @@
  *  watch out for interactions between leaves and clusters.
  */
 
-#include	"dot.h"
+#include	<cgraph/alloc.h>
+#include	<cgraph/gv_math.h>
+#include	<dotgen/dot.h>
+#include	<limits.h>
+#include	<stdbool.h>
+#include	<stddef.h>
+#include	<stdint.h>
 
-static void dot1_rank(graph_t * g, aspect_t* asp);
-static void dot2_rank(graph_t * g, aspect_t* asp);
+static void dot1_rank(graph_t *g);
+static void dot2_rank(graph_t *g);
 
 static void 
 renewlist(elist * L)
 {
-    int i;
-    for (i = L->size; i >= 0; i--)
+    for (size_t i = L->size; i != SIZE_MAX; i--)
 	L->list[i] = NULL;
     L->size = 0;
 }
@@ -45,14 +47,13 @@ cleanup1(graph_t * g)
 {
     node_t *n;
     edge_t *e, *f;
-    int c;
 
-    for (c = 0; c < GD_comp(g).size; c++) {
+    for (size_t c = 0; c < GD_comp(g).size; c++) {
 	    GD_nlist(g) = GD_comp(g).list[c];
 	    for (n = GD_nlist(g); n; n = ND_next(n)) {
 	        renewlist(&ND_in(n));
 	        renewlist(&ND_out(n));
-	        ND_mark(n) = FALSE;
+	        ND_mark(n) = false;
 	    }
     }
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
@@ -81,53 +82,6 @@ cleanup1(graph_t * g)
     GD_comp(g).list = NULL;
     GD_comp(g).size = 0;
 }
-
-/*static void
-cleanup1(graph_t * g)
-{
-    node_t *n;
-    edge_t *e, *f;
-    int c;
-
-    for (c = 0; c < GD_comp(g).size; c++) {
-        GD_nlist(g) = GD_comp(g).list[c];
-        for (n = GD_nlist(g); n; n = ND_next(n)) {
-            renewlist(&ND_in(n));
-            renewlist(&ND_out(n));
-            ND_mark(n) = FALSE;
-        }
-    }
-    for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-        for (e = agfstout(g, n); e; e = agnxtout(g, e)) {
-            f = ED_to_virt(e);
-            * Null out any other references to f to make sure we don't
-             * handle it a second time. For example, parallel multiedges
-             * share a virtual edge.
-             *
-            if (f && (e == ED_to_orig(f))) {
-                edge_t *e1, *f1;
-                node_t *n1;
-                for (n1 = agfstnode(g); n1; n1 = agnxtnode(g, n1)) {
-                    for (e1 = agfstout(g, n1); e1; e1 = agnxtout(g, e1)) {
-                        if (e != e1) {
-                            f1 = ED_to_virt(e1);
-                            if (f1 && (f == f1)) {
-                                ED_to_virt(e1) = NULL;
-                            }
-                        }
-                    }
-                }
-                free(f->base.data);
-                free(f);
-            }
-            ED_to_virt(e) = NULL;
-        }
-    }
-    free(GD_comp(g).list);
-    GD_comp(g).list = NULL;
-    GD_comp(g).size = 0;
-}
-*/
 
 /* When there are edge labels, extra ranks are reserved here for the virtual
  * nodes of the labels.  This is done by doubling the input edge lengths.
@@ -207,7 +161,8 @@ make_new_cluster(graph_t * g, graph_t * subg)
 {
     int cno;
     cno = ++(GD_n_cluster(g));
-    GD_clust(g) = ZALLOC(cno + 1, GD_clust(g), graph_t *, GD_n_cluster(g));
+    GD_clust(g) = gv_recalloc(GD_clust(g), GD_n_cluster(g), cno + 1,
+                              sizeof(graph_t*));
     GD_clust(g)[cno] = subg;
     do_graph_label(subg);
     return cno;
@@ -247,7 +202,7 @@ void
 dot_scan_ranks(graph_t * g)
 {
     node_t *n, *leader = NULL;
-    GD_minrank(g) = MAXSHORT;
+    GD_minrank(g) = INT_MAX;
     GD_maxrank(g) = -1;
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	if (GD_maxrank(g) < ND_rank(n))
@@ -273,7 +228,7 @@ cluster_leader(graph_t * clust)
     /* find number of ranks and select a leader */
     leader = NULL;
     for (n = GD_nlist(clust); n; n = ND_next(n)) {
-	if ((ND_rank(n) == 0) && (ND_node_type(n) == NORMAL))
+	if (ND_rank(n) == 0 && ND_node_type(n) == NORMAL)
 	    leader = n;
 	if (maxrank < ND_rank(n))
 	    maxrank = ND_rank(n);
@@ -282,7 +237,7 @@ cluster_leader(graph_t * clust)
     GD_leader(clust) = leader;
 
     for (n = agfstnode(clust); n; n = agnxtnode(clust, n)) {
-	assert((ND_UF_size(n) <= 1) || (n == leader));
+	assert(ND_UF_size(n) <= 1 || n == leader);
 	UF_union(n, leader);
 	ND_ranktype(n) = CLUSTER;
     }
@@ -307,7 +262,7 @@ collapse_cluster(graph_t * g, graph_t * subg)
 	return;
     make_new_cluster(g, subg);
     if (CL_type == LOCAL) {
-	dot1_rank(subg, 0);
+	dot1_rank(subg);
 	cluster_leader(subg);
     } else
 	dot_scan_ranks(subg);
@@ -319,9 +274,6 @@ collapse_sets(graph_t *rg, graph_t *g)
 {
     int c;
     graph_t  *subg;
-#ifdef OBSOLETE
-    node_t *n;
-#endif
 
     for (subg = agfstsubg(g); subg; subg = agnxtsubg(subg)) {
 	c = rank_set_class(subg);
@@ -333,14 +285,6 @@ collapse_sets(graph_t *rg, graph_t *g)
 	}
 	else collapse_sets(rg, subg);
 
-#ifdef OBSOLETE
- Collapsing leaves is currently obsolete
-
-	/* mark nodes with ordered edges so their leaves are not collapsed */
-	if (agget(subg, "ordering"))
-	    for (n = agfstnode(subg); n; n = agnxtnode(subg, n))
-		ND_order(n) = 1;
-#endif
     }
 }
 
@@ -429,12 +373,11 @@ minmax_edges2(graph_t * g, point slen)
 void rank1(graph_t * g)
 {
     int maxiter = INT_MAX;
-    int c;
     char *s;
 
     if ((s = agget(g, "nslimit1")))
-	maxiter = atof(s) * agnnodes(g);
-    for (c = 0; c < GD_comp(g).size; c++) {
+	maxiter = scale_clamp(agnnodes(g), atof(s));
+    for (size_t c = 0; c < GD_comp(g).size; c++) {
 	GD_nlist(g) = GD_comp(g).list[c];
 	rank(g, (GD_n_cluster(g) == 0 ? 1 : 0), maxiter);	/* TB balance */
     }
@@ -446,20 +389,19 @@ void rank1(graph_t * g)
  * Leaf sets and clusters remain merged.
  * Sets minrank and maxrank appropriately.
  */
-static void expand_ranksets(graph_t * g, aspect_t* asp)
-{
+static void expand_ranksets(graph_t *g) {
     int c;
     node_t *n, *leader;
 
     if ((n = agfstnode(g))) {
-	GD_minrank(g) = MAXSHORT;
+	GD_minrank(g) = INT_MAX;
 	GD_maxrank(g) = -1;
 	while (n) {
 	    leader = UF_find(n);
 	    /* The following works because ND_rank(n) == 0 if n is not in a
 	     * cluster, and ND_rank(n) = the local rank offset if n is in
 	     * a cluster. */
-	    if ((leader != n) && (!asp || (ND_rank(n) == 0)))
+	    if (leader != n)
 		ND_rank(n) += ND_rank(leader);
 
 	    if (GD_maxrank(g) < ND_rank(n))
@@ -484,213 +426,41 @@ static void expand_ranksets(graph_t * g, aspect_t* asp)
     }
 }
 
-#ifdef ALLOW_LEVELS
-void
-setRanks (graph_t* g, attrsym_t* lsym)
-{
-    node_t* n;
-    char*   s;
-    char*   ep;
-    long    v;
-
-    for (n = agfstnode(g); n; n = agnxtnode(g,n)) {
-	s = agxget (n, lsym);
-	v = strtol (s, &ep, 10);
-	if (ep == s)
-	    agerr(AGWARN, "no level attribute for node \"%s\"\n", agnameof(n));
-	ND_rank(n) = v;
-    }
-}
-#endif
-
-#ifdef UNUSED
-static node_t **virtualEdgeHeadList = NULL;
-static node_t **virtualEdgeTailList = NULL;
-static int nVirtualEdges = 0;
-
-static void
-saveVirtualEdges(graph_t *g)
-{
-    edge_t *e;
-    node_t *n;
-    int cnt = 0;
-    int lc;
-    
-    if (virtualEdgeHeadList != NULL) {
-	free(virtualEdgeHeadList);
-    }
-    if (virtualEdgeTailList != NULL) {
-	free(virtualEdgeTailList);
-    }
-
-  /* allocate memory */
-    for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-	for (lc = 0; lc < ND_in(n).size; lc++) {
-	    e = ND_in(n).list[lc];
-	    if (ED_edge_type(e) == VIRTUAL) cnt++;
-	}
-    }
-
-    nVirtualEdges = cnt;
-    virtualEdgeHeadList = N_GNEW(cnt, node_t*);
-    virtualEdgeTailList = N_GNEW(cnt, node_t*);
-
-    for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-	for (lc = 0, cnt = 0; lc < ND_in(n).size; lc++) {
-	    e = ND_in(n).list[lc];
-	    if (ED_edge_type(e) == VIRTUAL) {
-		virtualEdgeHeadList[cnt] = e->head;
-		virtualEdgeTailList[cnt] = e->tail;
-		if (Verbose)
-		    printf("saved virtual edge: %s->%s\n", 
-			virtualEdgeTailList[cnt]->name, 
-			virtualEdgeHeadList[cnt]->name);	    
-		cnt++;
-	    }
-	}
-    }
-}
-
-static void
-restoreVirtualEdges(graph_t *g)
-{
-    int i;
-    edge_t e;
-
-    for (i = 0; i < nVirtualEdges; i++) {
-	if (virtualEdgeTailList[i] && virtualEdgeHeadList[i]) {
-	    if (Verbose)
-		printf("restoring virtual edge: %s->%s\n", 
-		    virtualEdgeTailList[i]->name, virtualEdgeHeadList[i]->name);
-	    virtual_edge(virtualEdgeTailList[i], virtualEdgeHeadList[i], NULL);
-	}
-    }
-    if (Verbose)
-	printf("restored %d virt edges\n", nVirtualEdges);
-}
-#endif
-
-/* dot1_rank:
- * asp != NULL => g is root
- */
-static void dot1_rank(graph_t * g, aspect_t* asp)
+static void dot1_rank(graph_t *g)
 {
     point p;
-#ifdef ALLOW_LEVELS
-    attrsym_t* N_level;
-#endif
     edgelabel_ranks(g);
-
-    if (asp) {
-	init_UF_size(g);
-	initEdgeTypes(g);
-    }
 
     collapse_sets(g,g);
     /*collapse_leaves(g); */
     class1(g);
     p = minmax_edges(g);
     decompose(g, 0);
-    if (asp && ((GD_comp(g).size > 1)||(GD_n_cluster(g) > 0))) {
-	asp->badGraph = 1;
-	asp = NULL;
-    }
     acyclic(g);
     if (minmax_edges2(g, p))
 	decompose(g, 0);
-#ifdef ALLOW_LEVELS
-    if ((N_level = agattr(g,AGNODE,"level",NULL)))
-	setRanks(g, N_level);
-    else
-#endif
 
-    if (asp)
-	rank3(g, asp);
-    else
-	rank1(g);
+    rank1(g);
 
-    expand_ranksets(g, asp);
+    expand_ranksets(g);
     cleanup1(g);
 }
 
-void dot_rank(graph_t * g, aspect_t* asp)
-{
-    if (agget (g, "newrank")) {
+void dot_rank(graph_t *g) {
+    if (mapbool(agget(g, "newrank"))) {
 	GD_flags(g) |= NEW_RANK;
-	dot2_rank (g, asp);
+	dot2_rank(g);
     }
     else
-	dot1_rank (g, asp);
+	dot1_rank(g);
     if (Verbose)
 	fprintf (stderr, "Maxrank = %d, minrank = %d\n", GD_maxrank(g), GD_minrank(g));
 }
 
-int is_cluster(graph_t * g)
+bool is_cluster(graph_t * g)
 {
-    //return (strncmp(agnameof(g), "cluster", 7) == 0);
     return is_a_cluster(g);   // from utils.c
 }
-
-#ifdef OBSOLETE
-static node_t*
-merge_leaves(graph_t * g, node_t * cur, node_t * new)
-{
-    node_t *rv;
-
-    if (cur == NULL)
-	rv = new;
-    else {
-	rv = UF_union(cur, new);
-	ND_ht(rv) = MAX(ND_ht(cur), ND_ht(new));
-	ND_lw(rv) = ND_lw(cur) + ND_lw(new) + GD_nodesep(g) / 2;
-	ND_rw(rv) = ND_rw(cur) + ND_rw(new) + GD_nodesep(g) / 2;
-    }
-    return rv;
-}
-
-static void 
-potential_leaf(graph_t * g, edge_t * e, node_t * leaf)
-{
-    node_t *par;
-
-    if ((ED_tail_port(e).p.x) || (ED_head_port(e).p.x))
-	return;
-    if ((ED_minlen(e) != 1) || (ND_order(agtail(e)) > 0))
-	return;
-    par = ((leaf != aghead(e)) ? aghead(e) : agtail(e));
-    ND_ranktype(leaf) = LEAFSET;
-    if (par == agtail(e))
-	GD_outleaf(par) = merge_leaves(g, GD_outleaf(par), leaf);
-    else
-	GD_inleaf(par) = merge_leaves(g, GD_inleaf(par), leaf);
-}
-
-static void 
-collapse_leaves(graph_t * g)
-{
-    node_t *n;
-    edge_t *e;
-
-    for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-
-	/* consider n as a potential leaf of some other node. */
-	if ((ND_ranktype(n) != NOCMD) || (ND_order(n)))
-	    continue;
-	if (agfstout(g, n) == NULL) {
-	    if ((e = agfstin(g, n)) && (agnxtin(g, e) == NULL)) {
-		potential_leaf(g, AGMKOUT(e), n);
-		continue;
-	    }
-	}
-	if (agfstin(g, n) == NULL) {
-	    if ((e = agfstout(g, n)) && (agnxtout(g, e) == NULL)) {
-		potential_leaf(g, e, n);
-		continue;
-	    }
-	}
-    }
-}
-#endif
 
 /* new ranking code:
  * Allows more constraints
@@ -710,8 +480,6 @@ collapse_leaves(graph_t * g)
  */
 #define ND_comp(n)  ND_hops(n)   
 
-extern int rank2(Agraph_t *, int, int, int);
-
 static void set_parent(graph_t* g, graph_t* p) 
 {
     GD_parent(g) = p;
@@ -719,18 +487,14 @@ static void set_parent(graph_t* g, graph_t* p)
     node_induce(p, g);
 }
 
-static int is_empty(graph_t * g)
-{
-    return (!agfstnode(g));
+static bool is_empty(graph_t *g) {
+    return !agfstnode(g);
 }
 
-static int is_a_strong_cluster(graph_t * g)
+static bool is_a_strong_cluster(graph_t * g)
 {
-    int rv;
     char *str = agget(g, "compact");
-    /* rv = mapBool((str), TRUE); */
-    rv = mapBool((str), FALSE);
-    return rv;
+    return mapbool(str);
 }
 
 static int rankset_kind(graph_t * g)
@@ -752,15 +516,15 @@ static int rankset_kind(graph_t * g)
     return NORANK;
 }
 
-static int is_nonconstraint(edge_t * e)
+static bool is_nonconstraint(edge_t * e)
 {
     char *constr;
 
     if (E_constr && (constr = agxget(e, E_constr))) {
-	if (constr[0] && mapbool(constr) == FALSE)
-	    return TRUE;
+	if (constr[0] && !mapbool(constr))
+	    return true;
     }
-    return FALSE;
+    return false;
 }
 
 static node_t *find(node_t * n)
@@ -832,17 +596,19 @@ static void compile_samerank(graph_t * ug, graph_t * parent_clust)
 
     /* process this subgraph as a rankset */
     switch (rankset_kind(ug)) {
-    case SOURCERANK:
-	GD_has_sourcerank(clust) = TRUE;	/* fall through */
+    case SOURCERANK: // fall through
     case MINRANK:
 	leader = union_all(ug);
-	GD_minrep(clust) = union_one(leader, GD_minrep(clust));
+	if (clust != NULL) {
+	    GD_minrep(clust) = union_one(leader, GD_minrep(clust));
+	}
 	break;
-    case SINKRANK:
-	GD_has_sinkrank(clust) = TRUE;	/* fall through */
+    case SINKRANK: // fall through
     case MAXRANK:
 	leader = union_all(ug);
-	GD_maxrep(clust) = union_one(leader, GD_maxrep(clust));
+	if (clust != NULL) {
+	    GD_maxrep(clust) = union_one(leader, GD_maxrep(clust));
+	}
 	break;
     case SAMERANK:
 	leader = union_all(ug);
@@ -851,7 +617,7 @@ static void compile_samerank(graph_t * ug, graph_t * parent_clust)
     case NORANK:
 	break;
     default:			/* unrecognized - warn and do nothing */
-	agerr(AGWARN, "%s has unrecognized rank=%s", agnameof(ug),
+	agwarningf("%s has unrecognized rank=%s", agnameof(ug),
 	      agget(ug, "rank"));
     }
 
@@ -876,19 +642,17 @@ static graph_t *dot_lca(graph_t * c0, graph_t * c1)
     return c0;
 }
 
-static int is_internal_to_cluster(edge_t * e)
+static bool is_internal_to_cluster(edge_t * e)
 {
     graph_t *par, *ct, *ch;
     ct = ND_clust(agtail(e));
     ch = ND_clust(aghead(e));
     if (ct == ch)
-	return TRUE;
+	return true;
     par = dot_lca(ct, ch);
-    /* if (par == agroot(par)) */
-	/* return FALSE; */
-    if ((par == ct) || (par == ch))
-	return TRUE;
-    return FALSE;
+    if (par == ct || par == ch)
+	return true;
+    return false;
 }
 
 static node_t* Last_node;
@@ -939,7 +703,7 @@ static void strong(graph_t * g, node_t * t, node_t * h, edge_t * orig)
 	(e = agfindedge(g, h, t)) || (e = agedge(g, t, h, 0, 1)))
 	merge(e, ED_minlen(orig), ED_weight(orig));
     else
-	agerr(AGERR, "ranking: failure to create strong constraint edge between nodes %s and %s\n", 
+	agerrorf("ranking: failure to create strong constraint edge between nodes %s and %s\n", 
 	    agnameof(t), agnameof(h));
 }
 
@@ -958,7 +722,7 @@ static void weak(graph_t * g, node_t * t, node_t * h, edge_t * orig)
 	}
     }
     if (!e) {
-	sprintf (buf, "_weak_%d", id++);
+	snprintf(buf, sizeof(buf), "_weak_%d", id++);
 	v = makeXnode(g, buf);
 	e = agedge(g, v, t, 0, 1);
 	f = agedge(g, v, h, 0, 1);
@@ -990,9 +754,11 @@ static void compile_edges(graph_t * ug, graph_t * Xg)
 	    hc = ND_clust(aghead(e));
 
 	    if (is_internal_to_cluster(e)) {
+		graph_t *clust_tail = ND_clust(agtail(e));
+		graph_t *clust_head = ND_clust(aghead(e));
 		/* determine if graph requires reversed edge */
-		if ((find(agtail(e)) == GD_maxrep(ND_clust(agtail(e))))
-		    || (find(aghead(e)) == GD_minrep(ND_clust(aghead(e))))) {
+		if ((clust_tail != NULL && find(agtail(e)) == GD_maxrep(clust_tail))
+		    || (clust_head != NULL && find(aghead(e)) == GD_minrep(clust_head))) {
 		    node_t *temp = Xt;
 		    Xt = Xh;
 		    Xh = temp;
@@ -1055,27 +821,29 @@ static void dfs(graph_t * g, node_t * v)
 
     if (ND_mark(v))
 	return;
-    ND_mark(v) = TRUE;
-    ND_onstack(v) = TRUE;
+    ND_mark(v) = true;
+    ND_onstack(v) = true;
     for (e = agfstout(g, v); e; e = f) {
 	f = agnxtout(g, e);
 	w = aghead(e);
 	if (ND_onstack(w))
 	    reverse_edge2(g, e);
 	else {
-	    if (ND_mark(w) == FALSE)
+	    if (!ND_mark(w))
 		dfs(g, w);
 	}
     }
-    ND_onstack(v) = FALSE;
+    ND_onstack(v) = false;
 }
 
 static void break_cycles(graph_t * g)
 {
     node_t *n;
 
-    for (n = agfstnode(g); n; n = agnxtnode(g, n))
-	ND_mark(n) = ND_onstack(n) = FALSE;
+    for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
+	ND_mark(n) = false;
+	ND_onstack(n) = false;
+    }
     for (n = agfstnode(g); n; n = agnxtnode(g, n))
 	dfs(g, n);
 }
@@ -1097,7 +865,7 @@ static void setMinMax (graph_t* g, int doRoot)
     if (!GD_parent(g) && !doRoot) // root graph
 	return;
 
-    GD_minrank(g) = MAXSHORT;
+    GD_minrank(g) = INT_MAX;
     GD_maxrank(g) = -1;
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	v = ND_rank(n);
@@ -1125,13 +893,13 @@ static void readout_levels(graph_t * g, graph_t * Xg, int ncc)
     int* minrk = NULL;
     int doRoot = 0;
 
-    GD_minrank(g) = MAXSHORT;
+    GD_minrank(g) = INT_MAX;
     GD_maxrank(g) = -1;
     if (ncc > 1) {
 	int i;
-	minrk = N_NEW(ncc+1,int);
+	minrk = gv_calloc(ncc + 1, sizeof(int));
 	for (i = 1; i <= ncc; i++)
-	    minrk[i] = MAXSHORT;
+	    minrk[i] = INT_MAX;
     }
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	xn = ND_rep(find(n));
@@ -1171,8 +939,7 @@ static void readout_levels(graph_t * g, graph_t * Xg, int ncc)
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	ND_alg(n) = NULL;
     }
-    if (minrk)
-	free (minrk);
+    free(minrk);
 }
 
 static void dfscc(graph_t * g, node_t * n, int cc)
@@ -1223,11 +990,11 @@ static void add_fast_edges (graph_t * g)
 }
 
 static void my_init_graph(Agraph_t *g, Agobj_t *graph, void *arg)
-{ int *sz = arg; agbindrec(graph,"level graph rec",sz[0],TRUE); }
+{ int *sz = arg; (void)g; agbindrec(graph,"level graph rec",sz[0],true); }
 static void my_init_node(Agraph_t *g, Agobj_t *node, void *arg)
-{ int *sz = arg; agbindrec(node,"level node rec",sz[1],TRUE); }
+{ int *sz = arg; (void)g; agbindrec(node,"level node rec",sz[1],true); }
 static void my_init_edge(Agraph_t *g, Agobj_t *edge, void *arg)
-{ int *sz = arg; agbindrec(edge,"level edge rec",sz[2],TRUE); }
+{ int *sz = arg; (void)g; agbindrec(edge,"level edge rec",sz[2],true); }
 static Agcbdisc_t mydisc = { {my_init_graph,0,0}, {my_init_node,0,0}, {my_init_edge,0,0} };
 
 int infosizes[] = {
@@ -1236,8 +1003,7 @@ int infosizes[] = {
     sizeof(Agedgeinfo_t)
 };
 
-void dot2_rank(graph_t * g, aspect_t* asp)
-{
+void dot2_rank(graph_t *g) {
     int ssize;
     int ncc, maxiter = INT_MAX;
     char *s;
@@ -1245,13 +1011,13 @@ void dot2_rank(graph_t * g, aspect_t* asp)
 
     Last_node = NULL;
     Xg = agopen("level assignment constraints", Agstrictdirected, 0);
-    agbindrec(Xg,"level graph rec",sizeof(Agraphinfo_t),TRUE);
+    agbindrec(Xg,"level graph rec",sizeof(Agraphinfo_t),true);
     agpushdisc(Xg,&mydisc,infosizes);
 
     edgelabel_ranks(g);
 
     if ((s = agget(g, "nslimit1")))
-	maxiter = atof(s) * agnnodes(g);
+	maxiter = scale_clamp(agnnodes(g), atof(s));
     else
 	maxiter = INT_MAX;
 
@@ -1262,11 +1028,6 @@ void dot2_rank(graph_t * g, aspect_t* asp)
     break_cycles(Xg);
     ncc = connect_components(Xg);
     add_fast_edges (Xg);
-
-    if (asp) {
-	init_UF_size(Xg);
-	initEdgeTypes(Xg);
-    }
 
     if ((s = agget(g, "searchsize")))
 	ssize = atoi(s);

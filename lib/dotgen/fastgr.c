@@ -1,19 +1,18 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include "dot.h"
-
+#include <cgraph/alloc.h>
+#include <cgraph/unused.h>
+#include <dotgen/dot.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 /*
  * operations on the fast internal graph.
@@ -44,9 +43,7 @@ edge_t *find_fast_edge(node_t * u, node_t * v)
     return ffe(u, ND_out(u), v, ND_in(v));
 }
 
-static node_t*
-find_fast_node(graph_t * g, node_t * n)
-{
+static UNUSED node_t *find_fast_node(graph_t *g, node_t *n) {
     node_t *v;
     for (v = GD_nlist(g); v; v = ND_next(v))
 	if (v == n)
@@ -63,9 +60,7 @@ edge_t *find_flat_edge(node_t * u, node_t * v)
 static void 
 safe_list_append(edge_t * e, elist * L)
 {
-    int i;
-
-    for (i = 0; i < L->size; i++)
+    for (size_t i = 0; i < L->size; i++)
 	if (e == L->list[i])
 	    return;
     elist_append(e, (*L));
@@ -99,9 +94,7 @@ edge_t *fast_edge(edge_t * e)
 /* zapinlist - remove e from list and fill hole with last member of list */
 void zapinlist(elist * L, edge_t * e)
 {
-    int i;
-
-    for (i = 0; i < L->size; i++) {
+    for (size_t i = 0; i < L->size; i++) {
 	if (L->list[i] == e) {
 	    L->size--;
 	    L->list[i] = L->list[L->size];
@@ -119,21 +112,6 @@ void delete_fast_edge(edge_t * e)
     zapinlist(&(ND_in(aghead(e))), e);
 }
 
-static void 
-safe_delete_fast_edge(edge_t * e)
-{
-    int i;
-    edge_t *f;
-
-    assert(e != NULL);
-    for (i = 0; (f = ND_out(agtail(e)).list[i]); i++)
-	if (f == e)
-	    zapinlist(&(ND_out(agtail(e))), e);
-    for (i = 0; (f = ND_in(aghead(e)).list[i]); i++)
-	if (f == e)
-	    zapinlist(&(ND_in(aghead(e))), e);
-}
-
 void other_edge(edge_t * e)
 {
     elist_append(e, ND_other(agtail(e)));
@@ -143,15 +121,6 @@ void safe_other_edge(edge_t * e)
 {
     safe_list_append(e, &(ND_other(agtail(e))));
 }
-
-#ifdef OBSOLETE
-void 
-delete_other_edge(edge_t * e)
-{
-    assert(e != NULL);
-    zapinlist(&(ND_other(agtail(e))), e);
-}
-#endif
 
 /* new_virtual_edge:
  * Create and return a new virtual edge e attached to orig.
@@ -163,10 +132,10 @@ edge_t *new_virtual_edge(node_t * u, node_t * v, edge_t * orig)
 {
     edge_t *e;
 
-    Agedgepair_t* e2 = NEW(Agedgepair_t);
+    Agedgepair_t* e2 = gv_alloc(sizeof(Agedgepair_t));
     AGTYPE(&(e2->in)) = AGINEDGE;
     AGTYPE(&(e2->out)) = AGOUTEDGE;
-    e2->out.base.data = (Agrec_t*)NEW(Agedgeinfo_t);
+    e2->out.base.data = gv_alloc(sizeof(Agedgeinfo_t));
     e = &(e2->out);
     agtail(e) = u;
     aghead(e) = v;
@@ -191,8 +160,12 @@ edge_t *new_virtual_edge(node_t * u, node_t * v, edge_t * orig)
 	if (ED_to_virt(orig) == NULL)
 	    ED_to_virt(orig) = e;
 	ED_to_orig(e) = orig;
-    } else
-	ED_minlen(e) = ED_count(e) = ED_xpenalty(e) = ED_weight(e) = 1;
+    } else {
+	ED_weight(e) = 1;
+	ED_xpenalty(e) = 1;
+	ED_count(e) = 1;
+	ED_minlen(e) = 1;
+    }
     return e;
 }
 
@@ -215,17 +188,6 @@ void fast_node(graph_t * g, Agnode_t * n)
     assert(n != ND_next(n));
 }
 
-void fast_nodeapp(node_t * u, node_t * v)
-{
-    assert(u != v);
-    assert(ND_next(v) == NULL);
-    ND_next(v) = ND_next(u);
-    if (ND_next(u))
-	ND_prev(ND_next(u)) = v;
-    ND_prev(v) = u;
-    ND_next(u) = v;
-}
-
 void delete_fast_node(graph_t * g, node_t * n)
 {
     assert(find_fast_node(g, n));
@@ -237,36 +199,26 @@ void delete_fast_node(graph_t * g, node_t * n)
 	GD_nlist(g) = ND_next(n);
 }
 
-static node_t *named_virtual_node(graph_t * g, char *s)
-{
-    node_t *n;
-
-    n = NEW(node_t);
+node_t *virtual_node(graph_t *g) {
+    node_t *n = gv_alloc(sizeof(node_t));
     AGTYPE(n) = AGNODE;
-    n->base.data = (Agrec_t*)NEW(Agnodeinfo_t);
+    n->base.data = gv_alloc(sizeof(Agnodeinfo_t));
     n->root = agroot(g);
     ND_node_type(n) = VIRTUAL;
     ND_lw(n) = ND_rw(n) = 1;
     ND_ht(n) = 1;
     ND_UF_size(n) = 1;
-    if (s) ND_alg(n) = s;
     alloc_elist(4, ND_in(n));
     alloc_elist(4, ND_out(n));
     fast_node(g, n);
-    GD_n_nodes(g)++;
     return n;
-}
-
-node_t *virtual_node(graph_t * g)
-{
-  return named_virtual_node(g,0);
 }
 
 void flat_edge(graph_t * g, edge_t * e)
 {
     elist_append(e, ND_flat_out(agtail(e)));
     elist_append(e, ND_flat_in(aghead(e)));
-    GD_has_flat_edges(dot_root(g)) = GD_has_flat_edges(g) = TRUE;
+    GD_has_flat_edges(dot_root(g)) = GD_has_flat_edges(g) = true;
 }
 
 void delete_flat_edge(edge_t * e)
@@ -284,7 +236,7 @@ static char *NAME(node_t * n)
     static char buf[20];
     if (ND_node_type(n) == NORMAL)
 	return agnameof(n);
-    sprintf(buf, "V%p", n);
+    snprintf(buf, sizeof(buf), "V%p", n);
     return buf;
 }
 
@@ -339,51 +291,10 @@ void
 merge_oneway(edge_t * e, edge_t * rep)
 {
     if (rep == ED_to_virt(e) || e == ED_to_virt(rep)) {
-	agerr(AGWARN, "merge_oneway glitch\n");
+	agwarningf("merge_oneway glitch\n");
 	return;
     }
     assert(ED_to_virt(e) == NULL);
     ED_to_virt(e) = rep;
     basic_merge(e, rep);
 }
-
-static void 
-unrep(edge_t * rep, edge_t * e)
-{
-    ED_count(rep) -= ED_count(e);
-    ED_xpenalty(rep) -= ED_xpenalty(e);
-    ED_weight(rep) -= ED_weight(e);
-}
-
-void unmerge_oneway(edge_t * e)
-{
-    edge_t *rep, *nextrep;
-    for (rep = ED_to_virt(e); rep; rep = nextrep) {
-	unrep(rep, e);
-	nextrep = ED_to_virt(rep);
-	if (ED_count(rep) == 0)
-	    safe_delete_fast_edge(rep);	/* free(rep)? */
-
-	/* unmerge from a virtual edge chain */
-	while ((ED_edge_type(rep) == VIRTUAL)
-	       && (ND_node_type(aghead(rep)) == VIRTUAL)
-	       && (ND_out(aghead(rep)).size == 1)) {
-	    rep = ND_out(aghead(rep)).list[0];
-	    unrep(rep, e);
-	}
-    }
-    ED_to_virt(e) = NULL;
-}
-
-#ifdef OBSOLETET
-static int 
-is_fast_node(graph_t * g, node_t * v)
-{
-    node_t *n;
-
-    for (n = GD_nlist(g); n; n = ND_next(n))
-	if (v == n)
-	    return TRUE;
-    return FALSE;
-}
-#endif

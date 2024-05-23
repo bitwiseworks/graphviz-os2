@@ -1,17 +1,19 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/**
+ * @file
+ * @ingroup cgraph_core
+ */
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include	<cghdr.h>
+#include	<cgraph/cghdr.h>
+#include	<stdbool.h>
 
 /* The following functions take a graph and a template (node/edge/graph)
  * and return the object representing the template within the local graph.
@@ -20,19 +22,19 @@ static Agobj_t *subnode_search(Agraph_t * sub, Agobj_t * n)
 {
     if (agraphof(n) == sub)
 	return n;
-    return (Agobj_t *) agsubnode(sub, (Agnode_t *) n, FALSE);
+    return (Agobj_t *) agsubnode(sub, (Agnode_t *) n, 0);
 }
 
 static Agobj_t *subedge_search(Agraph_t * sub, Agobj_t * e)
 {
     if (agraphof(e) == sub)
 	return e;
-    return (Agobj_t *) agsubedge(sub, (Agedge_t *) e, FALSE);
+    return (Agobj_t *) agsubedge(sub, (Agedge_t *) e, 0);
 }
 
 static Agobj_t *subgraph_search(Agraph_t * sub, Agobj_t * g)
 {
-    NOTUSED(g);
+    (void)g;
     return (Agobj_t *) sub;
 }
 
@@ -41,8 +43,7 @@ static Agobj_t *subgraph_search(Agraph_t * sub, Agobj_t * g)
  * if obj is a graph, then it and its subgs are visited.
  */
 static void rec_apply(Agraph_t * g, Agobj_t * obj, agobjfn_t fn, void *arg,
-		      agobjsearchfn_t objsearch, int preorder)
-{
+                      agobjsearchfn_t objsearch, bool preorder) {
     Agraph_t *sub;
     Agobj_t *subobj;
 
@@ -52,12 +53,10 @@ static void rec_apply(Agraph_t * g, Agobj_t * obj, agobjfn_t fn, void *arg,
 	if ((subobj = objsearch(sub, obj)))
 	    rec_apply(sub, subobj, fn, arg, objsearch, preorder);
     }
-    if (NOT(preorder))
+    if (!preorder)
 	fn(g, obj, arg);
 }
 
-/* external entry point (this seems to be one of those ineffective
- * comments censured in books on programming style) */
 int agapply(Agraph_t * g, Agobj_t * obj, agobjfn_t fn, void *arg,
 	    int preorder)
 {
@@ -76,12 +75,11 @@ int agapply(Agraph_t * g, Agobj_t * obj, agobjfn_t fn, void *arg,
 	objsearch = subedge_search;
 	break;
     default:
-	agerr(AGERR, "agapply: unknown object type %d\n", AGTYPE(obj));
+	agerrorf("agapply: unknown object type %d\n", AGTYPE(obj));
 	return FAILURE;
-	break;
     }
     if ((subobj = objsearch(g, obj))) {
-	rec_apply(g, subobj, fn, arg, objsearch, preorder);
+	rec_apply(g, subobj, fn, arg, objsearch, preorder != 0);
 	return SUCCESS;
     } else
 	return FAILURE;

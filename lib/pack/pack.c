@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -19,12 +16,16 @@
 
 #include <math.h>
 #include <assert.h>
-#include "render.h"
-#include "pack.h"
-#include "pointset.h"
-#include <assert.h>
-
-#define strneq(a,b,n)		(!strncmp(a,b,n))
+#include <cgraph/alloc.h>
+#include <cgraph/prisize_t.h>
+#include <cgraph/sort.h>
+#include <cgraph/startswith.h>
+#include <cgraph/streq.h>
+#include <common/render.h>
+#include <pack/pack.h>
+#include <common/pointset.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 #define C 100			/* Max. avg. polyomino size */
 
@@ -40,30 +41,28 @@ typedef struct {
     int perim;			/* half size of bounding rectangle perimeter */
     point *cells;		/* cells in covering polyomino */
     int nc;			/* no. of cells */
-    int index;			/* index in original array */
+    size_t index; ///<  index in original array
 } ginfo;
 
 typedef struct {
     double width, height;
-    int index;			/* index in original array */
+    size_t index; ///< index in original array
 } ainfo;
 
-/* computeStep:
- * Compute grid step size. This is a root of the
+/* Compute grid step size. This is a root of the
  * quadratic equation al^2 +bl + c, where a, b and
  * c are defined below.
  */
-static int computeStep(int ng, boxf* bbs, unsigned int margin)
-{
+static int computeStep(size_t ng, boxf *bbs, unsigned int margin) {
     double l1, l2;
     double a, b, c, d, r;
     double W, H;		/* width and height of graph, with margin */
-    int i, root;
+    int root;
 
-    a = C * ng - 1;
+    a = C * (double)ng - 1;
     c = 0;
     b = 0;
-    for (i = 0; i < ng; i++) {
+    for (size_t i = 0; i < ng; i++) {
 	boxf bb = bbs[i];
 	W = bb.UR.x - bb.LL.x + 2 * margin;
 	H = bb.UR.y - bb.LL.y + 2 * margin;
@@ -72,7 +71,7 @@ static int computeStep(int ng, boxf* bbs, unsigned int margin)
     }
     d = b * b - 4.0 * a * c;
     if (d < 0) {
-	agerr(AGERR, "libpack: disc = %f ( < 0)\n", d);
+	agerrorf("libpack: disc = %f ( < 0)\n", d);
 	return -1;
     }
     r = sqrt(d);
@@ -92,20 +91,29 @@ static int computeStep(int ng, boxf* bbs, unsigned int margin)
     return root;
 }
 
-/* cmpf;
- * Comparison function for polyominoes.
+/* Comparison function for polyominoes.
  * Size is determined by perimeter.
  */
 static int cmpf(const void *X, const void *Y)
 {
-    ginfo *x = *(ginfo **) X;
-    ginfo *y = *(ginfo **) Y;
+    const ginfo *x = *(ginfo *const *) X;
+    const ginfo *y = *(ginfo *const *) Y;
     /* flip order to get descending array */
-    return (y->perim - x->perim);
+    if (y->perim < x->perim) {
+        return -1;
+    }
+    if (y->perim > x->perim) {
+      return 1;
+    }
+    return 0;
 }
 
-/* fillLine:
- * Mark cells crossed by line from cell p to cell q.
+/// `sgn`, as defined in Graphics Gems I, §11.8, pp. 99
+static int sgn(int x) {
+  return x > 0 ? 1 : -1;
+}
+
+/* Mark cells crossed by line from cell p to cell q.
  * Bresenham's algorithm, from Graphics Gems I, pp. 99-100.
  */
 static void fillLine(pointf p, pointf q, PointSet * ps)
@@ -117,19 +125,17 @@ static void fillLine(pointf p, pointf q, PointSet * ps)
     int d, x, y, ax, ay, sx, sy, dx, dy;
 
     dx = x2 - x1;
-    ax = ABS(dx) << 1;
-    sx = SGN(dx);
+    ax = abs(dx) << 1;
+    sx = sgn(dx);
     dy = y2 - y1;
-    ay = ABS(dy) << 1;
-    sy = SGN(dy);
+    ay = abs(dy) << 1;
+    sy = sgn(dy);
 
-/* fprintf (stderr, "fillLine %d %d - %d %d\n", x1,y1,x2,y2); */
     x = x1;
     y = y1;
     if (ax > ay) {              /* x dominant */
         d = ay - (ax >> 1);
         for (;;) {
-/* fprintf (stderr, "  addPS %d %d\n", x,y); */
             addPS(ps, x, y);
             if (x == x2)
                 return;
@@ -143,7 +149,6 @@ static void fillLine(pointf p, pointf q, PointSet * ps)
     } else {                    /* y dominant */
         d = ax - (ay >> 1);
         for (;;) {
-/* fprintf (stderr, "  addPS %d %d\n", x,y); */
             addPS(ps, x, y);
             if (y == y2)
                 return;
@@ -157,15 +162,13 @@ static void fillLine(pointf p, pointf q, PointSet * ps)
     }
 }
 
-/* fillEdge:
- * It appears that spline_edges always have the start point at the
+/* It appears that spline_edges always have the start point at the
  * beginning and the end point at the end.
  */
 static void
 fillEdge(Agedge_t * e, point p, PointSet * ps, int dx, int dy,
-	 int ssize, int doS)
-{
-    int j, k;
+         int ssize, bool doS) {
+    size_t k;
     bezier bz;
     pointf pt, hpt;
     Agnode_t *h;
@@ -182,7 +185,7 @@ fillEdge(Agedge_t * e, point p, PointSet * ps, int dx, int dy,
 	return;
     }
 
-    for (j = 0; j < ED_spl(e)->size; j++) {
+    for (size_t j = 0; j < ED_spl(e)->size; j++) {
 	bz = ED_spl(e)->list[j];
 	if (bz.sflag) {
 	    pt = bz.sp;
@@ -218,8 +221,7 @@ fillEdge(Agedge_t * e, point p, PointSet * ps, int dx, int dy,
 
 }
 
-/* genBox:
- * Generate polyomino info from graph using the bounding box of
+/* Generate polyomino info from graph using the bounding box of
  * the graph.
  */
 static void
@@ -264,8 +266,7 @@ genBox(boxf bb0, ginfo * info, int ssize, unsigned int margin, point center,
     freePS(ps);
 }
 
-/* genPoly:
- * Generate polyomino info from graph.
+/* Generate polyomino info from graph.
  * We add all cells covered partially by the bounding box of the 
  * node. If doSplines is true and an edge has a spline, we use the 
  * polyline determined by the control point. Otherwise,
@@ -290,7 +291,7 @@ genPoly(Agraph_t * root, Agraph_t * g, ginfo * info,
     int dx, dy;
     graph_t *subg;
     unsigned int margin = pinfo->margin;
-    int doSplines = pinfo->doSplines;
+    bool doSplines = pinfo->doSplines;
     box bb;
 
     if (root)
@@ -304,10 +305,9 @@ genPoly(Agraph_t * root, Agraph_t * g, ginfo * info,
 
     if (pinfo->mode == l_clust) {
 	int i;
-	void **alg;
 
 	/* backup the alg data */
-	alg = N_GNEW(agnnodes(g), void *);
+	void **alg = gv_calloc(agnnodes(g), sizeof(void*));
 	for (i = 0, n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	    alg[i++] = ND_alg(n);
 	    ND_alg(n) = 0;
@@ -317,7 +317,7 @@ genPoly(Agraph_t * root, Agraph_t * g, ginfo * info,
 	for (i = 1; i <= GD_n_cluster(g); i++) {
 	    subg = GD_clust(g)[i];
 	    BF2B(GD_bb(subg), bb);
-	    if ((bb.UR.x > bb.LL.x) && (bb.UR.y > bb.LL.y)) {
+	    if (bb.UR.x > bb.LL.x && bb.UR.y > bb.LL.y) {
 		MOVEPT(bb.LL);
 		MOVEPT(bb.UR);
 		bb.LL.x -= margin;
@@ -415,8 +415,7 @@ genPoly(Agraph_t * root, Agraph_t * g, ginfo * info,
     return 0;
 }
 
-/* fits:
- * Check if polyomino fits at given point.
+/* Check if polyomino fits at given point.
  * If so, add cells to pointset, store point in place and return true.
  */
 static int
@@ -456,8 +455,7 @@ fits(int x, int y, ginfo * info, PointSet * ps, point * place, int step, boxf* b
     return 1;
 }
 
-/* placeFixed:
- * Position fixed graph. Store final translation and
+/* Position fixed graph. Store final translation and
  * fill polyomino set. Note that polyomino set for the
  * graph is constructed where it will be.
  */
@@ -480,16 +478,13 @@ placeFixed(ginfo * info, PointSet * ps, point * place, point center)
 		place->y);
 }
 
-/* placeGraph:
- * Search for points on concentric "circles" out
+/* Search for points on concentric "circles" out
  * from the origin. Check if polyomino can be placed
  * with bounding box origin at point.
  * First graph (i == 0) is centered on the origin if possible.
  */
-static void
-placeGraph(int i, ginfo * info, PointSet * ps, point * place, int step,
-	   unsigned int margin, boxf* bbs)
-{
+static void placeGraph(size_t i, ginfo *info, PointSet *ps, point *place,
+                       int step, unsigned int margin, boxf* bbs) {
     int x, y;
     int W, H;
     int bnd;
@@ -562,63 +557,41 @@ void dumpp(ginfo * info, char *pfx)
 }
 #endif
 
-static packval_t* userVals;
+/// Sort by user values.
+static int ucmpf(const void *X, const void *Y, void *user_values) {
+    const ainfo* x = *(ainfo *const *) X;
+    const ainfo* y = *(ainfo *const *) Y;
+    const packval_t *userVals = user_values;
 
-/* ucmpf;
- * Sort by user values.
- */
-static int ucmpf(const void *X, const void *Y)
-{
-    ainfo* x = *(ainfo **) X;
-    ainfo* y = *(ainfo **) Y;
-
-    int dX = userVals[x->index];
-    int dY = userVals[y->index];
+    const unsigned int dX = userVals[x->index];
+    const unsigned int dY = userVals[y->index];
     if (dX > dY) return 1;
-    else if (dX < dY) return -1;
-    else return 0;
+    if (dX < dY) return -1;
+    return 0;
 }
 
-/* acmpf;
- * Sort by height + width
- */
+/// Sort by height + width
 static int acmpf(const void *X, const void *Y)
 {
-    ainfo* x = *(ainfo **) X;
-    ainfo* y = *(ainfo **) Y;
-#if 0
-    if (x->height < y->height) return 1;
-    else if (x->height > y->height) return -1;
-    else if (x->width < y->width) return 1;
-    else if (x->width > y->width) return -1;
-    else return 0;
-#endif
+    const ainfo* x = *(ainfo *const *) X;
+    const ainfo* y = *(ainfo *const *) Y;
     double dX = x->height + x->width; 
     double dY = y->height + y->width; 
     if (dX < dY) return 1;
-    else if (dX > dY) return -1;
-    else return 0;
+    if (dX > dY) return -1;
+    return 0;
 }
 
 #define INC(m,c,r) \
     if (m){ c++; if (c == nc) { c = 0; r++; } } \
     else { r++; if (r == nr) { r = 0; c++; } }
 
-/* arrayRects:
- */
-static point *
-arrayRects (int ng, boxf* gs, pack_info* pinfo)
-{
-    int i;
-    int nr = 0, nc;
-    int r, c;
+static point *arrayRects(size_t ng, boxf *gs, pack_info *pinfo) {
+    size_t nr = 0, nc;
+    size_t r, c;
     ainfo *info;
-    ainfo *ip;
-    ainfo **sinfo;
-    double* widths;
-    double* heights;
     double v, wd, ht;
-    point* places = N_NEW(ng, point);
+    point *places = gv_calloc(ng, sizeof(point));
     boxf bb;
     int sz, rowMajor;
 
@@ -627,7 +600,7 @@ arrayRects (int ng, boxf* gs, pack_info* pinfo)
     if (pinfo->flags & PK_COL_MAJOR) {
 	rowMajor = 0;
 	if (sz > 0) {
-	    nr = sz;
+	    nr = (size_t)sz;
 	    nc = (ng + (nr-1))/nr;
 	}
 	else {
@@ -638,7 +611,7 @@ arrayRects (int ng, boxf* gs, pack_info* pinfo)
     else {
 	rowMajor = 1;
 	if (sz > 0) {
-	    nc = sz;
+	    nc = (size_t)sz;
 	    nr = (ng + (nc-1))/nc;
 	}
 	else {
@@ -647,26 +620,26 @@ arrayRects (int ng, boxf* gs, pack_info* pinfo)
 	}
     }
     if (Verbose)
-	fprintf (stderr, "array packing: %s %d rows %d columns\n", (rowMajor?"row major":"column major"), nr, nc);
-    widths = N_NEW(nc+1, double);
-    heights = N_NEW(nr+1, double);
+	fprintf(stderr, "array packing: %s %" PRISIZE_T " rows %" PRISIZE_T
+	        " columns\n", rowMajor ? "row major" : "column major", nr, nc);
+    double *widths = gv_calloc(nc + 1, sizeof(double));
+    double *heights = gv_calloc(nr + 1, sizeof(double));
 
-    ip = info = N_NEW(ng, ainfo);
-    for (i = 0; i < ng; i++, ip++) {
+    ainfo *ip = info = gv_calloc(ng, sizeof(ainfo));
+    for (size_t i = 0; i < ng; i++, ip++) {
 	bb = gs[i];
 	ip->width = bb.UR.x - bb.LL.x + pinfo->margin;
 	ip->height = bb.UR.y - bb.LL.y + pinfo->margin;
 	ip->index = i;
     }
 
-    sinfo = N_NEW(ng, ainfo*);
-    for (i = 0; i < ng; i++) {
+    ainfo **sinfo = gv_calloc(ng, sizeof(ainfo*));
+    for (size_t i = 0; i < ng; i++) {
 	sinfo[i] = info + i;
     }
 
     if (pinfo->vals) {
-	userVals = pinfo->vals;
-	qsort(sinfo, ng, sizeof(ainfo *), ucmpf);
+	gv_sort(sinfo, ng, sizeof(ainfo *), ucmpf, pinfo->vals);
     }
     else if (!(pinfo->flags & PK_INPUT_ORDER)) {
 	qsort(sinfo, ng, sizeof(ainfo *), acmpf);
@@ -674,7 +647,7 @@ arrayRects (int ng, boxf* gs, pack_info* pinfo)
 
     /* compute column widths and row heights */
     r = c = 0;
-    for (i = 0; i < ng; i++, ip++) {
+    for (size_t i = 0; i < ng; i++, ip++) {
 	ip = sinfo[i];
 	widths[c] = MAX(widths[c],ip->width);
 	heights[r] = MAX(heights[r],ip->height);
@@ -683,14 +656,14 @@ arrayRects (int ng, boxf* gs, pack_info* pinfo)
 
     /* convert widths and heights to positions */
     wd = 0;
-    for (i = 0; i <= nc; i++) {
+    for (size_t i = 0; i <= nc; i++) {
 	v = widths[i];
 	widths[i] = wd;
 	wd += v;
     }
 
     ht = 0;
-    for (i = nr; 0 < i; i--) {
+    for (size_t i = nr; 0 < i; i--) {
 	v = heights[i-1];
 	heights[i] = ht;
 	ht += v;
@@ -699,10 +672,9 @@ arrayRects (int ng, boxf* gs, pack_info* pinfo)
 
     /* position rects */
     r = c = 0;
-    for (i = 0; i < ng; i++, ip++) {
-	int idx;
+    for (size_t i = 0; i < ng; i++, ip++) {
 	ip = sinfo[i];
-	idx = ip->index;
+	const size_t idx = ip->index;
 	bb = gs[idx];
 	if (pinfo->flags & PK_LEFT_ALIGN)
 	    places[idx].x = widths[c];
@@ -726,15 +698,9 @@ arrayRects (int ng, boxf* gs, pack_info* pinfo)
     return places;
 }
 
-static point*
-polyRects(int ng, boxf* gs, pack_info * pinfo)
-{
+static point *polyRects(size_t ng, boxf *gs, pack_info *pinfo) {
     int stepSize;
-    ginfo *info;
-    ginfo **sinfo;
-    point *places;
     Dict_t *ps;
-    int i;
     point center;
 
     /* calculate grid size */
@@ -746,41 +712,40 @@ polyRects(int ng, boxf* gs, pack_info * pinfo)
 
     /* generate polyomino cover for the rectangles */
     center.x = center.y = 0;
-    info = N_NEW(ng, ginfo);
-    for (i = 0; i < ng; i++) {
+    ginfo *info = gv_calloc(ng, sizeof(ginfo));
+    for (size_t i = 0; i < ng; i++) {
 	info[i].index = i;
 	genBox(gs[i], info + i, stepSize, pinfo->margin, center, "");
     }
 
     /* sort */
-    sinfo = N_NEW(ng, ginfo *);
-    for (i = 0; i < ng; i++) {
+    ginfo **sinfo = gv_calloc(ng, sizeof(ginfo*));
+    for (size_t i = 0; i < ng; i++) {
 	sinfo[i] = info + i;
     }
     qsort(sinfo, ng, sizeof(ginfo *), cmpf);
 
     ps = newPS();
-    places = N_NEW(ng, point);
-    for (i = 0; i < ng; i++)
-	placeGraph(i, sinfo[i], ps, places + (sinfo[i]->index),
+    point *places = gv_calloc(ng, sizeof(point));
+    for (size_t i = 0; i < ng; i++)
+	placeGraph(i, sinfo[i], ps, places + sinfo[i]->index,
 		       stepSize, pinfo->margin, gs);
 
     free(sinfo);
-    for (i = 0; i < ng; i++)
+    for (size_t i = 0; i < ng; i++)
 	free(info[i].cells);
     free(info);
     freePS(ps);
 
     if (Verbose > 1)
-	for (i = 0; i < ng; i++)
-	    fprintf(stderr, "pos[%d] %d %d\n", i, places[i].x,
+	for (size_t i = 0; i < ng; i++)
+	    fprintf(stderr, "pos[%" PRISIZE_T "] %d %d\n", i, places[i].x,
 		    places[i].y);
 
     return places;
 }
 
-/* polyGraphs:
- *  Given a collection of graphs, reposition them in the plane
+/* Given a collection of graphs, reposition them in the plane
  *  to not overlap but pack "nicely".
  *   ng is the number of graphs
  *   gs is a pointer to an array of graph pointers
@@ -804,27 +769,22 @@ polyRects(int ng, boxf* gs, pack_info * pinfo)
  * FIX: Check CELL and GRID macros for negative coordinates 
  * FIX: Check width and height computation
  */
-static point*
-polyGraphs(int ng, Agraph_t ** gs, Agraph_t * root, pack_info * pinfo)
-{
+static point *polyGraphs(size_t ng, Agraph_t **gs, Agraph_t *root,
+                         pack_info *pinfo) {
     int stepSize;
     ginfo *info;
-    ginfo **sinfo;
-    point *places;
     Dict_t *ps;
-    int i;
-    boolean *fixed = pinfo->fixed;
+    bool *fixed = pinfo->fixed;
     int fixed_cnt = 0;
     box bb, fixed_bb = { {0, 0}, {0, 0} };
     point center;
-    boxf* bbs;
 
-    if (ng <= 0)
+    if (ng == 0)
 	return 0;
 
     /* update bounding box info for each graph */
     /* If fixed, compute bbox of fixed graphs */
-    for (i = 0; i < ng; i++) {
+    for (size_t i = 0; i < ng; i++) {
 	Agraph_t *g = gs[i];
 	compute_bb(g);
 	if (fixed && fixed[i]) {
@@ -846,14 +806,16 @@ polyGraphs(int ng, Agraph_t ** gs, Agraph_t * root, pack_info * pinfo)
     }
 
     /* calculate grid size */
-    bbs = N_GNEW(ng, boxf);
-    for (i = 0; i < ng; i++)
+    boxf *bbs = gv_calloc(ng, sizeof(boxf));
+    for (size_t i = 0; i < ng; i++)
 	bbs[i] = GD_bb(gs[i]);
     stepSize = computeStep(ng, bbs, pinfo->margin);
     if (Verbose)
 	fprintf(stderr, "step size = %d\n", stepSize);
-    if (stepSize <= 0)
+    if (stepSize <= 0) {
+	free(bbs);
 	return 0;
+    }
 
     /* generate polyomino cover for the graphs */
     if (fixed) {
@@ -861,75 +823,72 @@ polyGraphs(int ng, Agraph_t ** gs, Agraph_t * root, pack_info * pinfo)
 	center.y = (fixed_bb.LL.y + fixed_bb.UR.y) / 2;
     } else
 	center.x = center.y = 0;
-    info = N_NEW(ng, ginfo);
-    for (i = 0; i < ng; i++) {
+    info = gv_calloc(ng, sizeof(ginfo));
+    for (size_t i = 0; i < ng; i++) {
 	Agraph_t *g = gs[i];
 	info[i].index = i;
 	if (pinfo->mode == l_graph)
 	    genBox(GD_bb(g), info + i, stepSize, pinfo->margin, center, agnameof(g));
 	else if (genPoly(root, gs[i], info + i, stepSize, pinfo, center)) {
+	    free(bbs);
 	    return 0;
 	}
     }
 
     /* sort */
-    sinfo = N_NEW(ng, ginfo *);
-    for (i = 0; i < ng; i++) {
+    ginfo **sinfo = gv_calloc(ng, sizeof(ginfo*));
+    for (size_t i = 0; i < ng; i++) {
 	sinfo[i] = info + i;
     }
     qsort(sinfo, ng, sizeof(ginfo *), cmpf);
 
     ps = newPS();
-    places = N_NEW(ng, point);
+    point *places = gv_calloc(ng, sizeof(point));
     if (fixed) {
-	for (i = 0; i < ng; i++) {
+	for (size_t i = 0; i < ng; i++) {
 	    if (fixed[i])
-		placeFixed(sinfo[i], ps, places + (sinfo[i]->index),
-			   center);
+		placeFixed(sinfo[i], ps, places + sinfo[i]->index, center);
 	}
-	for (i = 0; i < ng; i++) {
+	for (size_t i = 0; i < ng; i++) {
 	    if (!fixed[i])
-		placeGraph(i, sinfo[i], ps, places + (sinfo[i]->index),
+		placeGraph(i, sinfo[i], ps, places + sinfo[i]->index,
 			   stepSize, pinfo->margin, bbs);
 	}
     } else {
-	for (i = 0; i < ng; i++)
-	    placeGraph(i, sinfo[i], ps, places + (sinfo[i]->index),
+	for (size_t i = 0; i < ng; i++)
+	    placeGraph(i, sinfo[i], ps, places + sinfo[i]->index,
 		       stepSize, pinfo->margin, bbs);
     }
 
     free(sinfo);
-    for (i = 0; i < ng; i++)
+    for (size_t i = 0; i < ng; i++)
 	free(info[i].cells);
     free(info);
     freePS(ps);
     free (bbs);
 
     if (Verbose > 1)
-	for (i = 0; i < ng; i++)
-	    fprintf(stderr, "pos[%d] %d %d\n", i, places[i].x,
+	for (size_t i = 0; i < ng; i++)
+	    fprintf(stderr, "pos[%" PRISIZE_T "] %d %d\n", i, places[i].x,
 		    places[i].y);
 
     return places;
 }
 
-point *putGraphs(int ng, Agraph_t ** gs, Agraph_t * root,
-		 pack_info * pinfo)
-{
-    int i, v;
-    boxf* bbs;
+point *putGraphs(size_t ng, Agraph_t **gs, Agraph_t *root, pack_info *pinfo) {
+    int v;
     Agraph_t* g;
     point* pts = NULL;
     char* s;
 
-    if (ng <= 0) return NULL;
+    if (ng == 0) return NULL;
 
     if (pinfo->mode <= l_graph)
 	return polyGraphs (ng, gs, root, pinfo);
     
-    bbs = N_GNEW(ng, boxf);
+    boxf *bbs = gv_calloc(ng, sizeof(boxf));
 
-    for (i = 0; i < ng; i++) {
+    for (size_t i = 0; i < ng; i++) {
 	g = gs[i];
 	compute_bb(g);
 	bbs[i] = GD_bb(g);
@@ -937,15 +896,15 @@ point *putGraphs(int ng, Agraph_t ** gs, Agraph_t * root,
 
     if (pinfo->mode == l_array) {
 	if (pinfo->flags & PK_USER_VALS) {
-	    pinfo->vals = N_NEW(ng, packval_t);
-	    for (i = 0; i < ng; i++) {
+	    pinfo->vals = gv_calloc(ng, sizeof(packval_t));
+	    for (size_t i = 0; i < ng; i++) {
 		s = agget (gs[i], "sortv");
-		if (s && (sscanf (s, "%d", &v) > 0) && (v >= 0))
+		if (s && sscanf(s, "%d", &v) > 0 && v >= 0)
 		    pinfo->vals[i] = v;
 	    }
 
 	}
-	pts = arrayRects (ng, bbs, pinfo);
+	pts = arrayRects(ng, bbs, pinfo);
 	if (pinfo->flags & PK_USER_VALS)
 	    free (pinfo->vals);
     }
@@ -955,21 +914,17 @@ point *putGraphs(int ng, Agraph_t ** gs, Agraph_t * root,
     return pts;
 }
 
-point *
-putRects(int ng, boxf* bbs, pack_info* pinfo)
-{
-    if (ng <= 0) return NULL;
-    if ((pinfo->mode == l_node) || (pinfo->mode == l_clust)) return NULL;
+point *putRects(size_t ng, boxf* bbs, pack_info* pinfo) {
+    if (ng == 0) return NULL;
+    if (pinfo->mode == l_node || pinfo->mode == l_clust) return NULL;
     if (pinfo->mode == l_graph)
 	return polyRects (ng, bbs, pinfo);
-    else if (pinfo->mode == l_array)
-	return arrayRects (ng, bbs, pinfo);
-    else
-	return NULL;
+    if (pinfo->mode == l_array)
+	return arrayRects(ng, bbs, pinfo);
+    return NULL;
 }
 
-/* packRects:
- * Packs rectangles.
+/* Packs rectangles.
  *  ng - number of rectangles
  *  bbs - array of rectangles
  *  info - parameters used in packing
@@ -978,22 +933,18 @@ putRects(int ng, boxf* bbs, pack_info* pinfo)
  *
  * Returns 0 on success.
  */
-int 
-packRects(int ng, boxf* bbs, pack_info* pinfo)
-{
-    int i;
+int packRects(size_t ng, boxf *bbs, pack_info *pinfo) {
     point *pp;
     boxf bb;
     point p;
 
-    if (ng < 0) return -1;
     if (ng <= 1) return 0;
 
     pp = putRects(ng, bbs, pinfo);
     if (!pp)
 	return 1;
 
-    for (i = 0; i < ng; i++) { 
+    for (size_t i = 0; i < ng; i++) {
 	bb = bbs[i];
 	p = pp[i];
 	bb.LL.x += p.x;
@@ -1006,12 +957,9 @@ packRects(int ng, boxf* bbs, pack_info* pinfo)
     return 0;
 }
 
-/* shiftEdge:
- * Translate all of the edge components by the given offset.
- */
+/// Translate all of the edge components by the given offset.
 static void shiftEdge(Agedge_t * e, int dx, int dy)
 {
-    int j, k;
     bezier bz;
 
     if (ED_label(e))
@@ -1026,9 +974,9 @@ static void shiftEdge(Agedge_t * e, int dx, int dy)
     if (ED_spl(e) == NULL)
 	return;
 
-    for (j = 0; j < ED_spl(e)->size; j++) {
+    for (size_t j = 0; j < ED_spl(e)->size; j++) {
 	bz = ED_spl(e)->list[j];
-	for (k = 0; k < bz.size; k++)
+	for (size_t k = 0; k < bz.size; k++)
 	    MOVEPT(bz.list[k]);
 	if (bz.sflag)
 	    MOVEPT(ED_spl(e)->list[j].sp);
@@ -1037,8 +985,6 @@ static void shiftEdge(Agedge_t * e, int dx, int dy)
     }
 }
 
-/* shiftGraph:
- */
 static void shiftGraph(Agraph_t * g, int dx, int dy)
 {
     graph_t *subg;
@@ -1061,8 +1007,7 @@ static void shiftGraph(Agraph_t * g, int dx, int dy)
     }
 }
 
-/* shiftGraphs:
- * The function takes ng graphs gs and a similar
+/* The function takes ng graphs gs and a similar
  * number of points pp and translates each graph so
  * that the lower left corner of the bounding box of graph gs[i] is at
  * point ps[i]. To do this, it assumes the bb field in
@@ -1084,11 +1029,8 @@ static void shiftGraph(Agraph_t * g, int dx, int dy)
  * the pos and coord fields in nodehinfo_t and
  * the spl field in Aedgeinfo_t.
  */
-int
-shiftGraphs(int ng, Agraph_t ** gs, point * pp, Agraph_t * root,
-	    int doSplines)
-{
-    int i;
+int shiftGraphs(size_t ng, Agraph_t **gs, point *pp, Agraph_t *root,
+                bool doSplines) {
     int dx, dy;
     double fx, fy;
     point p;
@@ -1097,10 +1039,10 @@ shiftGraphs(int ng, Agraph_t ** gs, point * pp, Agraph_t * root,
     Agnode_t *n;
     Agedge_t *e;
 
-    if (ng <= 0)
-	return abs(ng);
+    if (ng == 0)
+	return 0;
 
-    for (i = 0; i < ng; i++) {
+    for (size_t i = 0; i < ng; i++) {
 	g = gs[i];
 	if (root)
 	    eg = root;
@@ -1130,8 +1072,7 @@ shiftGraphs(int ng, Agraph_t ** gs, point * pp, Agraph_t * root,
     return 0;
 }
 
-/* packGraphs:
- * Packs graphs.
+/* Packs graphs.
  *  ng - number of graphs
  *  gs - pointer to array of graphs
  *  root - graph used to find edges
@@ -1142,8 +1083,7 @@ shiftGraphs(int ng, Agraph_t ** gs, point * pp, Agraph_t * root,
  *
  * Returns 0 on success.
  */
-int packGraphs(int ng, Agraph_t ** gs, Agraph_t * root, pack_info * info)
-{
+int packGraphs(size_t ng, Agraph_t **gs, Agraph_t *root, pack_info *info) {
     int ret;
     point *pp = putGraphs(ng, gs, root, info);
 
@@ -1154,25 +1094,22 @@ int packGraphs(int ng, Agraph_t ** gs, Agraph_t * root, pack_info * info)
     return ret;
 }
 
-/* packSubgraphs:
- * Packs subgraphs of given root graph, then recalculates root's bounding box.
+/* Packs subgraphs of given root graph, then recalculates root's bounding box.
  * Note that it does not recompute subgraph bounding boxes.
  * Cluster bounding boxes are recomputed in shiftGraphs.
  */
-int
-packSubgraphs(int ng, Agraph_t ** gs, Agraph_t * root, pack_info * info)
-{
+int packSubgraphs(size_t ng, Agraph_t **gs, Agraph_t *root, pack_info *info) {
     int ret;
 
     ret = packGraphs(ng, gs, root, info);
     if (ret == 0) {
-	int i, j;
+	int j;
 	boxf bb;
 	graph_t* g;
 
 	compute_bb(root);
 	bb = GD_bb(root);
-	for (i = 0; i < ng; i++) {
+	for (size_t i = 0; i < ng; i++) {
 	    g = gs[i];
 	    for (j = 1; j <= GD_n_cluster(g); j++) {
 		EXPANDBB(bb,GD_bb(GD_clust(g)[j]));
@@ -1183,30 +1120,20 @@ packSubgraphs(int ng, Agraph_t ** gs, Agraph_t * root, pack_info * info)
     return ret;
 }
 
-/* pack_graph:
- * Pack subgraphs followed by postprocessing.
- */
-int 
-pack_graph(int ng, Agraph_t** gs, Agraph_t* root, boolean* fixed)
-{
+/// Pack subgraphs followed by postprocessing.
+int pack_graph(size_t ng, Agraph_t **gs, Agraph_t *root, bool *fixed) {
     int ret;
     pack_info info;
 
     getPackInfo(root, l_graph, CL_OFFSET, &info);
-    info.doSplines = 1;
+    info.doSplines = true;
     info.fixed = fixed;
     ret = packSubgraphs(ng, gs, root, &info);
     if (ret == 0) dotneato_postprocess (root);
     return ret;
 }
 
-#define ARRAY  "array"
-#define ASPECT "aspect"
-#define SLEN(s) (sizeof(s)/sizeof(char) - 1)
-
-static char*
-chkFlags (char* p, pack_info* pinfo)
-{
+static const char*chkFlags(const char *p, pack_info *pinfo) {
     int c, more;
 
     if (*p != '_') return p;
@@ -1250,41 +1177,31 @@ chkFlags (char* p, pack_info* pinfo)
     return p;
 }
 
-static char*
-mode2Str (pack_mode m)
-{
-    char *s;
+static const char *mode2Str(pack_mode m) {
 
     switch (m) {
     case l_clust:
-	s = "cluster";
-	break;
+	return "cluster";
     case l_node:
-	s = "node";
-	break;
+	return "node";
     case l_graph:
-	s = "graph";
-	break;
+	return "graph";
     case l_array:
-	s = "array";
-	break;
+	return "array";
     case l_aspect:
-	s = "aspect";
-	break;
+	return "aspect";
     case l_undef: 
     default:
-	s = "undefined";
 	break;
     }
-    return s;
+    return "undefined";
 }
 
-/* parsePackModeInfo;
- * Return pack_mode of graph using "packmode" attribute.
+/* Return pack_mode of graph using "packmode" attribute.
  * If not defined, return dflt
  */
 pack_mode 
-parsePackModeInfo(char* p, pack_mode dflt, pack_info* pinfo)
+parsePackModeInfo(const char* p, pack_mode dflt, pack_info* pinfo)
 {
     float v;
     int i;
@@ -1294,54 +1211,25 @@ parsePackModeInfo(char* p, pack_mode dflt, pack_info* pinfo)
     pinfo->mode = dflt;
     pinfo->sz = 0;
     pinfo->vals = NULL;
-    if (p && *p) {
-	switch (*p) {
-	case 'a':
-	    if (strneq(p, ARRAY, SLEN(ARRAY))) {
-		pinfo->mode = l_array;
-		p += SLEN(ARRAY);
-		p = chkFlags (p, pinfo);
-		if ((sscanf (p, "%d", &i)>0) && (i > 0))
-		    pinfo->sz = i;
-	    }
-	    else if (strneq(p, ASPECT, SLEN(ASPECT))) {
-		pinfo->mode = l_aspect;
-		if ((sscanf (p + SLEN(ARRAY), "%f", &v)>0) && (v > 0))
-		    pinfo->aspect = v;
-		else
-		    pinfo->aspect = 1;
-	    }
-	    break;
-#ifdef NOT_IMPLEMENTED
-	case 'b':
-	    if (streq(p, "bisect"))
-		pinfo->mode = l_bisect;
-	    break;
-#endif
-	case 'c':
-	    if (streq(p, "cluster"))
-		pinfo->mode = l_clust;
-	    break;
-	case 'g':
-	    if (streq(p, "graph"))
-		pinfo->mode = l_graph;
-	    break;
-#ifdef NOT_IMPLEMENTED
-	case 'h':
-	    if (streq(p, "hull"))
-		pinfo->mode = l_hull;
-	    break;
-#endif
-	case 'n':
-	    if (streq(p, "node"))
-		pinfo->mode = l_node;
-	    break;
-#ifdef NOT_IMPLEMENTED
-	case 't':
-	    if (streq(p, "tile"))
-		pinfo->mode = l_tile;
-	    break;
-#endif
+    if (p) {
+	if (startswith(p, "array")) {
+	    pinfo->mode = l_array;
+	    p += strlen("array");
+	    p = chkFlags (p, pinfo);
+	    if ((sscanf (p, "%d", &i)>0) && (i > 0))
+		pinfo->sz = i;
+	} else if (startswith(p, "aspect")) {
+	    pinfo->mode = l_aspect;
+	    if (sscanf(p + strlen("aspect"), "%f", &v) > 0 && v > 0)
+		pinfo->aspect = v;
+	    else
+		pinfo->aspect = 1;
+	} else if (streq(p, "cluster")) {
+	    pinfo->mode = l_clust;
+	} else if (streq(p, "graph")) {
+	    pinfo->mode = l_graph;
+	} else if (streq(p, "node")) {
+	    pinfo->mode = l_node;
 	}
     }
 
@@ -1356,8 +1244,7 @@ parsePackModeInfo(char* p, pack_mode dflt, pack_info* pinfo)
     return pinfo->mode;
 }
 
-/* getPackModeInfo;
- * Return pack_mode of graph using "packmode" attribute.
+/* Return pack_mode of graph using "packmode" attribute.
  * If not defined, return dflt
  */
 pack_mode 
@@ -1373,8 +1260,7 @@ getPackMode(Agraph_t * g, pack_mode dflt)
   return getPackModeInfo (g, dflt, &info);
 }
 
-/* getPack:
- * Return "pack" attribute of g.
+/* Return "pack" attribute of g.
  * If not defined or negative, return not_def.
  * If defined but not specified, return dflt.
  */
@@ -1385,9 +1271,9 @@ int getPack(Agraph_t * g, int not_def, int dflt)
     int v = not_def;
 
     if ((p = agget(g, "pack"))) {
-	if ((sscanf(p, "%d", &i) == 1) && (i >= 0))
+	if (sscanf(p, "%d", &i) == 1 && i >= 0)
 	    v = i;
-	else if ((*p == 't') || (*p == 'T'))
+	else if (*p == 't' || *p == 'T')
 	    v = dflt;
     }
 
@@ -1403,11 +1289,16 @@ getPackInfo(Agraph_t * g, pack_mode dflt, int dfltMargin, pack_info* pinfo)
     if (Verbose) {
 	fprintf (stderr, "  margin %u\n", pinfo->margin);
     }
-    pinfo->doSplines = 0;
-    pinfo->fixed = 0;
+    pinfo->doSplines = false;
+    pinfo->fixed = NULL;
     getPackModeInfo(g, dflt, pinfo);
 
     return pinfo->mode;
 }
-
-
+/**
+ * @dir lib/pack
+ * @brief support for connected components, API pack.h
+ *
+ * [man 3 libpack](https://graphviz.org/pdf/pack.3.pdf)
+ *
+ */

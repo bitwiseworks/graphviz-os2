@@ -1,28 +1,23 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
-
-#include "config.h"
 
 #include "gml2gv.h"
 #include <stdlib.h>
 #include <string.h>
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 
 #include <getopt.h>
-
-#define N_NEW(n,t)       (t*)calloc((n),sizeof(t))
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <cgraph/exit.h>
+#include <cgraph/unreachable.h>
+#include "openFile.h"
 
 static int Verbose;
 static char* gname = "";
@@ -54,26 +49,6 @@ static FILE *getFile(void)
     return rv;
 }
 
-static FILE *openFile(char *name, char *mode)
-{
-    FILE *fp;
-    char *modestr;
-
-    fp = fopen(name, mode);
-    if (!fp) {
-        if (*mode == 'r')
-            modestr = "reading";
-        else
-            modestr = "writing";
-        fprintf(stderr, "%s: could not open file %s for %s\n",
-                CmdName, name, modestr);
-        perror(name);
-        exit(1);
-    }
-    return fp;
-}
-
-
 static char *useString = "Usage: %s [-v?] [-g<name>] [-o<file>] <files>\n\
   -g<name>  : use <name> as template for graph names\n\
   -v        : verbose mode\n\
@@ -84,7 +59,7 @@ If no files are specified, stdin is used\n";
 static void usage(int v)
 {
     printf(useString, CmdName);
-    exit(v);
+    graphviz_exit(v);
 }
 
 static char *cmdName(char *path)
@@ -114,7 +89,9 @@ static void initargs(int argc, char **argv)
 	    Verbose = 1;
 	    break;
 	case 'o':
-	    outFile = openFile(optarg, "w");
+	    if (outFile != NULL)
+		fclose(outFile);
+	    outFile = openFile(CmdName, optarg, "w");
 	    break;
 	case ':':
 	    fprintf(stderr, "%s: option -%c missing argument\n", CmdName, optopt);
@@ -128,6 +105,9 @@ static void initargs(int argc, char **argv)
 			optopt);
 		usage(1);
 	    }
+	    break;
+	default:
+	    UNREACHABLE();
 	}
     }
 
@@ -140,18 +120,12 @@ static void initargs(int argc, char **argv)
 	outFile = stdout;
 }
 
-static char*
-nameOf (char* name, int cnt)
-{
-    static char* buf = 0;
-
+static char *nameOf(agxbuf *buf, char *name, int cnt) {
     if (*name == '\0')
 	return name;
     if (cnt) {
-	if (!buf)
-	    buf = N_NEW (strlen(name)+32,char);  /* 32 to handle any integer plus null byte */
-	sprintf (buf, "%s%d", name, cnt);
-	return buf;
+	agxbprint(buf, "%s%d", name, cnt);
+	return agxbuse(buf);
     }
     else
 	return name;
@@ -163,13 +137,14 @@ int main(int argc, char **argv)
     Agraph_t *prev = 0;
     FILE *inFile;
     int gcnt, cnt, rv;
+    agxbuf buf = {0};
 
     rv = 0;
     gcnt = 0;
     initargs(argc, argv);
     while ((inFile = getFile())) {
 	cnt = 0;
-	while ((G = gml_to_gv(nameOf(gname, gcnt), inFile, cnt, &rv))) {
+	while ((G = gml_to_gv(nameOf(&buf, gname, gcnt), inFile, cnt, &rv))) {
 	    cnt++;
 	    gcnt++;
 	    if (prev)
@@ -182,6 +157,7 @@ int main(int argc, char **argv)
 	    fflush(outFile);
 	}
     }
-    exit(rv);
+    agxbfree(&buf);
+    graphviz_exit(rv);
 }
 

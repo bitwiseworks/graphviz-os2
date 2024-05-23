@@ -1,23 +1,21 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
 
-#include "gvplugin_loadimage.h"
+#include <gvc/gvplugin_loadimage.h>
 
 #include "gvplugin_quartz.h"
 
@@ -69,7 +67,7 @@ static CGDataProviderCallbacks file_data_provider_callbacks = {
 
 static void quartz_freeimage(usershape_t *us)
 {
-	CGImageRelease((CGImageRef)us->data);
+	CGImageRelease(us->data);
 }
 
 static CGImageRef quartz_loadimage(GVJ_t * job, usershape_t *us)
@@ -154,11 +152,13 @@ static CGImageRef quartz_loadimage(GVJ_t * job, usershape_t *us)
 			
 		gvusershape_file_release(us);
     }
-    return (CGImageRef)(us->data);
+    return us->data;
 }
 
-static void quartz_loadimage_quartz(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void quartz_loadimage_quartz(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
+	(void)filled;
+
 	/* get the image from usershape details, then blit it to the context */
 	CGImageRef image = quartz_loadimage(job, us);
 	if (image)

@@ -1,16 +1,14 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
+#include <QStringList>
 #include <QtWidgets>
 #include <qframe.h>
 #include "mainwindow.h"
@@ -35,32 +33,25 @@ static void freeList(char **lp, int count)
     free(lp);
 }
 
-static int LoadPlugins(QComboBox * cb, GVC_t * gvc, const char *kind,
-		       const char *more[], const char *prefer)
-{
+static int LoadPlugins(QComboBox &cb, GVC_t *gvc, const char *kind,
+                       const QStringList &more, const char *prefer) {
     int count;
-    char **lp = gvPluginList(gvc, kind, &count, NULL);
+    char **lp = gvPluginList(gvc, kind, &count);
     int idx = -1;
 
-    cb->clear();
+    cb.clear();
     for (int id = 0; id < count; id++) {
-	cb->addItem(QString(lp[id]));
-	if (prefer && (idx < 0) && !strcmp(prefer, lp[id]))
+	cb.addItem(QString(lp[id]));
+	if (prefer && idx < 0 && !strcmp(prefer, lp[id]))
 	    idx = id;
     };
     freeList(lp, count);
 
     /* Add additional items if supplied */
-    if (more) {
-	int i = 0;
-	const char *s;
-	while ((s = more[i++])) {
-	    cb->addItem(QString(s));
-	}
-    }
+    cb.addItems(more);
 
     if (idx > 0)
-	cb->setCurrentIndex(idx);
+	cb.setCurrentIndex(idx);
     else
 	idx = 0;
 
@@ -69,19 +60,16 @@ static int LoadPlugins(QComboBox * cb, GVC_t * gvc, const char *kind,
 
 void CMainWindow::createConsole()
 {
-    QDockWidget *dock = new QDockWidget(tr("Output Console"), NULL);
+    QDockWidget *dock = new QDockWidget(tr("Output Console"), nullptr);
     QTextEdit *textEdit = new QTextEdit(dock);
 
     dock->
 	setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
-//    dock->setWidget(textEdit);
     addDockWidget(Qt::BottomDockWidgetArea, dock);
     QVBoxLayout *vL = new QVBoxLayout();
 
 
     textEdit->setObjectName(QString::fromUtf8("textEdit"));
-/*    textEdit->setMinimumSize(QSize(0, 80));
-    textEdit->setMaximumSize(QSize(16777215, 120));*/
     globTextEdit = textEdit;
     agseterrf(errorPipe);
 
@@ -102,7 +90,6 @@ void CMainWindow::createConsole()
     consoleLayout->addWidget(logSaveBtn);
     consoleLayout->addStretch();
 
-    consoleLayout->setContentsMargins(1, 1, 1, 1);;
     consoleLayout->setContentsMargins(1, 1, 1, 1);
 
     fr->setLayout(consoleLayout);
@@ -115,13 +102,9 @@ void CMainWindow::createConsole()
 
 }
 
-static const char *xtra[] = {
-    "NONE",
-    (const char *) NULL
-};
+static const QStringList xtra = {"NONE"};
 
-CMainWindow::CMainWindow(char*** Files)
-{
+CMainWindow::CMainWindow(char **files) {
 
     QWidget *centralwidget = new QWidget(this);
     centralwidget->setObjectName(QString::fromUtf8("centralwidget"));
@@ -137,14 +120,9 @@ CMainWindow::CMainWindow(char*** Files)
     verticalLayout_2->addLayout(verticalLayout);
     setCentralWidget(centralwidget);
     centralwidget->layout()->setContentsMargins(1, 1, 1, 1);
-    prevChild = NULL;
+    prevChild = nullptr;
 
     createConsole();
-
-
-
-
-
 
     connect(mdiArea, SIGNAL(subWindowActivated(QMdiSubWindow *)),
 	    this, SLOT(slotRefreshMenus()));
@@ -166,26 +144,20 @@ CMainWindow::CMainWindow(char*** Files)
     this->resize(1024, 900);
     this->move(0, 0);
     setUnifiedTitleAndToolBarOnMac(true);
-//    (QComboBox*)frmSettings->findChild<QComboBox*>("cbLayout")
     QComboBox *cb =
 	(QComboBox *) frmSettings->findChild < QComboBox * >("cbLayout");
-    dfltLayoutIdx = LoadPlugins(cb, frmSettings->gvc, "layout", NULL, "dot");
+    dfltLayoutIdx = LoadPlugins(*cb, frmSettings->gvc, "layout", {}, "dot");
     cb = (QComboBox *) frmSettings->findChild <
 	QComboBox * >("cbExtension");
-    dfltRenderIdx =
-	LoadPlugins(cb, frmSettings->gvc, "device", xtra, "png");
+    dfltRenderIdx = LoadPlugins(*cb, frmSettings->gvc, "device", xtra, "png");
     statusBar()->showMessage(tr("Ready"));
     setWindowIcon(QIcon(":/images/icon.png"));
     //load files specified in command line , one time task
-    char** files=*Files;
     if (files)
 	while (*files) {
 	    addFile(QString(*files));
 	    files++;
 	}
-
-
-
 }
 
 void CMainWindow::closeEvent(QCloseEvent * event)
@@ -232,10 +204,8 @@ void CMainWindow::slotOpen()
     filters << "*.cpp" << "*.cxx" << "*.cc";
 
     QFileDialog fd;
-//    fd.setProxyModel(new FileFilterProxyModel());
     fd.setNameFilter("XML (*.xml)");
     QString fileName = fd.getOpenFileName(this);
-//    QFileDialog::getOpenFileName(this);
 
     addFile(fileName);
 }
@@ -287,7 +257,7 @@ void CMainWindow::setChild ()
 	msg.append("working on ");
 	msg.append(activeMdiChild()->currentFile());
 	msg.append("\n");
-	errorPipe((char *) msg.toLatin1().constData());
+	errorPipe(msg.toLatin1().data());
 	prevChild = activeMdiChild();
     }
 }
@@ -302,20 +272,11 @@ void CMainWindow::slotRun(MdiChild * m)
 {
     setChild ();
 
-    
-    
-//    if ((activeMdiChild()) && (!activeMdiChild()->firstTime()))
     if(m)
 	frmSettings->runSettings(m);
     else
 	frmSettings->runSettings(activeMdiChild());
-//    if ((activeMdiChild()) && (activeMdiChild()->firstTime()))
-//	frmSettings->showSettings(activeMdiChild());
-
-
 }
-
-
 
 void CMainWindow::slotNewLog()
 {
@@ -325,7 +286,7 @@ void CMainWindow::slotNewLog()
 void CMainWindow::slotSaveLog()
 {
 
-    if (globTextEdit->toPlainText().trimmed().length() == 0) {
+    if (globTextEdit->toPlainText().trimmed().isEmpty()) {
 	QMessageBox::warning(this, tr("GvEdit"), tr("Nothing to save!"),
 			     QMessageBox::Ok, QMessageBox::Ok);
 	return;
@@ -565,7 +526,7 @@ void CMainWindow::actions()
 	new QAction(QIcon(":/images/settings.png"), tr("Settings"), this);
     settingsAct->setStatusTip(tr("Show Graphviz Settings"));
     connect(settingsAct, SIGNAL(triggered()), this, SLOT(slotSettings()));
-    settingsAct->setShortcut(QKeySequence(Qt::SHIFT + Qt::Key_F5));
+    settingsAct->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F5));
 
 
 
@@ -603,7 +564,6 @@ void CMainWindow::menus()
     mGraph->addAction(settingsAct);
     mGraph->addAction(layoutAct);
     mGraph->addSeparator();
-    loadPlugins();
 
     updateWindowMenu();
     connect(mWindow, SIGNAL(aboutToShow()), this,
@@ -632,6 +592,19 @@ void CMainWindow::toolBars()
 
 void CMainWindow::readSettings()
 {
+    // first try new settings
+    {
+      QSettings settings("Graphviz", "gvedit");
+      if (settings.contains("pos") && settings.contains("size")) {
+        QPoint pos = settings.value("pos", QPoint(200, 200)).toPoint();
+        QSize size = settings.value("size", QSize(400, 400)).toSize();
+        move(pos);
+        resize(size);
+        return;
+      }
+    }
+
+    // fall back to old settings
     QSettings settings("Trolltech", "MDI Example");
     QPoint pos = settings.value("pos", QPoint(200, 200)).toPoint();
     QSize size = settings.value("size", QSize(400, 400)).toSize();
@@ -641,7 +614,7 @@ void CMainWindow::readSettings()
 
 void CMainWindow::writeSettings()
 {
-    QSettings settings("Trolltech", "MDI Example");
+    QSettings settings("Graphviz", "gvedit");
     settings.setValue("pos", pos());
     settings.setValue("size", size());
 }
@@ -690,9 +663,4 @@ void CMainWindow::activateChild(QWidget * window)
     if (!window)
 	return;
     mdiArea->setActiveSubWindow(qobject_cast < QMdiSubWindow * >(window));
-}
-
-void CMainWindow::loadPlugins()
-{
-
 }

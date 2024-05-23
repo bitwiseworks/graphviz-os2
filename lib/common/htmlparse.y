@@ -1,23 +1,31 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup common_utils
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
+
+%require "3.0"
+
+  /* By default, Bison emits a parser using symbols prefixed with "yy". Graphviz
+   * contains multiple Bison-generated parsers, so we alter this prefix to avoid
+   * symbol clashes.
+   */
+%define api.prefix {html}
 
 %{
 
-#include "render.h"
-#include "htmltable.h"
-#include "htmllex.h"
+#include <cgraph/alloc.h>
+#include <common/render.h>
+#include <common/htmltable.h>
+#include <common/htmllex.h>
 
-extern int yyparse(void);
+extern int htmlparse(void);
 
 typedef struct sfont_t {
     textfont_t *cfont;	
@@ -38,9 +46,9 @@ static struct {
  * Free row. This closes and frees row's list, then
  * the pitem itself is freed.
  */
-static void
-free_ritem(Dt_t* d, pitem* p,Dtdisc_t* ds)
-{
+static void free_ritem(pitem *p, Dtdisc_t *ds) {
+  (void)ds;
+
   dtclose (p->u.rp);
   free (p);
 }
@@ -49,9 +57,9 @@ free_ritem(Dt_t* d, pitem* p,Dtdisc_t* ds)
  * Generic Dt free. Only frees container, assuming contents
  * have been copied elsewhere.
  */
-static void
-free_item(Dt_t* d, void* p,Dtdisc_t* ds)
-{
+static void free_item(void *p, Dtdisc_t *ds) {
+  (void)ds;
+
   free (p);
 }
 
@@ -81,34 +89,24 @@ cleanCell (htmlcell_t* cp)
 /* free_citem:
  * Free cell item during parsing. This frees cell and pitem.
  */
-static void
-free_citem(Dt_t* d, pitem* p,Dtdisc_t* ds)
-{
+static void free_citem(pitem *p, Dtdisc_t *ds) {
+  (void)ds;
+
   cleanCell (p->u.cp);
   free (p);
 }
 
 static Dtdisc_t rowDisc = {
-    offsetof(pitem,u),
-    sizeof(void*),
-    offsetof(pitem,link),
-    NIL(Dtmake_f),
-    (Dtfree_f)free_ritem,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .key = offsetof(pitem, u),
+    .size = sizeof(void *),
+    .link = offsetof(pitem, link),
+    .freef = (Dtfree_f)free_ritem,
 };
 static Dtdisc_t cellDisc = {
-    offsetof(pitem,u),
-    sizeof(void*),
-    offsetof(pitem,link),
-    NIL(Dtmake_f),
-    (Dtfree_f)free_item,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .key = offsetof(pitem, u),
+    .size = sizeof(void *),
+    .link = offsetof(pitem, link),
+    .freef = (Dtfree_f)free_item,
 };
 
 typedef struct {
@@ -121,24 +119,22 @@ typedef struct {
     htextspan_t  lp;
 } fspan;
 
-static void 
-free_fitem(Dt_t* d, fitem* p, Dtdisc_t* ds)
-{
-    if (p->ti.str)
-	free (p->ti.str);
+static void free_fitem(fitem *p, Dtdisc_t *ds) {
+    (void)ds;
+
+    free (p->ti.str);
     free (p);
 }
 
-static void 
-free_fspan(Dt_t* d, fspan* p, Dtdisc_t* ds)
-{
+static void free_fspan(fspan *p, Dtdisc_t *ds) {
+    (void)ds;
+
     textspan_t* ti;
 
     if (p->lp.nitems) {
-	int i;
 	ti = p->lp.items;
-	for (i = 0; i < p->lp.nitems; i++) {
-	    if (ti->str) free (ti->str);
+	for (size_t i = 0; i < p->lp.nitems; i++) {
+	    free (ti->str);
 	    ti++;
 	}
 	free (p->lp.items);
@@ -147,28 +143,13 @@ free_fspan(Dt_t* d, fspan* p, Dtdisc_t* ds)
 }
 
 static Dtdisc_t fstrDisc = {
-    0,
-    0,
-    offsetof(fitem,link),
-    NIL(Dtmake_f),
-    (Dtfree_f)free_item,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .link = offsetof(fitem, link),
+    .freef = (Dtfree_f)free_item,
 };
 
-
 static Dtdisc_t fspanDisc = {
-    0,
-    0,
-    offsetof(fspan,link),
-    NIL(Dtmake_f),
-    (Dtfree_f)free_item,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .link = offsetof(fspan, link),
+    .freef = (Dtfree_f)free_item,
 };
 
 /* appendFItemList:
@@ -177,9 +158,9 @@ static Dtdisc_t fspanDisc = {
 static void
 appendFItemList (agxbuf *ag)
 {
-    fitem *fi = NEW(fitem);
+    fitem *fi = gv_alloc(sizeof(fitem));
 
-    fi->ti.str = strdup(agxbuse(ag));
+    fi->ti.str = agxbdisown(ag);
     fi->ti.font = HTMLstate.fontstack->cfont;
     dtinsert(HTMLstate.fitemList, fi);
 }	
@@ -189,20 +170,19 @@ appendFItemList (agxbuf *ag)
 static void 
 appendFLineList (int v)
 {
-    int cnt;
-    fspan *ln = NEW(fspan);
+    fspan *ln = gv_alloc(sizeof(fspan));
     fitem *fi;
     Dt_t *ilist = HTMLstate.fitemList;
 
-    cnt = dtsize(ilist);
+    size_t cnt = (size_t)dtsize(ilist);
     ln->lp.just = v;
     if (cnt) {
         int i = 0;
 	ln->lp.nitems = cnt;
-	ln->lp.items = N_NEW(cnt, textspan_t);
+	ln->lp.items = gv_calloc(cnt, sizeof(textspan_t));
 
 	fi = (fitem*)dtflatten(ilist);
-	for (; fi; fi = (fitem*)dtlink(fitemList,(Dtlink_t*)fi)) {
+	for (; fi; fi = (fitem*)dtlink(fitemList, fi)) {
 		/* NOTE: When fitemList is closed, it uses free_item, which only frees the container,
 		 * not the contents, so this copy is safe.
 		 */
@@ -211,9 +191,9 @@ appendFLineList (int v)
 	}
     }
     else {
-	ln->lp.items = NEW(textspan_t);
+	ln->lp.items = gv_alloc(sizeof(textspan_t));
 	ln->lp.nitems = 1;
-	ln->lp.items[0].str = strdup("");
+	ln->lp.items[0].str = gv_strdup("");
 	ln->lp.items[0].font = HTMLstate.fontstack->cfont;
     }
 
@@ -225,21 +205,20 @@ appendFLineList (int v)
 static htmltxt_t*
 mkText(void)
 {
-    int cnt;
     Dt_t * ispan = HTMLstate.fspanList;
     fspan *fl ;
-    htmltxt_t *hft = NEW(htmltxt_t);
+    htmltxt_t *hft = gv_alloc(sizeof(htmltxt_t));
     
     if (dtsize (HTMLstate.fitemList)) 
 	appendFLineList (UNSET_ALIGN);
 
-    cnt = dtsize(ispan);
+    size_t cnt = (size_t)dtsize(ispan);
     hft->nspans = cnt;
     	
     if (cnt) {
 	int i = 0;
-	hft->spans = N_NEW(cnt,htextspan_t);	
-    	for(fl=(fspan *)dtfirst(ispan); fl; fl=(fspan *)dtnext(ispan,fl)) {
+	hft->spans = gv_calloc(cnt, sizeof(htextspan_t));
+    	for(fl=dtfirst(ispan); fl; fl=dtnext(ispan,fl)) {
     	    hft->spans[i] = fl->lp;
     	    i++;
     	}
@@ -264,9 +243,9 @@ static pitem* addRow (void)
 {
   Dt_t*      dp = dtopen(&cellDisc, Dtqueue);
   htmltbl_t* tbl = HTMLstate.tblstack;
-  pitem*     sp = NEW(pitem);
+  pitem*     sp = gv_alloc(sizeof(pitem));
   sp->u.rp = dp;
-  if (tbl->flags & HTML_HRULE)
+  if (tbl->hrule)
     sp->ruled = 1;
   dtinsert (tbl->u.p.rows, sp);
   return sp;
@@ -275,38 +254,36 @@ static pitem* addRow (void)
 /* setCell:
  * Set cell body and type and attach to row
  */
-static void setCell (htmlcell_t* cp, void* obj, int kind)
-{
-  pitem*     sp = NEW(pitem);
+static void setCell(htmlcell_t *cp, void *obj, char kind) {
+  pitem*     sp = gv_alloc(sizeof(pitem));
   htmltbl_t* tbl = HTMLstate.tblstack;
-  pitem*     rp = (pitem*)dtlast (tbl->u.p.rows);
+  pitem*     rp = dtlast (tbl->u.p.rows);
   Dt_t*      row = rp->u.rp;
   sp->u.cp = cp;
   dtinsert (row, sp);
   cp->child.kind = kind;
-  if (tbl->flags & HTML_VRULE)
+  if (tbl->vrule)
     cp->ruled = HTML_VRULE;
   
   if(kind == HTML_TEXT)
-  	cp->child.u.txt = (htmltxt_t*)obj;
+  	cp->child.u.txt = obj;
   else if (kind == HTML_IMAGE)
-    cp->child.u.img = (htmlimg_t*)obj;
+    cp->child.u.img = obj;
   else
-    cp->child.u.tbl = (htmltbl_t*)obj;
+    cp->child.u.tbl = obj;
 }
 
 /* mkLabel:
  * Create label, given body and type.
  */
-static htmllabel_t* mkLabel (void* obj, int kind)
-{
-  htmllabel_t* lp = NEW(htmllabel_t);
+static htmllabel_t *mkLabel(void *obj, char kind) {
+  htmllabel_t* lp = gv_alloc(sizeof(htmllabel_t));
 
   lp->kind = kind;
   if (kind == HTML_TEXT)
-    lp->u.txt = (htmltxt_t*)obj;
+    lp->u.txt = obj;
   else
-    lp->u.tbl = (htmltbl_t*)obj;
+    lp->u.tbl = obj;
   return lp;
 }
 
@@ -378,7 +355,7 @@ static int nonSpace (char* s)
 static void
 pushFont (textfont_t *fp)
 {
-    sfont_t *ft = NEW(sfont_t);
+    sfont_t *ft = gv_alloc(sizeof(sfont_t));
     textfont_t* curfont = HTMLstate.fontstack->cfont;
     textfont_t  f = *fp;
 
@@ -526,7 +503,7 @@ string : T_string
 
 table : opt_space T_table { 
           if (nonSpace(agxbuse(HTMLstate.str))) {
-            yyerror ("Syntax error: non-space string used before <TABLE>");
+            htmlerror ("Syntax error: non-space string used before <TABLE>");
             cleanup(); YYABORT;
           }
           $2->u.p.prev = HTMLstate.tblstack;
@@ -537,7 +514,7 @@ table : opt_space T_table {
         }
         rows T_end_table opt_space {
           if (nonSpace(agxbuse(HTMLstate.str))) {
-            yyerror ("Syntax error: non-space string used after </TABLE>");
+            htmlerror ("Syntax error: non-space string used after </TABLE>");
             cleanup(); YYABORT;
           }
           $$ = HTMLstate.tblstack;
@@ -593,13 +570,13 @@ VR  : T_vr T_end_vr
 
 /* parseHTML:
  * Return parsed label or NULL if failure.
- * Set warn to 0 on success; 1 for warning message; 2 if no expat.
+ * Set warn to 0 on success; 1 for warning message; 2 if no expat; 3 for error
+ * message.
  */
 htmllabel_t*
 parseHTML (char* txt, int* warn, htmlenv_t *env)
 {
-  unsigned char buf[SMALLBUF];
-  agxbuf        str;
+  agxbuf        str = {0};
   htmllabel_t*  l;
   sfont_t       dfltf;
 
@@ -612,7 +589,6 @@ parseHTML (char* txt, int* warn, htmlenv_t *env)
   HTMLstate.fitemList = dtopen(&fstrDisc, Dtqueue);
   HTMLstate.fspanList = dtopen(&fspanDisc, Dtqueue);
 
-  agxbinit (&str, SMALLBUF, buf);
   HTMLstate.str = &str;
   
   if (initHTMLlexer (txt, &str, env)) {/* failed: no libexpat - give up */
@@ -620,7 +596,7 @@ parseHTML (char* txt, int* warn, htmlenv_t *env)
     l = NULL;
   }
   else {
-    yyparse();
+    htmlparse();
     *warn = clearHTMLlexer ();
     l = HTMLstate.lbl;
   }

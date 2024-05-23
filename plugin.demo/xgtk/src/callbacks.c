@@ -1,19 +1,17 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
 #include <gtk/gtk.h>
+#include <stdbool.h>
 
 #include "gvplugin_device.h"
 
@@ -195,22 +193,7 @@ on_about1_activate                     (GtkMenuItem     *menuitem,
 static void
 load_store_with_attrs(GtkListStore *model, GVJ_t *job)
 {
-#if 0
-        gint attrs_len = job->selected_obj_attributes.argc, i;
-        gchar **attrs = job->selected_obj_attributes.argv;
-        GtkTreeIter iter;
-        gvattr_t type;
-#endif
-
         gtk_list_store_clear(model);
-
-#if 0
-        for (i = 0; i < attrs_len; i+=3) {
-                gtk_list_store_append(model, &iter);
-                gtk_list_store_set(model, &iter, 0, attrs[i], 1, g_strdup(attrs[i+1]), -1);
-                type = (gvattr_t)attrs[i+2];
-        }
-#endif
 }
 
 
@@ -228,7 +211,7 @@ on_drawingarea1_expose_event           (GtkWidget       *widget,
     (job->callbacks->motion)(job, job->pointer);
 
     job->context = (void *)cr;
-    job->external_context = TRUE;
+    job->external_context = true;
     job->width = widget->allocation.width;
     job->height = widget->allocation.height;
     if (job->has_been_rendered) {
@@ -263,11 +246,6 @@ on_drawingarea1_motion_notify_event    (GtkWidget       *widget,
     job->pointer.y = event->y;
     gtk_widget_queue_draw(widget);
 
-#if 0
-    if (job->active_tooltip && job->active_tooltip[0])
-	fprintf(stderr,"tooltip = \"%s\"\n", job->active_tooltip);
-#endif
-
     return FALSE;
 }
 
@@ -298,7 +276,7 @@ on_drawingarea2_expose_event           (GtkWidget       *widget,
     (job->callbacks->motion)(job, job->pointer);
 
     job->context = (void *)cr;
-    job->external_context = TRUE;
+    job->external_context = true;
     job->width = widget->allocation.width;
     job->height = widget->allocation.height;
 
@@ -350,10 +328,10 @@ on_drawingarea1_configure_event        (GtkWidget       *widget,
 	job->zoom *= zoom_to_fit;
     }
     if (event->width > job->width || event->height > job->height)
-	job->has_grown = TRUE;
+	job->has_grown = true;
     job->width = event->width;
     job->height = event->height;
-    job->needs_refresh = TRUE;
+    job->needs_refresh = true;
 
     return FALSE;
 }

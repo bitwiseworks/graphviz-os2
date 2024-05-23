@@ -1,22 +1,21 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
-
-#include <stddef.h>
+#include <assert.h>
+#include <limits.h>
+#include <math.h>
+#include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <ctype.h>
 #include <errno.h>
 
 #ifdef _WIN32
@@ -25,18 +24,19 @@
 #define GLOB_ABORTED    2   /* Read error.  */
 #define GLOB_NOMATCH    3   /* No matches found.  */
 #define GLOB_NOSORT     4
-#define DMKEY "Software\\Microsoft" //key to look for library dir
 #endif
 
-#include <regex.h>
-#include "types.h"
-#include "logic.h"
-#include "memory.h"
-#include "agxbuf.h"
-
-#define _BLD_gvc 1
-#include "utils.h"
-#include "gvplugin_loadimage.h"
+#include <common/types.h>
+#include <common/usershape.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/strview.h>
+#include <common/utils.h>
+#include <gvc/gvplugin_loadimage.h>
+#include <gvc/gvplugin.h>
+#include <gvc/gvcint.h>
+#include <gvc/gvcproc.h>
 
 extern char *Gvimagepath;
 extern char *HTTPServerEnVar;
@@ -46,8 +46,8 @@ static Dict_t *ImageDict;
 
 typedef struct {
     char *template;
-    int size;
-    int type;
+    size_t size;
+    imagetype_t type;
     char *stringtype;
 } knowntype_t;
 
@@ -64,7 +64,6 @@ typedef struct {
 #define SVG_MAGIC  "<svg"
 #define RIFF_MAGIC "RIFF"
 #define WEBP_MAGIC "WEBP"
-//#define TIFF_MAGIC "II"
 #define ICO_MAGIC  "\x00\x00\x01\x00"
 
 static knowntype_t knowntypes[] = {
@@ -75,31 +74,47 @@ static knowntype_t knowntypes[] = {
     { JPEG_MAGIC, sizeof(JPEG_MAGIC)-1,  FT_JPEG, "jpeg", },
     { PDF_MAGIC,  sizeof(PDF_MAGIC)-1,   FT_PDF,  "pdf",  },
     { EPS_MAGIC,  sizeof(EPS_MAGIC)-1,   FT_EPS,  "eps",  },
-/*    { SVG_MAGIC,  sizeof(SVG_MAGIC)-1,  FT_SVG,  "svg",  },  - viewers expect xml preamble */
     { XML_MAGIC,  sizeof(XML_MAGIC)-1,   FT_XML,  "xml",  },
     { RIFF_MAGIC, sizeof(RIFF_MAGIC)-1,  FT_RIFF, "riff", },
     { ICO_MAGIC,  sizeof(ICO_MAGIC)-1,   FT_ICO,  "ico",  },
-//    { TIFF_MAGIC, sizeof(TIFF_MAGIC)-1,  FT_TIFF, "tiff", },
 };
 
-static int imagetype (usershape_t *us)
-{
-    char header[HDRLEN];
-    char line[200];
-    int i;
+static imagetype_t imagetype(usershape_t *us) {
+    char header[HDRLEN] = {0};
 
     if (us->f && fread(header, 1, HDRLEN, us->f) == HDRLEN) {
-        for (i = 0; i < sizeof(knowntypes) / sizeof(knowntype_t); i++) {
+        for (size_t i = 0; i < sizeof(knowntypes) / sizeof(knowntype_t); i++) {
 	    if (!memcmp (header, knowntypes[i].template, knowntypes[i].size)) {
 	        us->stringtype = knowntypes[i].stringtype;
 		us->type = knowntypes[i].type;
 		if (us->type == FT_XML) {
+		    // if we did not see the closing of the XML declaration, scan for it
+		    if (memchr(header, '>', HDRLEN) == NULL) {
+		        while (true) {
+    			    int c = fgetc(us->f);
+    			    if (c == EOF) {
+    			        return us->type;
+    			    } else if (c == '>') {
+    			        break;
+    			    }
+		        }
+		    }
 		    /* check for SVG in case of XML */
-		    while (fgets(line, sizeof(line), us->f) != NULL) {
-		        if (!memcmp(line, SVG_MAGIC, sizeof(SVG_MAGIC)-1)) {
+		    char tag[sizeof(SVG_MAGIC) - 1] = {0};
+		    if (fread(tag, 1, sizeof(tag), us->f) != sizeof(tag)) {
+		        return us->type;
+		    }
+		    while (true) {
+		        if (memcmp(tag, SVG_MAGIC, sizeof(SVG_MAGIC) - 1) == 0) {
     			    us->stringtype = "svg";
 			    return (us->type = FT_SVG);
 		        }
+		        int c = fgetc(us->f);
+		        if (c == EOF) {
+			    return us->type;
+		        }
+		        memmove(&tag[0], &tag[1], sizeof(tag) - 1);
+		        tag[sizeof(tag) - 1] = (char)c;
 		    }
 		}
 	    	else if (us->type == FT_RIFF) {
@@ -120,126 +135,177 @@ static int imagetype (usershape_t *us)
     return FT_NULL;
 }
     
-static boolean get_int_lsb_first (FILE *f, unsigned int sz, unsigned int *val)
-{
-    int ch, i;
+static bool get_int_lsb_first(FILE *f, size_t sz, int *val) {
+    int ch;
 
-    *val = 0;
-    for (i = 0; i < sz; i++) {
+    unsigned value = 0;
+    for (size_t i = 0; i < sz; i++) {
 	ch = fgetc(f);
 	if (feof(f))
-	    return FALSE;
-	*val |= (ch << 8*i);
+	    return false;
+	value |= (unsigned)ch << 8 * i;
     }
-    return TRUE;
+    if (value > INT_MAX) {
+	return false;
+    }
+    *val = (int)value;
+    return true;
 }
 	
-static boolean get_int_msb_first (FILE *f, unsigned int sz, unsigned int *val)
-{
-    int ch, i;
+static bool get_int_msb_first(FILE *f, size_t sz, int *val) {
+    int ch;
 
-    *val = 0;
-    for (i = 0; i < sz; i++) {
+    unsigned value = 0;
+    for (size_t i = 0; i < sz; i++) {
 	ch = fgetc(f);
 	if (feof(f))
-	    return FALSE;
-        *val <<= 8;
-	*val |= ch;
+	    return false;
+        value <<= 8;
+	value |= (unsigned)ch;
     }
-    return TRUE;
+    if (value > INT_MAX) {
+	return false;
+    }
+    *val = (int)value;
+    return true;
 }
 
-static unsigned int svg_units_convert(double n, char *u)
-{
+static double svg_units_convert(double n, char *u) {
     if (strcmp(u, "in") == 0)
-	return ROUND(n * POINTS_PER_INCH);
+	return round(n * POINTS_PER_INCH);
     if (strcmp(u, "px") == 0)
-        return ROUND(n * POINTS_PER_INCH / 96);
+        return round(n * POINTS_PER_INCH / 96);
     if (strcmp(u, "pc") == 0)
-        return ROUND(n * POINTS_PER_INCH / 6); 
+        return round(n * POINTS_PER_INCH / 6); 
     if (strcmp(u, "pt") == 0 || strcmp(u, "\"") == 0)   /* ugly!!  - if there are no inits then the %2s get the trailing '"' */
-        return ROUND(n);
+        return round(n);
     if (strcmp(u, "cm") == 0)
-        return ROUND(n * POINTS_PER_CM);
+        return round(n * POINTS_PER_CM);
     if (strcmp(u, "mm") == 0)
-        return ROUND(n * POINTS_PER_MM);
+        return round(n * POINTS_PER_MM);
     return 0;
 }
 
-static char* svg_attr_value_re = "([a-z][a-zA-Z]*)=\"([^\"]*)\"";
-static regex_t re, *pre = NULL;
+typedef struct {
+  strview_t key;
+  strview_t value;
+} match_t;
+
+static int find_attribute(const char *s, match_t *result) {
+
+  // look for an attribute string matching ([a-z][a-zA-Z]*)="([^"]*)"
+  for (size_t i = 0; s[i] != '\0'; ) {
+    if (s[i] >= 'a' && s[i] <= 'z') {
+      result->key.data = &s[i];
+      result->key.size = 1;
+      ++i;
+      while ((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z')) {
+        ++i;
+        ++result->key.size;
+      }
+      if (s[i] == '=' && s[i + 1] == '"') {
+        i += 2;
+        result->value.data = &s[i];
+        result->value.size = 0;
+        while (s[i] != '"' && s[i] != '\0') {
+          ++i;
+          ++result->value.size;
+        }
+        if (s[i] == '"') {
+          // found a valid attribute
+          return 0;
+        }
+      }
+    } else {
+      ++i;
+    }
+  }
+
+  // no attribute found
+  return -1;
+}
 
 static void svg_size (usershape_t *us)
 {
-    unsigned int w = 0, h = 0;
+    double w = 0, h = 0;
     double n, x0, y0, x1, y1;
     char u[10];
-    char *attribute, *value, *re_string;
-    char line[200];
-    boolean wFlag = FALSE, hFlag = FALSE;
-#define RE_NMATCH 4
-    regmatch_t re_pmatch[RE_NMATCH];
-
-    /* compile on first use */
-    if (! pre) {
-        if (regcomp(&re, svg_attr_value_re, REG_EXTENDED) != 0) {
-	    agerr(AGERR,"cannot compile regular expression %s", svg_attr_value_re);
-    	}
-	pre = &re;
-    }
+    agxbuf line = {0};
+    bool eof = false;
+    bool wFlag = false, hFlag = false;
 
     fseek(us->f, 0, SEEK_SET);
-    while (fgets(line, sizeof(line), us->f) != NULL && (!wFlag || !hFlag)) {
-	re_string = line;
-	while (regexec(&re, re_string, RE_NMATCH, re_pmatch, 0) == 0) {
-	    re_string[re_pmatch[1].rm_eo] = '\0';
-	    re_string[re_pmatch[2].rm_eo] = '\0';
-	    attribute = re_string + re_pmatch[1].rm_so;
-	    value = re_string + re_pmatch[2].rm_so;
-    	    re_string += re_pmatch[0].rm_eo + 1;
+    while (!eof && (!wFlag || !hFlag)) {
+	// read next line
+	while (true) {
+	    int c = fgetc(us->f);
+	    if (c == EOF) {
+	        eof = true;
+	        break;
+	    } else if (c == '\n') {
+	        break;
+	    }
+	    agxbputc(&line, (char)c);
+	}
 
-	    if (strcmp(attribute,"width") == 0) {
+	const char *re_string = agxbuse(&line);
+	match_t match;
+	while (find_attribute(re_string, &match) == 0) {
+	    re_string = match.value.data + match.value.size + 1;
+
+	    if (strview_str_eq(match.key, "width")) {
+	        char *value = strview_str(match.value);
 	        if (sscanf(value, "%lf%2s", &n, u) == 2) {
 	            w = svg_units_convert(n, u);
-	            wFlag = TRUE;
+	            wFlag = true;
 		}
 		else if (sscanf(value, "%lf", &n) == 1) {
 	            w = svg_units_convert(n, "pt");
-	            wFlag = TRUE;
+	            wFlag = true;
 		}
+		free(value);
 		if (hFlag)
 		    break;
 	    }
-	    else if (strcmp(attribute,"height") == 0) {
+	    else if (strview_str_eq(match.key, "height")) {
+	        char *value = strview_str(match.value);
 	        if (sscanf(value, "%lf%2s", &n, u) == 2) {
 	            h = svg_units_convert(n, u);
-	            hFlag = TRUE;
+	            hFlag = true;
 		}
 	        else if (sscanf(value, "%lf", &n) == 1) {
 	            h = svg_units_convert(n, "pt");
-	            hFlag = TRUE;
+	            hFlag = true;
 		}
+		free(value);
                 if (wFlag)
 		    break;
 	    }
-	    else if (strcmp(attribute,"viewBox") == 0
-	      && sscanf(value, "%lf %lf %lf %lf", &x0,&y0,&x1,&y1) == 4) {
-		w = x1 - x0 + 1;
-		h = y1 - y0 + 1;
-	        wFlag = TRUE;
-	        hFlag = TRUE;
-	        break;
+	    else if (strview_str_eq(match.key, "viewBox")) {
+	        char *value = strview_str(match.value);
+	        if (sscanf(value, "%lf %lf %lf %lf", &x0, &y0, &x1, &y1) == 4) {
+	            w = x1 - x0 + 1;
+	            h = y1 - y0 + 1;
+	            wFlag = true;
+	            hFlag = true;
+	            free(value);
+	            break;
+	        }
+		free(value);
 	    }
 	}
     }
     us->dpi = 0;
-    us->w = w;
-    us->h = h;
+    assert(w >= 0 && w <= INT_MAX);
+    us->w = (int)w;
+    assert(h >= 0 && h <= INT_MAX);
+    us->h = (int)h;
+    agxbfree(&line);
 }
 
 static void png_size (usershape_t *us)
 {
-    unsigned int w, h;
+    int w, h;
 
     us->dpi = 0;
     fseek(us->f, 16, SEEK_SET);
@@ -251,7 +317,7 @@ static void png_size (usershape_t *us)
 
 static void ico_size (usershape_t *us)
 {
-    unsigned int w, h;
+    int w, h;
 
     us->dpi = 0;
     fseek(us->f, 6, SEEK_SET);
@@ -260,26 +326,10 @@ static void ico_size (usershape_t *us)
         us->h = h;
     }
 }
-
-
-// FIXME - how to get the size of a tiff image?
-#if 0
-static void tiff_size (usershape_t *us)
-{
-    unsigned int w, h;
-
-    us->dpi = 0;
-    fseek(us->f, 6, SEEK_SET);
-    if (get_int_msb_first(us->f, 1, &w) && get_int_msb_first(us->f, 1, &h)) {
-        us->w = w;
-        us->h = h;
-    }
-}
-#endif
 
 static void webp_size (usershape_t *us)
 {
-    unsigned int w, h;
+    int w, h;
 
     us->dpi = 0;
     fseek(us->f, 15, SEEK_SET);
@@ -301,7 +351,7 @@ static void webp_size (usershape_t *us)
 
 static void gif_size (usershape_t *us)
 {
-    unsigned int w, h;
+    int w, h;
 
     us->dpi = 0;
     fseek(us->f, 6, SEEK_SET);
@@ -312,7 +362,7 @@ static void gif_size (usershape_t *us)
 }
 
 static void bmp_size (usershape_t *us) {
-    unsigned int size_x_msw, size_x_lsw, size_y_msw, size_y_lsw;
+    int size_x_msw, size_x_lsw, size_y_msw, size_y_lsw;
 
     us->dpi = 0;
     fseek (us->f, 16, SEEK_SET);
@@ -326,23 +376,22 @@ static void bmp_size (usershape_t *us) {
 }
 
 static void jpeg_size (usershape_t *us) {
-    unsigned int marker, length, size_x, size_y, junk;
+    int marker, length, size_x, size_y;
 
     /* These are the markers that follow 0xff in the file.
      * Other markers implicitly have a 2-byte length field that follows.
      */
-    static unsigned char standalone_markers [] = {
+    static const unsigned char standalone_markers[] = {
         0x01,                       /* Temporary */
         0xd0, 0xd1, 0xd2, 0xd3,     /* Reset */
             0xd4, 0xd5, 0xd6,
             0xd7,
         0xd8,                       /* Start of image */
         0xd9,                       /* End of image */
-        0
     };
 
     us->dpi = 0;
-    while (TRUE) {
+    while (true) {
         /* Now we must be at a 0xff or at a series of 0xff's.
          * If that is not the case, or if we're at EOF, then there's
          * a parsing error.
@@ -360,13 +409,13 @@ static void jpeg_size (usershape_t *us) {
          */
 
         /* A stand-alone... */
-        if (strchr ((char*)standalone_markers, marker))
+        if (memchr(standalone_markers, marker, sizeof(standalone_markers)))
             continue;
 
         /* Incase of a 0xc0 marker: */
         if (marker == 0xc0) {
             /* Skip length and 2 lengths. */
-            if ( get_int_msb_first (us->f, 3, &junk)   &&
+            if (fseek(us->f, 3, SEEK_CUR) == 0 &&
                  get_int_msb_first (us->f, 2, &size_x) &&
                  get_int_msb_first (us->f, 2, &size_y) ) {
 
@@ -380,7 +429,7 @@ static void jpeg_size (usershape_t *us) {
         /* Incase of a 0xc2 marker: */
         if (marker == 0xc2) {
             /* Skip length and one more byte */
-            if (! get_int_msb_first (us->f, 3, &junk))
+            if (fseek(us->f, 3, SEEK_CUR) != 0)
                 return;
 
             /* Get length and store. */
@@ -403,13 +452,12 @@ static void jpeg_size (usershape_t *us) {
 static void ps_size (usershape_t *us)
 {
     char line[BUFSIZ];
-    boolean saw_bb;
     int lx, ly, ux, uy;
     char* linep;
 
     us->dpi = 72;
     fseek(us->f, 0, SEEK_SET);
-    saw_bb = FALSE;
+    bool saw_bb = false;
     while (fgets(line, sizeof(line), us->f)) {
 	/* PostScript accepts \r as EOL, so using fgets () and looking for a
 	 * bounding box comment at the beginning doesn't work in this case. 
@@ -422,7 +470,7 @@ static void ps_size (usershape_t *us)
 	if (!(linep = strstr (line, "%%BoundingBox:")))
 	    continue;
         if (sscanf (linep, "%%%%BoundingBox: %d %d %d %d", &lx, &ly, &ux, &uy) == 4) {
-            saw_bb = TRUE;
+            saw_bb = true;
 	    break;
         }
     }
@@ -442,9 +490,7 @@ typedef struct {
     FILE* fp;
 } stream_t;
 
-static unsigned char
-nxtc (stream_t* str)
-{
+static char nxtc(stream_t *str) {
     if (fgets(str->buf, BUFSIZ, str->fp)) {
 	str->s = str->buf;
 	return *(str->s);
@@ -459,9 +505,9 @@ nxtc (stream_t* str)
 static void
 skipWS (stream_t* str)
 {
-    unsigned char c;
+    char c;
     while ((c = strc(str))) {
-	if (isspace(c)) stradv(str);
+	if (gv_isspace(c)) stradv(str);
 	else return;
     }
 }
@@ -483,7 +529,7 @@ getNum (stream_t* str, char* buf)
     int len = 0;
     char c;
     skipWS(str);
-    while ((c = strc(str)) && (isdigit(c) || (c == '.'))) {
+    while ((c = strc(str)) && (gv_isdigit(c) || (c == '.'))) {
 	buf[len++] = c;
 	stradv(str);
 	if (len == BUFSIZ-1) break;
@@ -543,9 +589,10 @@ static void pdf_size (usershape_t *us)
     }
 }
 
-static void usershape_close (Dict_t * dict, void * p, Dtdisc_t * disc)
-{
-    usershape_t *us = (usershape_t *)p;
+static void usershape_close(void *p, Dtdisc_t *disc) {
+    (void)disc;
+
+    usershape_t *us = p;
 
     if (us->f)
 	fclose(us->f);
@@ -555,15 +602,9 @@ static void usershape_close (Dict_t * dict, void * p, Dtdisc_t * disc)
 }
 
 static Dtdisc_t ImageDictDisc = {
-    offsetof(usershape_t, name), /* key */
-    -1,                         /* size */
-    0,                          /* link offset */
-    NIL(Dtmake_f),
-    usershape_close,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .key = offsetof(usershape_t, name),
+    .size = -1,
+    .freef = usershape_close,
 };
 
 usershape_t *gvusershape_find(const char *name)
@@ -581,7 +622,7 @@ usershape_t *gvusershape_find(const char *name)
 }
 
 #define MAX_USERSHAPE_FILES_OPEN 50
-boolean gvusershape_file_access(usershape_t *us)
+bool gvusershape_file_access(usershape_t *us)
 {
     static int usershape_files_open_cnt;
     const char *fn;
@@ -594,25 +635,21 @@ boolean gvusershape_file_access(usershape_t *us)
 	fseek(us->f, 0, SEEK_SET);
     else {
         if (! (fn = safefile(us->name))) {
-	    agerr(AGWARN, "Filename \"%s\" is unsafe\n", us->name);
-	    return FALSE;
+	    agwarningf("Filename \"%s\" is unsafe\n", us->name);
+	    return false;
 	}
-#if !defined(_WIN32) && !defined(__OS2__)
-	us->f = fopen(fn, "r");
-#else
 	us->f = fopen(fn, "rb");
-#endif
 	if (us->f == NULL) {
-	    agerr(AGWARN, "%s while opening %s\n", strerror(errno), fn);
-	    return FALSE;
+	    agwarningf("%s while opening %s\n", strerror(errno), fn);
+	    return false;
 	}
 	if (usershape_files_open_cnt >= MAX_USERSHAPE_FILES_OPEN)
-	    us->nocache = TRUE;
+	    us->nocache = true;
 	else
 	    usershape_files_open_cnt++;
     }
     assert(us->f);
-    return TRUE;
+    return true;
 }
 
 void gvusershape_file_release(usershape_t *us)
@@ -627,7 +664,7 @@ void gvusershape_file_release(usershape_t *us)
 
 static void freeUsershape (usershape_t* us)
 {
-    if (us->name) agstrfree(0, (char*)us->name);
+    if (us->name) agstrfree(0, us->name);
     free (us);
 }
 
@@ -641,10 +678,9 @@ static usershape_t *gvusershape_open (const char *name)
         ImageDict = dtopen(&ImageDictDisc, Dttree);
 
     if (! (us = gvusershape_find(name))) {
-        if (! (us = zmalloc(sizeof(usershape_t))))
-	    return NULL;
+        us = gv_alloc(sizeof(usershape_t));
 
-	us->name = agstrdup (0, (char*)name);
+	us->name = agstrdup(0, name);
 	if (!gvusershape_file_access(us)) {
 	    freeUsershape (us);
 	    return NULL;
@@ -654,8 +690,8 @@ static usershape_t *gvusershape_open (const char *name)
 
         switch(imagetype(us)) {
 	    case FT_NULL:
-		if (!(us->data = (void*)find_user_shape(us->name))) {
-		    agerr(AGWARN, "\"%s\" was not found as a file or as a shape library member\n", us->name);
+		if (!(us->data = find_user_shape(us->name))) {
+		    agwarningf("\"%s\" was not found as a file or as a shape library member\n", us->name);
 		    freeUsershape (us);
 		    return NULL;
 		}
@@ -687,9 +723,6 @@ static usershape_t *gvusershape_open (const char *name)
 	    case FT_ICO:
 		ico_size(us);
 		break;
-//	    case FT_TIFF:
-//		tiff_size(us);
-//		break;
 	    case FT_EPS:   /* no eps_size code available */
 	    default:
 	        break;

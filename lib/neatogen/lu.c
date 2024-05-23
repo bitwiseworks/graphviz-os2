@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /*
@@ -45,8 +42,9 @@
  *	written 3/2/79, revised and enhanced 8/9/83.
  */
 
+#include <cgraph/alloc.h>
 #include <math.h>
-#include <neato.h>
+#include <neatogen/neato.h>
 
 static double *scales;
 static double **lu;
@@ -66,31 +64,28 @@ static int *ps;
 
 int lu_decompose(double **a, int n)
 {
-    register int i, j, k;
+    int i, j, k;
     int pivotindex = 0;
     double pivot, biggest, mult, tempf;
 
     if (lu)
 	free_array(lu);
     lu = new_array(n, n, 0.0);
-    if (ps)
-	free(ps);
-    ps = N_NEW(n, int);
-    if (scales)
-	free(scales);
-    scales = N_NEW(n, double);
+    free(ps);
+    ps = gv_calloc(n, sizeof(int));
+    free(scales);
+    scales = gv_calloc(n, sizeof(double));
 
     for (i = 0; i < n; i++) {	/* For each row */
 	/* Find the largest element in each row for row equilibration */
 	biggest = 0.0;
 	for (j = 0; j < n; j++)
-	    if (biggest < (tempf = fabs(lu[i][j] = a[i][j])))
-		biggest = tempf;
-	if (biggest != 0.0)
+	    biggest = fmax(biggest, fabs(lu[i][j] = a[i][j]));
+	if (biggest > 0.0)
 	    scales[i] = 1.0 / biggest;
 	else {
 	    scales[i] = 0.0;
-	    return (0);		/* Zero row: singular matrix */
+	    return 0;		/* Zero row: singular matrix */
 	}
 	ps[i] = i;		/* Initialize pivot sequence */
     }
@@ -104,8 +99,8 @@ int lu_decompose(double **a, int n)
 		pivotindex = i;
 	    }
 	}
-	if (biggest == 0.0)
-	    return (0);		/* Zero column: singular matrix */
+	if (biggest <= 0.0)
+	    return 0;		/* Zero column: singular matrix */
 	if (pivotindex != k) {	/* Update pivot sequence */
 	    j = ps[k];
 	    ps[k] = ps[pivotindex];
@@ -116,16 +111,14 @@ int lu_decompose(double **a, int n)
 	pivot = lu[ps[k]][k];
 	for (i = k + 1; i < n; i++) {
 	    lu[ps[i]][k] = mult = lu[ps[i]][k] / pivot;
-	    if (mult != 0.0) {
-		for (j = k + 1; j < n; j++)
-		    lu[ps[i]][j] -= mult * lu[ps[k]][j];
-	    }
+	    for (j = k + 1; j < n; j++)
+		lu[ps[i]][j] -= mult * lu[ps[k]][j];
 	}
     }
 
     if (lu[ps[n - 1]][n - 1] == 0.0)
-	return (0);		/* Singular matrix */
-    return (1);
+	return 0;		/* Singular matrix */
+    return 1;
 }
 
 /* lu_solve() solves the linear equation (Ax = b) after the matrix A has
@@ -141,7 +134,7 @@ int lu_decompose(double **a, int n)
 
 void lu_solve(double *x, double *b, int n)
 {
-    register int i, j;
+    int i, j;
     double dot;
 
     /* Vector reduction using U triangular matrix */

@@ -1,20 +1,17 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup common_utils
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef GV_CONST_H
-#define GV_CONST_H
+#pragma once
 
-#define SMALLBUF	128
 #define LPAREN		'('
 #define RPAREN		')'
 #define LBRACE		'{'
@@ -77,6 +74,8 @@
 #define		DEFAULT_NODEWIDTH	0.75
 #define		MIN_NODEWIDTH		0.01
 #define		DEFAULT_NODESHAPE	"ellipse"
+#define		DEFAULT_NODEPENWIDTH	1.0
+#define		MIN_NODEPENWIDTH	0.0
 
 #define		NODENAME_ESC		"\\N"
 
@@ -130,7 +129,6 @@
 #define		CLST    3
 
 /* output languages */
-#define		HPGL		2	/* HP Graphics Language */
 #define		PCL		3	/* Printer Control Language */
 #define		MIF		4	/* Adobe FrameMaker */
 #define		PIC_format	5	/* symbol PIC is used by compilers for 
@@ -139,7 +137,6 @@
 
 #define		VTX		21	/* visual thought */
 #define		METAPOST	22
-#define		DIA		24	/* dia drawing tool */
 
 #define		QPDF		30	/* Quartz paged PDF */
 #define		QEPDF		31	/* Quartz embedded PDF */
@@ -166,10 +163,6 @@
 #define SELFNPEDGE  8
 #define SELFEDGE    8
 #define EDGETYPEMASK	 15	/* the OR of the above */
-
-/* for graph server */
-#define		SERVER_NN	200
-#define		SERVER_NE	500
 
 /* for neato */
 #define Spring_coeff    1.0
@@ -262,18 +255,18 @@
 
 /* Flags stored in GD_flags 
  * Bit(s):  0     unused
- *          1-3   ET_ 
+ *          1-3   EDGETYPE_
  *          4     NEW_RANK
  */
 
 /* edge types */
-#define ET_NONE 	(0 << 1)
-#define ET_LINE 	(1 << 1)
-#define ET_CURVED 	(2 << 1)
-#define ET_PLINE 	(3 << 1)
-#define ET_ORTHO 	(4 << 1)
-#define ET_SPLINE 	(5 << 1)
-#define ET_COMPOUND 	(6 << 1)
+#define EDGETYPE_NONE       (0 << 1)
+#define EDGETYPE_LINE       (1 << 1)
+#define EDGETYPE_CURVED     (2 << 1)
+#define EDGETYPE_PLINE      (3 << 1)
+#define EDGETYPE_ORTHO      (4 << 1)
+#define EDGETYPE_SPLINE     (5 << 1)
+#define EDGETYPE_COMPOUND   (6 << 1)
 
 /* New ranking is used */
 #define NEW_RANK    	(1 << 4)
@@ -290,5 +283,3 @@
 #define FONTSIZE_MUCH_TOO_SMALL 0.15
 /* fontsize at which text is rendered by a simple line */
 #define FONTSIZE_TOO_SMALL 1.5
-
-#endif

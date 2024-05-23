@@ -1,26 +1,29 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/// @file
+/// @brief generic manipulations with @ref Agobj_t and derived objects graphs, nodes and edges
+/// @ingroup cgraph_object
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include <cghdr.h>
+#include <cgraph/cghdr.h>
+#include <cgraph/unreachable.h>
+#include <stddef.h>
 
 int agdelete(Agraph_t * g, void *obj)
 {
-    if ((AGTYPE((Agobj_t *) obj) == AGRAPH) && (g != agparent(obj))) {
-	agerr(AGERR, "agdelete on wrong graph");
+    if (AGTYPE(obj) == AGRAPH && g != agparent(obj)) {
+	agerrorf("agdelete on wrong graph");
 	return FAILURE;
     }
 
-    switch (AGTYPE((Agobj_t *) obj)) {
+    switch (AGTYPE(obj)) {
     case AGNODE:
 	return agdelnode(g, obj);
     case AGINEDGE:
@@ -29,7 +32,7 @@ int agdelete(Agraph_t * g, void *obj)
     case AGRAPH:
 	return agclose(obj);
     default:
-	agerr(AGERR, "agdelete on bad object");
+	agerrorf("agdelete on bad object");
     }
     return SUCCESS;		/* not reached */
 }
@@ -44,13 +47,11 @@ int agrename(Agobj_t * obj, char *newname)
 	old_id = AGID(obj);
 	g = agraphof(obj);
 	/* can we reserve the id corresponding to newname? */
-	if (agmapnametoid(agroot(g), AGTYPE(obj), newname,
-			  &new_id, FALSE) == 0)
+	if (agmapnametoid(agroot(g), AGTYPE(obj), newname, &new_id, false) == 0)
 	    return FAILURE;
 	if (new_id == old_id)
 	    return SUCCESS;
-	if (agmapnametoid(agroot(g), AGTYPE(obj), newname,
-			  &new_id, TRUE) == 0)
+	if (agmapnametoid(agroot(g), AGTYPE(obj), newname, &new_id, true) == 0)
 	    return FAILURE;
         /* obj* is unchanged, so no need to re agregister() */
 	if (agparent(g) && agidsubg(agparent(g), new_id, 0))
@@ -60,11 +61,11 @@ int agrename(Agobj_t * obj, char *newname)
 	break;
     case AGNODE:
 	return agrelabel_node((Agnode_t *) obj, newname);
-	agrename(obj, newname);
-	break;
     case AGINEDGE:
     case AGOUTEDGE:
 	return FAILURE;
+    default:
+	UNREACHABLE();
     }
     return SUCCESS;
 }
@@ -75,20 +76,17 @@ int agrename(Agobj_t * obj, char *newname)
 
 void agmethod_init(Agraph_t * g, void *obj)
 {
-    if (g->clos->callbacks_enabled)
-	aginitcb(g, obj, g->clos->cb);
-    else
-	agrecord_callback(g, obj, CB_INITIALIZE, NILsym);
+  aginitcb(g, obj, g->clos->cb);
 }
 
 void aginitcb(Agraph_t * g, void *obj, Agcbstack_t * cbstack)
 {
     agobjfn_t fn;
 
-    if (cbstack == NIL(Agcbstack_t *))
+    if (cbstack == NULL)
 	return;
     aginitcb(g, obj, cbstack->prev);
-    fn = NIL(agobjfn_t);
+    fn = NULL;
     switch (AGTYPE(obj)) {
     case AGRAPH:
 	fn = cbstack->f->graph.ins;
@@ -99,6 +97,8 @@ void aginitcb(Agraph_t * g, void *obj, Agcbstack_t * cbstack)
     case AGEDGE:
 	fn = cbstack->f->edge.ins;
 	break;
+    default: // ignore
+	break;
     }
     if (fn)
 	fn(g, obj, cbstack->state);
@@ -106,20 +106,17 @@ void aginitcb(Agraph_t * g, void *obj, Agcbstack_t * cbstack)
 
 void agmethod_upd(Agraph_t * g, void *obj, Agsym_t * sym)
 {
-    if (g->clos->callbacks_enabled)
-	agupdcb(g, obj, sym, g->clos->cb);
-    else
-	agrecord_callback(g, obj, CB_UPDATE, sym);
+  agupdcb(g, obj, sym, g->clos->cb);
 }
 
 void agupdcb(Agraph_t * g, void *obj, Agsym_t * sym, Agcbstack_t * cbstack)
 {
     agobjupdfn_t fn;
 
-    if (cbstack == NIL(Agcbstack_t *))
+    if (cbstack == NULL)
 	return;
     agupdcb(g, obj, sym, cbstack->prev);
-    fn = NIL(agobjupdfn_t);
+    fn = NULL;
     switch (AGTYPE(obj)) {
     case AGRAPH:
 	fn = cbstack->f->graph.mod;
@@ -130,6 +127,8 @@ void agupdcb(Agraph_t * g, void *obj, Agsym_t * sym, Agcbstack_t * cbstack)
     case AGEDGE:
 	fn = cbstack->f->edge.mod;
 	break;
+    default: // ignore
+	break;
     }
     if (fn)
 	fn(g, obj, cbstack->state, sym);
@@ -137,20 +136,17 @@ void agupdcb(Agraph_t * g, void *obj, Agsym_t * sym, Agcbstack_t * cbstack)
 
 void agmethod_delete(Agraph_t * g, void *obj)
 {
-    if (g->clos->callbacks_enabled)
-	agdelcb(g, obj, g->clos->cb);
-    else
-	agrecord_callback(g, obj, CB_DELETION, NILsym);
+  agdelcb(g, obj, g->clos->cb);
 }
 
 void agdelcb(Agraph_t * g, void *obj, Agcbstack_t * cbstack)
 {
     agobjfn_t fn;
 
-    if (cbstack == NIL(Agcbstack_t *))
+    if (cbstack == NULL)
 	return;
     agdelcb(g, obj, cbstack->prev);
-    fn = NIL(agobjfn_t);
+    fn = NULL;
     switch (AGTYPE(obj)) {
     case AGRAPH:
 	fn = cbstack->f->graph.del;
@@ -161,6 +157,8 @@ void agdelcb(Agraph_t * g, void *obj, Agcbstack_t * cbstack)
     case AGEDGE:
 	fn = cbstack->f->edge.del;
 	break;
+    default: // ignore
+	break;
     }
     if (fn)
 	fn(g, obj, cbstack->state);
@@ -169,7 +167,7 @@ void agdelcb(Agraph_t * g, void *obj, Agcbstack_t * cbstack)
 Agraph_t *agroot(void* obj)
 {
     // fixes CVE-2019-11023 by moving the problem to the caller :-)
-    if (obj == 0) return NILgraph; 
+    if (obj == 0) return NULL;
     switch (AGTYPE(obj)) {
     case AGINEDGE:
     case AGOUTEDGE:
@@ -179,8 +177,8 @@ Agraph_t *agroot(void* obj)
     case AGRAPH:
 	return ((Agraph_t *) obj)->root;
     default:			/* actually can't occur if only 2 bit tags */
-	agerr(AGERR, "agroot of a bad object");
-	return NILgraph;
+	agerrorf("agroot of a bad object");
+	return NULL;
     }
 }
 
@@ -193,10 +191,10 @@ Agraph_t *agraphof(void *obj)
     case AGNODE:
 	return ((Agnode_t *) obj)->root;
     case AGRAPH:
-	return (Agraph_t *) obj;
+	return obj;
     default:			/* actually can't occur if only 2 bit tags */
-	agerr(AGERR, "agraphof a bad object");
-	return NILgraph;
+	agerrorf("agraphof a bad object");
+	return NULL;
     }
 }
 
@@ -221,7 +219,7 @@ int agpopdisc(Agraph_t * g, Agcbdisc_t * cbd)
 	if (stack_ent->f == cbd)
 	    g->clos->cb = stack_ent->prev;
 	else {
-	    while (stack_ent && (stack_ent->prev->f != cbd))
+	    while (stack_ent && stack_ent->prev->f != cbd)
 		stack_ent = stack_ent->prev;
 	    if (stack_ent && stack_ent->prev)
 		stack_ent->prev = stack_ent->prev->prev;
@@ -234,16 +232,6 @@ int agpopdisc(Agraph_t * g, Agcbdisc_t * cbd)
     return FAILURE;
 }
 
-void *aggetuserptr(Agraph_t * g, Agcbdisc_t * cbd)
-{
-    Agcbstack_t *stack_ent;
-
-    for (stack_ent = g->clos->cb; stack_ent; stack_ent = stack_ent->prev)
-	if (stack_ent->f == cbd)
-	    return stack_ent->state;
-    return NIL(void *);
-}
-
 int agcontains(Agraph_t* g, void* obj)
 {
     Agraph_t* subg;
@@ -251,15 +239,15 @@ int agcontains(Agraph_t* g, void* obj)
     if (agroot (g) != agroot (obj)) return 0;
     switch (AGTYPE(obj)) {
     case AGRAPH:
-	subg = (Agraph_t *) obj;
+	subg = obj;
 	do {
 	    if (subg == g) return 1;
 	} while ((subg = agparent (subg)));
 	return 0;
     case AGNODE: 
-        return (agidnode(g, AGID(obj), 0) != 0);
+        return agidnode(g, AGID(obj), 0) != 0;
     default:
-        return (agsubedge(g, (Agedge_t *) obj, 0) != 0);
+        return agsubedge(g, obj, 0) != 0;
     }
 }
 

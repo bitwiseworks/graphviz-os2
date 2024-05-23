@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /*
@@ -19,30 +16,26 @@
 
 #include "config.h"
 
+#include <assert.h>
 #include <string.h>
-#include "memory.h"
-#include "const.h"
-#include "macros.h"
-#include "colorprocs.h"
-#include "gvplugin_render.h"
-#include "cgraph.h"
-#include "gvcint.h"
-#include "geom.h"
-#include "geomprocs.h"
-#include "gvcproc.h"
+#include <common/const.h>
+#include <common/macros.h>
+#include <common/colorprocs.h>
+#include <gvc/gvplugin_render.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <cgraph/cgraph.h>
+#include <gvc/gvcint.h>
+#include <common/geom.h>
+#include <common/geomprocs.h>
+#include <common/render.h>
+#include <gvc/gvcproc.h>
+#include <cgraph/strcasecmp.h>
+#include <cgraph/streq.h>
+#include <limits.h>
+#include <stdlib.h>
 
-extern int emit_once(char *str);
-extern shape_desc *find_user_shape(char *name);
-extern boolean mapbool(char *s);
-
-#ifndef HAVE_STRCASECMP
-extern int strcasecmp(const char *s1, const char *s2);
-#endif
-
-/* storage for temporary hacks until client API is FP */
-static pointf *AF;
-static int sizeAF;
-/* end hack */
+extern bool mapbool(const char *s);
 
 int gvrender_select(GVJ_t * job, const char *str)
 {
@@ -50,7 +43,7 @@ int gvrender_select(GVJ_t * job, const char *str)
     gvplugin_available_t *plugin;
     gvplugin_installed_t *typeptr;
 
-    gvplugin_load(gvc, API_device, str);
+    gvplugin_load(gvc, API_device, str, NULL);
 
     /* When job is created, it is zeroed out.
      * Some flags, such as OUTPUT_NOT_REQUIRED, may already be set,
@@ -60,8 +53,8 @@ int gvrender_select(GVJ_t * job, const char *str)
     plugin = gvc->api[API_device];
     if (plugin) {
 	typeptr = plugin->typeptr;
-	job->device.engine = (gvdevice_engine_t *) (typeptr->engine);
-	job->device.features = (gvdevice_features_t *) (typeptr->features);
+	job->device.engine = typeptr->engine;
+	job->device.features = typeptr->features;
 	job->device.id = typeptr->id;
 	job->device.type = plugin->typestr;
 
@@ -74,8 +67,8 @@ int gvrender_select(GVJ_t * job, const char *str)
     plugin = gvc->api[API_render];
     if (plugin) {
 	typeptr = plugin->typeptr;
-	job->render.engine = (gvrender_engine_t *) (typeptr->engine);
-	job->render.features = (gvrender_features_t *) (typeptr->features);
+	job->render.engine = typeptr->engine;
+	job->render.features = typeptr->features;
 	job->render.type = plugin->typestr;
 
 	job->flags |= job->render.features->flags;
@@ -158,9 +151,7 @@ pointf gvrender_ptf(GVJ_t * job, pointf p)
 /* transform an array of n points */
 /*  *AF and *af must be preallocated */
 /*  *AF can be the same as *af for inplace transforms */
-pointf *gvrender_ptf_A(GVJ_t * job, pointf * af, pointf * AF, int n)
-{
-    int i;
+pointf *gvrender_ptf_A(GVJ_t *job, pointf *af, pointf *AF, size_t n) {
     double t;
     pointf translation, scale;
 
@@ -169,13 +160,13 @@ pointf *gvrender_ptf_A(GVJ_t * job, pointf * af, pointf * AF, int n)
     scale.y = job->zoom * job->devscale.y;
 
     if (job->rotation) {
-	for (i = 0; i < n; i++) {
+	for (size_t i = 0; i < n; i++) {
 	    t = -(af[i].y + translation.y) * scale.x;
 	    AF[i].y = (af[i].x + translation.x) * scale.y;
 	    AF[i].x = t;
 	}
     } else {
-	for (i = 0; i < n; i++) {
+	for (size_t i = 0; i < n; i++) {
 	    AF[i].x = (af[i].x + translation.x) * scale.x;
 	    AF[i].y = (af[i].y + translation.y) * scale.y;
 	}
@@ -185,15 +176,14 @@ pointf *gvrender_ptf_A(GVJ_t * job, pointf * af, pointf * AF, int n)
 
 static int gvrender_comparestr(const void *s1, const void *s2)
 {
-    return strcmp(*(char **) s1, *(char **) s2);
+  return strcmp(s1, *(char *const *) s2);
 }
 
 /* gvrender_resolve_color:
  * N.B. strcmp cannot be used in bsearch, as it will pass a pointer
  * to an element in the array features->knowncolors (i.e., a char**)
  * as an argument of the compare function, while the arguments to 
- * strcmp are both char*. Given this, the first argument to
- * bsearch must also be char**, so we use &tok.
+ * strcmp are both char*.
  */
 static void gvrender_resolve_color(gvrender_features_t * features,
 				   char *name, gvcolor_t * color)
@@ -206,46 +196,32 @@ static void gvrender_resolve_color(gvrender_features_t * features,
     tok = canontoken(name);
     if (!features->knowncolors
 	||
-	(bsearch
-	 (&tok, features->knowncolors, features->sz_knowncolors,
+	(bsearch(tok, features->knowncolors, features->sz_knowncolors,
 	  sizeof(char *), gvrender_comparestr)) == NULL) {
 	/* if tok was not found in known_colors */
 	rc = colorxlate(name, color, features->color_type);
 	if (rc != COLOR_OK) {
 	    if (rc == COLOR_UNKNOWN) {
-		char *missedcolor = gmalloc(strlen(name) + 16);
-		sprintf(missedcolor, "color %s", name);
-		if (emit_once(missedcolor))
-		    agerr(AGWARN, "%s is not a known color.\n", name);
-		free(missedcolor);
+		agxbuf missedcolor = {0};
+		agxbprint(&missedcolor, "color %s", name);
+		if (emit_once(agxbuse(&missedcolor)))
+		    agwarningf("%s is not a known color.\n", name);
+		agxbfree(&missedcolor);
 	    } else {
-		agerr(AGERR, "error in colxlate()\n");
+		agerrorf("error in colxlate()\n");
 	    }
 	}
     }
+    free(tok);
 }
 
-void gvrender_begin_graph(GVJ_t * job, graph_t * g)
-{
-    /* GVC_t *gvc = job->gvc; */
+void gvrender_begin_graph(GVJ_t *job) {
     gvrender_engine_t *gvre = job->render.engine;
-    /* char *s; */
 
     if (gvre) {
 	/* render specific init */
 	if (gvre->begin_graph)
 	    gvre->begin_graph(job);
-
-#if 0
-	/* background color */
-	if (((s = agget(g, "bgcolor")) != 0) && s[0]) {
-	    gvrender_resolve_color(job->render.features, s,
-				   &(gvc->bgcolor));
-	    if (gvre->resolve_color)
-		gvre->resolve_color(job, &(gvc->bgcolor));
-	}
-#endif
-
     }
 }
 
@@ -301,8 +277,7 @@ void gvrender_end_layer(GVJ_t * job)
     }
 }
 
-void gvrender_begin_cluster(GVJ_t * job, graph_t * sg)
-{
+void gvrender_begin_cluster(GVJ_t *job) {
     gvrender_engine_t *gvre = job->render.engine;
 
     if (gvre) {
@@ -311,8 +286,7 @@ void gvrender_begin_cluster(GVJ_t * job, graph_t * sg)
     }
 }
 
-void gvrender_end_cluster(GVJ_t * job, graph_t * g)
-{
+void gvrender_end_cluster(GVJ_t *job) {
     gvrender_engine_t *gvre = job->render.engine;
 
     if (gvre) {
@@ -361,8 +335,7 @@ void gvrender_end_edges(GVJ_t * job)
     }
 }
 
-void gvrender_begin_node(GVJ_t * job, node_t * n)
-{
+void gvrender_begin_node(GVJ_t *job) {
     gvrender_engine_t *gvre = job->render.engine;
 
     if (gvre) {
@@ -381,8 +354,7 @@ void gvrender_end_node(GVJ_t * job)
     }
 }
 
-void gvrender_begin_edge(GVJ_t * job, edge_t * e)
-{
+void gvrender_begin_edge(GVJ_t *job) {
     gvrender_engine_t *gvre = job->render.engine;
 
     if (gvre) {
@@ -467,7 +439,7 @@ void gvrender_set_pencolor(GVJ_t * job, char *name)
     gvcolor_t *color = &(job->obj->pencolor);
     char *cp = NULL;
 
-    if ((cp = strstr(name, ":")))	/* if its a color list, then use only first */
+    if ((cp = strchr(name, ':'))) // if it’s a color list, then use only first
 	*cp = '\0';
     if (gvre) {
 	gvrender_resolve_color(job->render.features, name, color);
@@ -484,7 +456,7 @@ void gvrender_set_fillcolor(GVJ_t * job, char *name)
     gvcolor_t *color = &(job->obj->fillcolor);
     char *cp = NULL;
 
-    if ((cp = strstr(name, ":")))	/* if its a color list, then use only first */
+    if ((cp = strchr(name, ':'))) // if it’s a color list, then use only first
 	*cp = '\0';
     if (gvre) {
 	gvrender_resolve_color(job->render.features, name, color);
@@ -540,7 +512,7 @@ void gvrender_set_style(GVJ_t * job, char **s)
 		    obj->fill = FILL_NONE;
 		else if (streq(line, "tapered"));
 		else {
-		    agerr(AGWARN,
+		    agwarningf(
 			  "gvrender_set_style: unsupported style %s - ignoring\n",
 			  line);
 		}
@@ -548,19 +520,15 @@ void gvrender_set_style(GVJ_t * job, char **s)
     }
 }
 
-void gvrender_ellipse(GVJ_t * job, pointf * pf, int n, int filled)
-{
+void gvrender_ellipse(GVJ_t *job, pointf *pf, int filled) {
     gvrender_engine_t *gvre = job->render.engine;
 
     if (gvre) {
 	if (gvre->ellipse && job->obj->pen != PEN_NONE) {
-	    pointf af[2];
-
-	    /* center */
-	    af[0].x = (pf[0].x + pf[1].x) / 2.;
-	    af[0].y = (pf[0].y + pf[1].y) / 2.;
-	    /* corner */
-	    af[1] = pf[1];
+	    pointf af[] = {
+		mid_pointf(pf[0], pf[1]), // center
+		pf[1] // corner
+	    };
 
 	    if (!(job->flags & GVRENDER_DOES_TRANSFORM))
 		gvrender_ptf_A(job, af, af, 2);
@@ -569,8 +537,7 @@ void gvrender_ellipse(GVJ_t * job, pointf * pf, int n, int filled)
     }
 }
 
-void gvrender_polygon(GVJ_t * job, pointf * af, int n, int filled)
-{
+void gvrender_polygon(GVJ_t *job, pointf *af, size_t n, int filled) {
     int noPoly = 0;
     gvcolor_t save_pencolor;
 
@@ -586,12 +553,10 @@ void gvrender_polygon(GVJ_t * job, pointf * af, int n, int filled)
 	    if (job->flags & GVRENDER_DOES_TRANSFORM)
 		gvre->polygon(job, af, n, filled);
 	    else {
-		if (sizeAF < n) {
-		    sizeAF = n + 10;
-		    AF = grealloc(AF, sizeAF * sizeof(pointf));
-		}
+		pointf *AF = gv_calloc(n, sizeof(pointf));
 		gvrender_ptf_A(job, af, AF, n);
 		gvre->polygon(job, AF, n, filled);
+		free(AF);
 	    }
 	    if (noPoly)
 		job->obj->pencolor = save_pencolor;
@@ -614,32 +579,24 @@ void gvrender_box(GVJ_t * job, boxf B, int filled)
     gvrender_polygon(job, A, 4, filled);
 }
 
-void gvrender_beziercurve(GVJ_t * job, pointf * af, int n,
-			  int arrow_at_start, int arrow_at_end,
-			  boolean filled)
-{
+void gvrender_beziercurve(GVJ_t *job, pointf *af, size_t n, int filled) {
     gvrender_engine_t *gvre = job->render.engine;
 
     if (gvre) {
 	if (gvre->beziercurve && job->obj->pen != PEN_NONE) {
 	    if (job->flags & GVRENDER_DOES_TRANSFORM)
-		gvre->beziercurve(job, af, n, arrow_at_start, arrow_at_end,
-				  filled);
+		gvre->beziercurve(job, af, n, filled);
 	    else {
-		if (sizeAF < n) {
-		    sizeAF = n + 10;
-		    AF = grealloc(AF, sizeAF * sizeof(pointf));
-		}
+		pointf *AF = gv_calloc(n, sizeof(pointf));
 		gvrender_ptf_A(job, af, AF, n);
-		gvre->beziercurve(job, AF, n, arrow_at_start, arrow_at_end,
-				  filled);
+		gvre->beziercurve(job, AF, n, filled);
+		free(AF);
 	    }
 	}
     }
 }
 
-void gvrender_polyline(GVJ_t * job, pointf * af, int n)
-{
+void gvrender_polyline(GVJ_t *job, pointf *af, size_t n) {
     gvrender_engine_t *gvre = job->render.engine;
 
     if (gvre) {
@@ -647,12 +604,10 @@ void gvrender_polyline(GVJ_t * job, pointf * af, int n)
 	    if (job->flags & GVRENDER_DOES_TRANSFORM)
 		gvre->polyline(job, af, n);
 	    else {
-		if (sizeAF < n) {
-		    sizeAF = n + 10;
-		    AF = grealloc(AF, sizeAF * sizeof(pointf));
-		}
+		pointf *AF = gv_calloc(n, sizeof(pointf));
 		gvrender_ptf_A(job, af, AF, n);
 		gvre->polyline(job, AF, n);
+		free(AF);
 	    }
 	}
     }
@@ -715,15 +670,13 @@ static imagepos_t get_imagepos(char *s)
  * Scale image to fill polygon bounding box according to "imagescale",
  * positioned at "imagepos"
  */
-void gvrender_usershape(GVJ_t * job, char *name, pointf * a, int n,
-			boolean filled, char *imagescale, char *imagepos)
-{
+void gvrender_usershape(GVJ_t *job, char *name, pointf *a, size_t n,
+                        bool filled, char *imagescale, char *imagepos) {
     gvrender_engine_t *gvre = job->render.engine;
     usershape_t *us;
     double iw, ih, pw, ph;
     double scalex, scaley;	/* scale factors */
     boxf b;			/* target box */
-    int i;
     point isz;
     imagepos_t position;
 
@@ -745,7 +698,7 @@ void gvrender_usershape(GVJ_t * job, char *name, pointf * a, int n,
 
     /* compute bb of polygon */
     b.LL = b.UR = a[0];
-    for (i = 1; i < n; i++) {
+    for (size_t i = 1; i < n; i++) {
 	EXPANDBP(b, a[i]);
     }
 
@@ -851,6 +804,5 @@ void gvrender_set_penwidth(GVJ_t * job, double penwidth)
 
     if (gvre) {
 	job->obj->penwidth = penwidth;
-	/*if (gvre->set_penwidth) gvre->set_penwidth(job, penwidth); */
     }
 }

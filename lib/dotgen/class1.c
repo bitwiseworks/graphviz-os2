@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -17,18 +14,17 @@
  * create temporary edges.
  */
 
-#include "dot.h"
+#include <dotgen/dot.h>
+#include <stdbool.h>
 
-
-int nonconstraint_edge(edge_t * e)
-{
+bool nonconstraint_edge(edge_t *e) {
     char *constr;
 
     if (E_constr && (constr = agxget(e, E_constr))) {
-	if (constr[0] && mapbool(constr) == FALSE)
-	    return TRUE;
+	if (constr[0] && !mapbool(constr))
+	    return true;
     }
-    return FALSE;
+    return false;
 }
 
 static void 
@@ -98,25 +94,6 @@ void class1(graph_t * g)
 		merge_oneway(e, rep);
 	    else
 		virtual_edge(t, h, e);
-
-#ifdef NOTDEF
-	    if ((t == agtail(e)) && (h == aghead(e))) {
-		if (rep = find_fast_edge(t, h))
-		    merge_oneway(e, rep);
-		else
-		    virtual_edge(t, h, e);
-	    } else {
-		f = agfindedge(g, t, h);
-		if (f && (ED_to_virt(f) == NULL))
-		    rep = virtual_edge(t, h, f);
-		else
-		    rep = find_fast_edge(t, h);
-		if (rep)
-		    merge_oneway(e, rep);
-		else
-		    virtual_edge(t, h, e);
-	    }
-#endif
 	}
     }
 }

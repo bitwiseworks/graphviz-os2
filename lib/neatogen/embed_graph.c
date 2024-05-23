@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -19,11 +16,11 @@
 
 ************************************************/
 
-
-#include "dijkstra.h"
-#include "bfs.h"
-#include "kkutils.h"
-#include "embed_graph.h"
+#include <cgraph/alloc.h>
+#include <neatogen/dijkstra.h>
+#include <neatogen/bfs.h>
+#include <neatogen/kkutils.h>
+#include <neatogen/embed_graph.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
@@ -33,28 +30,23 @@ void embed_graph(vtx_data * graph, int n, int dim, DistType *** Coords,
 		 int reweight_graph)
 {
 /* Compute 'dim'-dimensional high-dimensional embedding (HDE) for the 'n' nodes
-  The embedding is based on chossing 'dim' pivots, and associating each
+  The embedding is based on choosing 'dim' pivots, and associating each
   coordinate with a unique pivot, assigning it to the graph-theoretic distances 
   of all nodes from the pivots
 */
 
     int i, j;
     int node;
-    DistType *storage = N_GNEW(n * dim, DistType);
+    DistType *storage = gv_calloc(n * dim, sizeof(DistType));
     DistType **coords = *Coords;
-    DistType *dist = N_GNEW(n, DistType);	/* this vector stores  the distances of
-						   each nodes to the selected "pivots" */
+    DistType *dist = gv_calloc(n, sizeof(DistType)); // this vector stores  the
+                                                     // distances of each nodes
+                                                     // to the selected “pivots”
     float *old_weights = graph[0].ewgts;
-    Queue Q;
     DistType max_dist = 0;
 
-    if (coords != NULL) {
-	free(coords[0]);
-	free(coords);
-    }
-
     /* this matrix stores the distance between each node and each "pivot" */
-    *Coords = coords = N_GNEW(dim, DistType *);
+    *Coords = coords = gv_calloc(dim, sizeof(DistType *));
     for (i = 0; i < dim; i++)
 	coords[i] = storage + i * n;
 
@@ -65,11 +57,10 @@ void embed_graph(vtx_data * graph, int n, int dim, DistType *** Coords,
     /* select the first pivot */
     node = rand() % n;
 
-    mkQueue(&Q, n);
     if (reweight_graph) {
 	dijkstra(node, graph, n, coords[0]);
     } else {
-	bfs(node, graph, n, coords[0], &Q);
+	bfs(node, graph, n, coords[0]);
     }
 
     for (i = 0; i < n; i++) {
@@ -85,7 +76,7 @@ void embed_graph(vtx_data * graph, int n, int dim, DistType *** Coords,
 	if (reweight_graph) {
 	    dijkstra(node, graph, n, coords[i]);
 	} else {
-	    bfs(node, graph, n, coords[i], &Q);
+	    bfs(node, graph, n, coords[i]);
 	}
 	max_dist = 0;
 	for (j = 0; j < n; j++) {

@@ -1,14 +1,11 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -16,12 +13,14 @@
 
 #define DEBUG
 
+#include <cgraph/alloc.h>
+#include <math.h>
+#include <stdbool.h>
 #include <stddef.h>
-#include <maze.h>
-#include <partition.h>
-#include <memory.h>
-#include <arith.h>
-/* #include <values.h> */
+#include <ortho/maze.h>
+#include <ortho/partition.h>
+#include <ortho/trap.h>
+#include <common/arith.h>
 
 #define MARGIN 36;
 
@@ -54,14 +53,13 @@ char* pre = "%!PS-Adobe-2.0\n\
 
 char* post = "showpage\n";
 
-static void
-psdump (cell* gcells, int n_gcells, boxf BB, boxf* rects, int nrect)
-{
-    int i;
-    boxf bb;
-    box absbb;
+/// @brief dumps @ref maze::gcells and @ref maze::cells via rects to PostScript
 
-    absbb.LL.y = absbb.LL.x = 10;
+static void
+psdump(cell *gcells, int n_gcells, boxf BB, boxf *rects, size_t nrect) {
+    boxf bb;
+    box absbb = {.LL = {.y = 10, .x = 10}};
+
     absbb.UR.x = absbb.LL.x + BB.UR.x - BB.LL.x;
     absbb.UR.y = absbb.LL.y + BB.UR.y - BB.LL.y;
     fputs (pre, stderr);
@@ -71,12 +69,12 @@ psdump (cell* gcells, int n_gcells, boxf BB, boxf* rects, int nrect)
 
     fprintf (stderr, "%f %f translate\n", 10-BB.LL.x, 10-BB.LL.y);
     fputs ("0 0 1 setrgbcolor\n", stderr);
-    for (i = 0; i < n_gcells; i++) {
+    for (int i = 0; i < n_gcells; i++) {
       bb = gcells[i].bb;
       fprintf (stderr, "%f %f %f %f node\n", bb.LL.x, bb.LL.y, bb.UR.x, bb.UR.y);
     }
     fputs ("0 0 0 setrgbcolor\n", stderr);
-    for (i = 0; i < nrect; i++) {
+    for (size_t i = 0; i < nrect; i++) {
       bb = rects[i];
       fprintf (stderr, "%f %f %f %f cell\n", bb.LL.x, bb.LL.y, bb.UR.x, bb.UR.y);
     }
@@ -86,25 +84,31 @@ psdump (cell* gcells, int n_gcells, boxf BB, boxf* rects, int nrect)
 }
 #endif
 
+/// compares points by X and then by Y
+
 static int
 vcmpid(Dt_t* d, pointf* key1, pointf* key2, Dtdisc_t* disc)
 {
-  if (key1->x > key2->x) return 1;
-  else if (key1->x < key2->x) return -1;
-  else if (key1->y > key2->y) return 1;
-  else if (key1->y < key2->y) return -1;
-  else return 0;
-}   
+  (void)d;
+  (void)disc;
+  int dx = dfp_cmp(key1->x, key2->x);
+  if (dx != 0)
+    return dx;
+  return dfp_cmp(key1->y, key2->y);
+}
+
+/// compares points by Y and then by X
 
 static int
 hcmpid(Dt_t* d, pointf* key1, pointf* key2, Dtdisc_t* disc)
 {
-  if (key1->y > key2->y) return 1;
-  else if (key1->y < key2->y) return -1;
-  else if (key1->x > key2->x) return 1;
-  else if (key1->x < key2->x) return -1;
-  else return 0;
-}   
+  (void)d;
+  (void)disc;
+  int dy = dfp_cmp(key1->y, key2->y);
+  if (dy != 0)
+    return dy;
+  return dfp_cmp(key1->x, key2->x);
+}
 
 typedef struct {
     snode*    np;
@@ -119,9 +123,6 @@ static Dtdisc_t vdictDisc = {
     0,
     0,
     (Dtcompar_f)vcmpid,
-    0,
-    0,
-    0
 };
 static Dtdisc_t hdictDisc = {
     offsetof(snodeitem,p),
@@ -130,9 +131,6 @@ static Dtdisc_t hdictDisc = {
     0,
     0,
     (Dtcompar_f)hcmpid,
-    0,
-    0,
-    0
 };
 
 #define delta 1        /* weight of length */
@@ -143,15 +141,17 @@ static Dtdisc_t hdictDisc = {
 #define BIG 16384
 #define CHANSZ(w) (((w)-3)/2)
 #define IS_SMALL(v) (CHANSZ(v) < 2)
-/* #define CHANSZ(w) (w) */
 
-/* updateWt:
+/**
+ * @brief updates single @ref sedge::weight
+ *
  * At present, we use a step function. When a bound is reached, the weight
  * becomes huge. We might consider bumping up the weight more gradually, the
  * thinner the channel, the faster the weight rises.
  */
+
 static void
-updateWt (cell* cp, sedge* ep, int sz)
+updateWt (sedge* ep, int sz)
 {
     ep->cnt++;
     if (ep->cnt > sz) {
@@ -160,12 +160,15 @@ updateWt (cell* cp, sedge* ep, int sz)
     }
 }
 
-/* updateWts:
+/**
+ * @brief updates @ref sedge::weight of cell edges
+ *
  * Iterate over edges in a cell, adjust weights as necessary.
  * It always updates the bent edges belonging to a cell.
  * A horizontal/vertical edge is updated only if the edge traversed
  * is bent, or if it is the traversed edge.
  */
+
 void
 updateWts (sgraph* g, cell* cp, sedge* ep)
 {
@@ -180,21 +183,22 @@ updateWts (sgraph* g, cell* cp, sedge* ep)
     for (i = 0; i < cp->nedges; i++) {
 	e = cp->edges[i];
 	if (!BEND(g,e)) break;
-	updateWt (cp, e, minsz);
+	updateWt (e, minsz);
 }
 
     for (; i < cp->nedges; i++) {
 	e = cp->edges[i];
-	if (isBend || (e == ep)) updateWt (cp, e, (HORZ(g,e)?hsz:vsz));
+	if (isBend || e == ep) updateWt (e, HORZ(g,e)?hsz:vsz);
     }
 }
 
-/* markSmall:
+/**
  * cp corresponds to a real node. If it is small, its associated cells should
  * be marked as usable.
  */
+
 static void
-markSmall (cell* cp, sgraph* g)
+markSmall (cell* cp)
 {
     int i;
     snode* onp;
@@ -247,6 +251,8 @@ markSmall (cell* cp, sgraph* g)
     }
 }
 
+/// fills @ref cell::sides and @ref sgraph::edges
+
 static void
 createSEdges (cell* cp, sgraph* g)
 {
@@ -281,8 +287,10 @@ createSEdges (cell* cp, sgraph* g)
 	cp->edges[cp->nedges++] = createSEdge (g, cp->sides[M_LEFT], cp->sides[M_RIGHT], hwt);
 }
 
+/// finds a @ref snode by point or creates it
+
 static snode*
-findSVert (sgraph* g, Dt_t* cdt, pointf p, snodeitem* ditems, boolean isVert)
+findSVert (sgraph* g, Dt_t* cdt, pointf p, snodeitem* ditems, bool isVert)
 {
     snodeitem* n = dtmatch (cdt, &p);
 
@@ -315,25 +323,29 @@ chkSgraph (sgraph* g)
     
 }
 
-/* mkMazeGraph:
+/**
+ * @brief creates and fills @ref sgraph for @ref maze
+ *
+ * Subroutines: @ref createSGraph, @ref findSVert with @ref createSNode,
+ * @ref initSEdges and @ref chkSgraph
  */
+
 static sgraph*
 mkMazeGraph (maze* mp, boxf bb)
 {
-    int nsides, i, ncnt, maxdeg;
+    int nsides, i, maxdeg;
     int bound = 4*mp->ncells;
     sgraph* g = createSGraph (bound + 2);
     Dt_t* vdict = dtopen(&vdictDisc,Dtoset);
     Dt_t* hdict = dtopen(&hdictDisc,Dtoset);
-    snodeitem* ditems = N_NEW(bound, snodeitem);
+    snodeitem* ditems = gv_calloc(bound, sizeof(snodeitem));
     snode** sides;
 
     /* For each cell, create if necessary and attach a node in search
      * corresponding to each internal face. The node also gets
      * a pointer to the cell.
      */
-    sides = N_NEW(4*mp->ncells, snode*);
-    ncnt = 0;
+    sides = gv_calloc(4 * mp->ncells, sizeof(snode*));
     for (i = 0; i < mp->ncells; i++) {
 	cell* cp = mp->cells+i;
         snode* np;
@@ -344,24 +356,24 @@ mkMazeGraph (maze* mp, boxf bb)
 	if (cp->bb.UR.x < bb.UR.x) {
 	    pt.x = cp->bb.UR.x;
 	    pt.y = cp->bb.LL.y;
-	    np = findSVert (g, vdict, pt, ditems, TRUE);
+	    np = findSVert(g, vdict, pt, ditems, true);
 	    np->cells[0] = cp;
 	    cp->sides[M_RIGHT] = np;
 	}
 	if (cp->bb.UR.y < bb.UR.y) {
 	    pt.x = cp->bb.LL.x;
 	    pt.y = cp->bb.UR.y;
-	    np = findSVert (g, hdict, pt, ditems, FALSE);
+	    np = findSVert(g, hdict, pt, ditems, false);
 	    np->cells[0] = cp;
 	    cp->sides[M_TOP] = np;
 	}
 	if (cp->bb.LL.x > bb.LL.x) {
-	    np = findSVert (g, vdict, cp->bb.LL, ditems, TRUE);
+	    np = findSVert(g, vdict, cp->bb.LL, ditems, true);
 	    np->cells[1] = cp;
 	    cp->sides[M_LEFT] = np;
 	}
 	if (cp->bb.LL.y > bb.LL.y) {
-	    np = findSVert (g, hdict, cp->bb.LL, ditems, FALSE);
+	    np = findSVert(g, hdict, cp->bb.LL, ditems, false);
 	    np->cells[1] = cp;
 	    cp->sides[M_BOTTOM] = np;
 	}
@@ -371,7 +383,7 @@ mkMazeGraph (maze* mp, boxf bb)
      * connect it to its corresponding search nodes.
      */
     maxdeg = 0;
-    sides = N_NEW(g->nnodes, snode*);
+    sides = gv_calloc(g->nnodes, sizeof(snode*));
     nsides = 0;
     for (i = 0; i < mp->ngcells; i++) {
 	cell* cp = mp->gcells+i;
@@ -406,14 +418,13 @@ mkMazeGraph (maze* mp, boxf bb)
 	nsides += cp->nsides;
         if (cp->nsides > maxdeg) maxdeg = cp->nsides;
     }
-    /* sides = RALLOC (nsides, sides, snode*); */
 
     /* Mark cells that are small because of a small node, not because of the close
      * alignment of two rectangles.
      */
     for (i = 0; i < mp->ngcells; i++) {
 	cell* cp = mp->gcells+i;
-	markSmall (cp, g);
+	markSmall (cp);
     }
 
     /* Set index of two dummy nodes used for real nodes */
@@ -432,8 +443,6 @@ mkMazeGraph (maze* mp, boxf bb)
     }
 
     /* tidy up memory */
-    /* g->nodes = RALLOC (g->nnodes+2, g->nodes, snode); */
-    /* g->edges = RALLOC (g->nedges+2*maxdeg, g->edges, sedge); */
     dtclose (vdict);
     dtclose (hdict);
     free (ditems);
@@ -444,58 +453,51 @@ chkSgraph (g);
     return g;
 }
 
-/* mkMaze:
- */
-maze*
-mkMaze (graph_t* g, int doLbls)
-{
+/// creates @ref maze and fills @ref maze::gcells and @ref maze::cells. A subroutine of @ref orthoEdges.
+
+maze *mkMaze(graph_t *g) {
     node_t* n;
-    maze* mp = NEW(maze);
+    maze* mp = gv_alloc(sizeof(maze));
     boxf* rects;
-    int i, nrect;
     cell* cp;
     double w2, h2;
-    boxf bb, BB;
+    boxf bb;
 
     mp->ngcells = agnnodes(g);
-    cp = mp->gcells = N_NEW(mp->ngcells, cell);
+    cp = mp->gcells = gv_calloc(mp->ngcells, sizeof(cell));
 
-    BB.LL.x = BB.LL.y = MAXDOUBLE;
-    BB.UR.x = BB.UR.y = -MAXDOUBLE;
+    boxf BB = {.LL = {.x = MAXDOUBLE, .y = MAXDOUBLE},
+               .UR = {.x = -MAXDOUBLE, .y = -MAXDOUBLE}};
     for (n = agfstnode (g); n; n = agnxtnode(g,n)) {
-        w2 = ND_xsize(n)/2.0;
-	if (w2 < 1) w2 = 1;
-        h2 = ND_ysize(n)/2.0;
-	if (h2 < 1) h2 = 1;
+        w2 = fmax(1, ND_xsize(n) / 2.0);
+        h2 = fmax(1, ND_ysize(n) / 2.0);
         bb.LL.x = ND_coord(n).x - w2;
         bb.UR.x = ND_coord(n).x + w2;
         bb.LL.y = ND_coord(n).y - h2;
         bb.UR.y = ND_coord(n).y + h2;
-	BB.LL.x = MIN(BB.LL.x, bb.LL.x);
-	BB.LL.y = MIN(BB.LL.y, bb.LL.y);
-	BB.UR.x = MAX(BB.UR.x, bb.UR.x);
-	BB.UR.y = MAX(BB.UR.y, bb.UR.y);
+	BB.LL.x = fmin(BB.LL.x, bb.LL.x);
+	BB.LL.y = fmin(BB.LL.y, bb.LL.y);
+	BB.UR.x = fmax(BB.UR.x, bb.UR.x);
+	BB.UR.y = fmax(BB.UR.y, bb.UR.y);
         cp->bb = bb;
 	cp->flags |= MZ_ISNODE;
         ND_alg(n) = cp;
 	cp++;
     }
 
-    if (doLbls) {
-    }
-
     BB.LL.x -= MARGIN;
     BB.LL.y -= MARGIN;
     BB.UR.x += MARGIN;
     BB.UR.y += MARGIN;
+    size_t nrect;
     rects = partition (mp->gcells, mp->ngcells, &nrect, BB);
 
 #ifdef DEBUG
     if (odb_flags & ODB_MAZE) psdump (mp->gcells, mp->ngcells, BB, rects, nrect);
 #endif
-    mp->cells = N_NEW(nrect, cell);
+    mp->cells = gv_calloc(nrect, sizeof(cell));
     mp->ncells = nrect;
-    for (i = 0; i < nrect; i++) {
+    for (size_t i = 0; i < nrect; i++) {
 	mp->cells[i].bb = rects[i];
     }
     free (rects);

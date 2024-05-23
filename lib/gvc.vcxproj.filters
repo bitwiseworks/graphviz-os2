@@ -18,6 +18,9 @@
     <ClInclude Include="common\arith.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="common\boxes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="common\color.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -31,9 +34,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="common\entities.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="common\exparse.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="common\geom.h">
@@ -54,13 +54,7 @@
     <ClInclude Include="common\htmltable.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="common\logic.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="common\macros.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="common\memory.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="pack\pack.h">
@@ -76,6 +70,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="common\textspan.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="common\textspan_lut.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="common\types.h">
@@ -149,6 +146,9 @@
     <ClCompile Include="common\textspan.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="common\textspan_lut.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="common\geom.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -188,6 +188,9 @@
     <ClCompile Include="gvc\gvtextlayout.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="gvc\gvtool_tred.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="gvc\gvusershape.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -210,9 +213,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="common\labels.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="common\memory.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="label\node.c">
@@ -263,11 +263,11 @@
     <ClCompile Include="label\xlabels.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="common\xml.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="gvc.def">
-      <Filter>Source Files</Filter>
-    </None>
     <None Include="common\entities.html" />
   </ItemGroup>
 </Project>

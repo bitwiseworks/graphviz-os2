@@ -1,21 +1,29 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief function @ref partition, subroutine of @ref mkMaze
+ */
 
 /*************************************************************************
- * Copyright (c) 2011 AT&T Intellectual Property 
+ * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef PARTITION_H
-#define PARTITION_H
+#pragma once
 
-#include <maze.h>
+#include <ortho/maze.h>
+#include <stddef.h>
 
-extern boxf* partition (cell*, int, int*, boxf);
+/**
+ * @brief partitions space around cells (nodes) into rectangular tiles
+ * @param[in] cells rectangular borders of user's input graph's nodes
+ * @param[in] bb range of the space to partition
+ * @param[out] nrects number of tiles
+ * @returns array of the tiles
+ */
 
-#endif
+boxf *partition(cell *cells, int ncells, size_t *nrects, boxf bb);

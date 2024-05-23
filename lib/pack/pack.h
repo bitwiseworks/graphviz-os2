@@ -1,20 +1,38 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief support for connected components
+ * @ingroup public_apis
+ *
+ * **libpack** supports the use of connected components
+ * in the context of laying out graphs using other graphviz libraries.
+ * One set of functions can be used to take a single graph and break it
+ * apart into connected components.
+ * A complementary set of functions takes a collection of graphs
+ * (not necessarily components of a single graph) which have been laid
+ * out separately, and packs them together.
+ *
+ * As this library is meant to be used with `libcommon`, it relies on the
+ * @ref Agraphinfo_t, @ref Agnodeinfo_t and @ref Agedgeinfo_t used in
+ * that library.
+ *
+ * [man 3 libpack](https://graphviz.org/pdf/pack.3.pdf)
+ *
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
+#pragma once
 
-
-#ifndef _PACK_H
-#define _PACK_H 1
+#include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,45 +68,48 @@ typedef unsigned int packval_t;
 	float aspect;		/* desired aspect ratio */
 	int sz;			/* row/column size size */
 	unsigned int margin;	/* margin left around objects, in points */
-	int doSplines;		/* use splines in constructing graph shape */
+	bool doSplines; ///< use splines in constructing graph shape
 	pack_mode mode;		/* granularity and method */
-	boolean *fixed;		/* fixed[i] == true implies g[i] should not be moved */
+	bool *fixed;		/* fixed[i] == true implies g[i] should not be moved */
 	packval_t* vals;	/* for arrays, sort numbers */
 	int flags;       
     } pack_info;
 
-/*visual studio*/
-#ifdef _WIN32
-#ifndef GVC_EXPORTS
-#define extern __declspec(dllimport)
+#ifdef GVDLL
+#ifdef GVC_EXPORTS
+#define PACK_API __declspec(dllexport)
+#else
+#define PACK_API __declspec(dllimport)
 #endif
 #endif
-/*end visual studio*/
 
-    extern point *putRects(int ng, boxf* bbs, pack_info* pinfo);
-    extern int packRects(int ng, boxf* bbs, pack_info* pinfo);
+#ifndef PACK_API
+#define PACK_API /* nothing */
+#endif
 
-    extern point *putGraphs(int, Agraph_t **, Agraph_t *, pack_info *);
-    extern int packGraphs(int, Agraph_t **, Agraph_t *, pack_info *);
-    extern int packSubgraphs(int, Agraph_t **, Agraph_t *, pack_info *);
-    extern int pack_graph(int ng, Agraph_t** gs, Agraph_t* root, boolean* fixed);
+    PACK_API point *putRects(size_t ng, boxf *bbs, pack_info *pinfo);
+    PACK_API int packRects(size_t ng, boxf* bbs, pack_info* pinfo);
 
-    extern int shiftGraphs(int, Agraph_t**, point*, Agraph_t*, int);
+    PACK_API point *putGraphs(size_t, Agraph_t **, Agraph_t *, pack_info *);
+    PACK_API int packGraphs(size_t, Agraph_t **, Agraph_t *, pack_info *);
+    PACK_API int packSubgraphs(size_t, Agraph_t **, Agraph_t *, pack_info *);
+    PACK_API int pack_graph(size_t ng, Agraph_t **gs, Agraph_t *root, bool *fixed);
 
-    extern pack_mode getPackMode(Agraph_t * g, pack_mode dflt);
-    extern int getPack(Agraph_t *, int not_def, int dflt);
-    extern pack_mode getPackInfo(Agraph_t * g, pack_mode dflt, int dfltMargin, pack_info*);
-    extern pack_mode getPackModeInfo(Agraph_t * g, pack_mode dflt, pack_info*);
-    extern pack_mode parsePackModeInfo(char* p, pack_mode dflt, pack_info* pinfo);
+    PACK_API int shiftGraphs(size_t, Agraph_t**, point*, Agraph_t*, bool);
 
-    extern int isConnected(Agraph_t *);
-    extern Agraph_t **ccomps(Agraph_t *, int *, char *);
-    extern Agraph_t **cccomps(Agraph_t *, int *, char *);
-    extern Agraph_t **pccomps(Agraph_t *, int *, char *, boolean *);
-    extern int nodeInduce(Agraph_t *);
-    extern Agraph_t *mapClust(Agraph_t *);
-#undef extern
+    PACK_API pack_mode getPackMode(Agraph_t * g, pack_mode dflt);
+    PACK_API int getPack(Agraph_t *, int not_def, int dflt);
+    PACK_API pack_mode getPackInfo(Agraph_t * g, pack_mode dflt, int dfltMargin, pack_info*);
+    PACK_API pack_mode getPackModeInfo(Agraph_t * g, pack_mode dflt, pack_info*);
+    PACK_API pack_mode parsePackModeInfo(const char* p, pack_mode dflt,
+                                         pack_info* pinfo);
+
+    PACK_API int isConnected(Agraph_t *);
+    PACK_API Agraph_t **ccomps(Agraph_t *, size_t *, char *);
+    PACK_API Agraph_t **cccomps(Agraph_t *, size_t *, char *);
+    PACK_API Agraph_t **pccomps(Agraph_t *, size_t *, char *, bool *);
+    PACK_API Agraph_t *mapClust(Agraph_t *);
+#undef PACK_API
 #ifdef __cplusplus
 }
-#endif
 #endif

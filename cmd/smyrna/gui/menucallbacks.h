@@ -1,24 +1,16 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef MENUCALLBACKS_H
-#define MENUCALLBACKS_H
+#pragma once
 
 #include "gui.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 //file
     _BB void mAttributesSlot(GtkWidget * widget, gpointer user_data);
@@ -57,12 +49,6 @@ extern "C" {
     _BB void mNodePropertiesSlot(GtkWidget * widget, gpointer user_data);
     _BB void mEdgePropertiesSlot(GtkWidget * widget, gpointer user_data);
     _BB void mShowCodeSlot(GtkWidget * widget, gpointer user_data);
-    _BB void mDotSlot(GtkWidget * widget, gpointer user_data);
-    _BB void mNeatoSlot(GtkWidget * widget, gpointer user_data);
-    _BB void mTwopiSlot(GtkWidget * widget, gpointer user_data);
-    _BB void mCircoSlot(GtkWidget * widget, gpointer user_data);
-    _BB void mFdpSlot(GtkWidget * widget, gpointer user_data);
-    _BB void mSfdpSlot(GtkWidget * widget, gpointer user_data);
 
 //select
     _BB void mSelectAllSlot(GtkWidget * widget, gpointer user_data);
@@ -81,18 +67,11 @@ extern "C" {
 
 //help
     _BB void mAbout(GtkWidget * widget, gpointer user_data);
-    _BB void mHelp(GtkWidget * widget, gpointer user_data);
     _BB void mTestgvpr(GtkWidget * widget, gpointer user_data);
     void change_cursor(GdkCursorType C);
-    int show_close_nosavedlg(void);
 
 /*others from settings dialog*/
     _BB void on_gvprbuttonload_clicked(GtkWidget * widget,
 				       gpointer user_data);
     _BB void on_gvprbuttonsave_clicked(GtkWidget * widget,
 				       gpointer user_data);
-
-#ifdef __cplusplus
-}				/* end extern "C" */
-#endif
-#endif

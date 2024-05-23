@@ -1,25 +1,24 @@
- /* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
-#include "gvc.h"
-#include "const.h"
-#include "gvcjob.h"
-#include "gvcint.h"
-#include "gvcproc.h"
-#include "gvconfig.h"
-#include "gvio.h"
+#include <gvc/gvc.h>
+#include <common/const.h>
+#include <gvc/gvcjob.h>
+#include <gvc/gvcint.h>
+#include <gvc/gvcproc.h>
+#include <gvc/gvconfig.h>
+#include <gvc/gvio.h>
+#include <math.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 GVC_t *gvContext(void)
@@ -28,8 +27,8 @@ GVC_t *gvContext(void)
 
     agattr(NULL, AGNODE, "label", NODENAME_ESC);
     /* default to no builtins, demand loading enabled */
-    gvc = gvNEWcontext(NULL, TRUE);
-    gvconfig(gvc, FALSE); /* configure for available plugins */
+    gvc = gvNEWcontext(NULL, true);
+    gvconfig(gvc, false); /* configure for available plugins */
     return gvc;
 }
 
@@ -39,7 +38,7 @@ GVC_t *gvContextPlugins(const lt_symlist_t *builtins, int demand_loading)
 
     agattr(NULL, AGNODE, "label", NODENAME_ESC);
     gvc = gvNEWcontext(builtins, demand_loading);
-    gvconfig(gvc, FALSE); /* configure for available plugins */
+    gvconfig(gvc, false); /* configure for available plugins */
     return gvc;
 }
 
@@ -57,7 +56,7 @@ int gvLayout(GVC_t *gvc, graph_t *g, const char *engine)
 
     rc = gvlayout_select(gvc, engine);
     if (rc == NO_SUPPORT) {
-        agerr (AGERR, "Layout type: \"%s\" not recognized. Use one of:%s\n",
+        agerrorf("Layout type: \"%s\" not recognized. Use one of:%s\n",
                 engine, gvplugin_list(gvc, API_layout, engine));
         return -1;
     }
@@ -69,13 +68,13 @@ int gvLayout(GVC_t *gvc, graph_t *g, const char *engine)
  * doesn't yet include margins, scaling or page sizes because
  * those depend on the renderer being used. */
     if (GD_drawing(g)->landscape)
-        sprintf(buf, "%d %d %d %d",
-                ROUND(GD_bb(g).LL.y), ROUND(GD_bb(g).LL.x),
-                ROUND(GD_bb(g).UR.y), ROUND(GD_bb(g).UR.x));
+        snprintf(buf, sizeof(buf), "%.0f %.0f %.0f %.0f",
+                 round(GD_bb(g).LL.y), round(GD_bb(g).LL.x),
+                 round(GD_bb(g).UR.y), round(GD_bb(g).UR.x));
     else
-        sprintf(buf, "%d %d %d %d",
-                ROUND(GD_bb(g).LL.x), ROUND(GD_bb(g).LL.y),
-                ROUND(GD_bb(g).UR.x), ROUND(GD_bb(g).UR.y));
+        snprintf(buf, sizeof(buf), "%.0f %.0f %.0f %.0f",
+                 round(GD_bb(g).LL.x), round(GD_bb(g).LL.y),
+                 round(GD_bb(g).UR.x), round(GD_bb(g).UR.y));
     agsafeset(g, "bb", buf, "");
 
     return 0;
@@ -87,13 +86,11 @@ int gvRender(GVC_t *gvc, graph_t *g, const char *format, FILE *out)
     int rc;
     GVJ_t *job;
 
-    g = g->root;
-
     /* create a job for the required format */
-    rc = gvjobs_output_langname(gvc, format);
+    bool r = gvjobs_output_langname(gvc, format);
     job = gvc->job;
-    if (rc == NO_SUPPORT) {
-        agerr (AGERR, "Format: \"%s\" not recognized. Use one of:%s\n",
+    if (!r) {
+        agerrorf("Format: \"%s\" not recognized. Use one of:%s\n",
                 format, gvplugin_list(gvc, API_device, format));
         return -1;
     }
@@ -119,13 +116,11 @@ int gvRenderFilename(GVC_t *gvc, graph_t *g, const char *format, const char *fil
     int rc;
     GVJ_t *job;
 
-    g = g->root;
-
     /* create a job for the required format */
-    rc = gvjobs_output_langname(gvc, format);
+    bool r = gvjobs_output_langname(gvc, format);
     job = gvc->job;
-    if (rc == NO_SUPPORT) {
-	agerr(AGERR, "Format: \"%s\" not recognized. Use one of:%s\n",
+    if (!r) {
+	agerrorf("Format: \"%s\" not recognized. Use one of:%s\n",
                 format, gvplugin_list(gvc, API_device, format));
 	return -1;
     }
@@ -150,13 +145,11 @@ int gvRenderContext(GVC_t *gvc, graph_t *g, const char *format, void *context)
     int rc;
     GVJ_t *job;
 	
-    g = g->root;
-	
     /* create a job for the required format */
-    rc = gvjobs_output_langname(gvc, format);
+    bool r = gvjobs_output_langname(gvc, format);
     job = gvc->job;
-    if (rc == NO_SUPPORT) {
-		agerr(AGERR, "Format: \"%s\" not recognized. Use one of:%s\n",
+    if (!r) {
+		agerrorf("Format: \"%s\" not recognized. Use one of:%s\n",
 			  format, gvplugin_list(gvc, API_device, format));
 		return -1;
     }
@@ -168,7 +161,7 @@ int gvRenderContext(GVC_t *gvc, graph_t *g, const char *format, void *context)
     }
 	
     job->context = context;
-    job->external_context = TRUE;
+    job->external_context = true;
 	
     rc = gvRenderJobs(gvc, g);
     gvrender_end_job(job);
@@ -184,13 +177,11 @@ int gvRenderData(GVC_t *gvc, graph_t *g, const char *format, char **result, unsi
     int rc;
     GVJ_t *job;
 
-    g = g->root;
-
     /* create a job for the required format */
-    rc = gvjobs_output_langname(gvc, format);
+    bool r = gvjobs_output_langname(gvc, format);
     job = gvc->job;
-    if (rc == NO_SUPPORT) {
-	agerr(AGERR, "Format: \"%s\" not recognized. Use one of:%s\n",
+    if (!r) {
+	agerrorf("Format: \"%s\" not recognized. Use one of:%s\n",
                 format, gvplugin_list(gvc, API_device, format));
 	return -1;
     }
@@ -205,7 +196,7 @@ int gvRenderData(GVC_t *gvc, graph_t *g, const char *format, char **result, unsi
 #define OUTPUT_DATA_INITIAL_ALLOCATION 4096
 
     if(!result || !(*result = malloc(OUTPUT_DATA_INITIAL_ALLOCATION))) {
-	agerr(AGERR, "failure malloc'ing for result string");
+	agerrorf("failure malloc'ing for result string");
 	return -1;
     }
 
@@ -242,3 +233,11 @@ void gvAddLibrary(GVC_t *gvc, gvplugin_library_t *lib)
 char **gvcInfo(GVC_t* gvc) { return gvc->common.info; }
 char *gvcVersion(GVC_t* gvc) { return gvc->common.info[1]; }
 char *gvcBuildDate(GVC_t* gvc) { return gvc->common.info[2]; }
+
+/**
+ * @dir lib/gvc
+ * @brief Graphviz context library, API gvc.h
+ *
+ * [man 3 gvc](https://graphviz.org/pdf/gvc.3.pdf)
+ *
+ */

@@ -1,22 +1,21 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
+#include <math.h>
 #include "tcldot.h"
+#include <cgraph/strcasecmp.h>
+#include <cgraph/unreachable.h>
 
 size_t Tcldot_string_writer(GVJ_t *job, const char *s, size_t len)
 {
-    Tcl_AppendResult((Tcl_Interp*)(job->context), s, NULL);
+    Tcl_AppendResult(job->context, s, NULL);
     return len;
 }
 
@@ -56,10 +55,11 @@ char *obj2cmd (void *obj) {
     static char buf[32];
 
     switch (AGTYPE(obj)) {
-        case AGRAPH: sprintf(buf,"graph%p",obj); break;
-        case AGNODE: sprintf(buf,"node%p",obj); break;
+        case AGRAPH:    snprintf(buf, sizeof(buf), "graph%p", obj); break;
+        case AGNODE:    snprintf(buf, sizeof(buf), "node%p",  obj); break;
         case AGINEDGE: 
-        case AGOUTEDGE: sprintf(buf,"edge%p",obj); break;
+        case AGOUTEDGE: snprintf(buf, sizeof(buf), "edge%p",  obj); break;
+        default:        UNREACHABLE();
     }
     return buf;
 }
@@ -67,6 +67,8 @@ char *obj2cmd (void *obj) {
 
 void deleteEdge(gctx_t *gctx, Agraph_t * g, Agedge_t *e)
 {
+    (void)g;
+
     char *hndl;
 
     hndl = obj2cmd(e);
@@ -86,6 +88,8 @@ static void deleteNodeEdges(gctx_t *gctx, Agraph_t *g, Agnode_t *n)
 }
 void deleteNode(gctx_t * gctx, Agraph_t *g, Agnode_t *n)
 {
+    (void)g;
+
     char *hndl;
 
     deleteNodeEdges(gctx, gctx->g, n); /* delete all edges to/from node in root graph */
@@ -126,11 +130,10 @@ void deleteGraph(gctx_t * gctx, Agraph_t *g)
 
 static void myagxset(void *obj, Agsym_t *a, char *val)
 {
-    int len;
     char *hs;
 
-    if (a->name[0] == 'l' && val[0] == '<' && strcmp(a->name, "label") == 0) {
-        len = strlen(val);
+    if (strcmp(a->name, "label") == 0 && val[0] == '<') {
+        size_t len = strlen(val);
         if (val[len-1] == '>') {
             hs = strdup(val+1);
                 *(hs+len-2) = '\0';
@@ -253,13 +256,13 @@ void tcldot_layout(GVC_t *gvc, Agraph_t * g, char *engine)
  * doesn't yet include margins, scaling or page sizes because
  * those depend on the renderer being used. */
     if (GD_drawing(g)->landscape)
-	sprintf(buf, "%d %d %d %d",
-		ROUND(GD_bb(g).LL.y), ROUND(GD_bb(g).LL.x),
-		ROUND(GD_bb(g).UR.y), ROUND(GD_bb(g).UR.x));
+	snprintf(buf, sizeof(buf), "%.0f %.0f %.0f %.0f",
+		round(GD_bb(g).LL.y), round(GD_bb(g).LL.x),
+		round(GD_bb(g).UR.y), round(GD_bb(g).UR.x));
     else
-	sprintf(buf, "%d %d %d %d",
-		ROUND(GD_bb(g).LL.x), ROUND(GD_bb(g).LL.y),
-		ROUND(GD_bb(g).UR.x), ROUND(GD_bb(g).UR.y));
+	snprintf(buf, sizeof(buf), "%.0f %.0f %.0f %.0f",
+		round(GD_bb(g).LL.x), round(GD_bb(g).LL.y),
+		round(GD_bb(g).UR.x), round(GD_bb(g).UR.y));
     if (!(a = agattr(g, AGRAPH, "bb", NULL))) 
 	a = agattr(g, AGRAPH, "bb", "");
     agxset(g, a, buf);

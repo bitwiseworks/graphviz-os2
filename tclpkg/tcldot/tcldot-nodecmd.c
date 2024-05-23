@@ -1,16 +1,14 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
+#include <string.h>
 #include "tcldot.h"
 
 int nodecmd(ClientData clientData, Tcl_Interp * interp,
@@ -21,9 +19,8 @@ int nodecmd(ClientData clientData, Tcl_Interp * interp,
 #endif				/* TCLOBJ */
     )
 {
-    char c, **argv2;
+    char **argv2;
     int i, j, argc2;
-    size_t length;
     Agraph_t *g;
     Agnode_t *n, *head;
     Agedge_t *e;
@@ -41,11 +38,7 @@ int nodecmd(ClientData clientData, Tcl_Interp * interp,
     }
     g = agraphof(n);
 
-    c = argv[1][0];
-    length = strlen(argv[1]);
-
-
-    if (MATCHES_OPTION("addedge", argv[1], c, length)) {
+    if (strcmp("addedge", argv[1]) == 0) {
 	if ((argc < 3) || (!(argc % 2))) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0], " addedge head ?attributename attributevalue? ?...?\"", NULL);
 	    return TCL_ERROR;
@@ -66,11 +59,11 @@ int nodecmd(ClientData clientData, Tcl_Interp * interp,
 	setedgeattributes(agroot(g), e, &argv[3], argc - 3);
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("delete", argv[1], c, length)) {
+    } else if (strcmp("delete", argv[1]) == 0) {
 	deleteNode(gctx, g, n);
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("findedge", argv[1], c, length)) {
+    } else if (strcmp("findedge", argv[1]) == 0) {
 	if (argc < 3) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0], " findedge headnodename\"", NULL);
 	    return TCL_ERROR;
@@ -86,29 +79,29 @@ int nodecmd(ClientData clientData, Tcl_Interp * interp,
 	Tcl_AppendElement(interp, obj2cmd(head));
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("listattributes", argv[1], c, length)) {
+    } else if (strcmp("listattributes", argv[1]) == 0) {
 	listNodeAttrs (interp, g);
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("listedges", argv[1], c, length)) {
+    } else if (strcmp("listedges", argv[1]) == 0) {
 	for (e = agfstedge(g, n); e; e = agnxtedge(g, e, n)) {
 	    Tcl_AppendElement(interp, obj2cmd(e));
 	}
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("listinedges", argv[1], c, length)) {
+    } else if (strcmp("listinedges", argv[1]) == 0) {
 	for (e = agfstin(g, n); e; e = agnxtin(g, e)) {
 	    Tcl_AppendElement(interp, obj2cmd(e));
 	}
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("listoutedges", argv[1], c, length)) {
+    } else if (strcmp("listoutedges", argv[1]) == 0) {
 	for (e = agfstout(g, n); e; e = agnxtout(g, e)) {
 	    Tcl_AppendElement(interp, obj2cmd(e));
 	}
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("queryattributes", argv[1], c, length)) {
+    } else if (strcmp("queryattributes", argv[1]) == 0) {
 	for (i = 2; i < argc; i++) {
 	    if (Tcl_SplitList
 		(interp, argv[i], &argc2,
@@ -126,7 +119,7 @@ int nodecmd(ClientData clientData, Tcl_Interp * interp,
 	}
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("queryattributevalues", argv[1], c, length)) {
+    } else if (strcmp("queryattributevalues", argv[1]) == 0) {
 	for (i = 2; i < argc; i++) {
 	    if (Tcl_SplitList
 		(interp, argv[i], &argc2,
@@ -145,7 +138,7 @@ int nodecmd(ClientData clientData, Tcl_Interp * interp,
 	}
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("setattributes", argv[1], c, length)) {
+    } else if (strcmp("setattributes", argv[1]) == 0) {
 	g = agroot(g);
 	if (argc == 3) {
 	    if (Tcl_SplitList
@@ -172,7 +165,7 @@ int nodecmd(ClientData clientData, Tcl_Interp * interp,
 	}
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("showname", argv[1], c, length)) {
+    } else if (strcmp("showname", argv[1]) == 0) {
 	Tcl_SetResult(interp, agnameof(n), TCL_STATIC);
 	return TCL_OK;
 

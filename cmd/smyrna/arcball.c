@@ -1,6 +1,3 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************************/
 /**                                                                                 **/
 /** Copyright (c) 1999-2009 Tatewake.com                                            **/
@@ -25,13 +22,12 @@
 /**                                                                                 **/
 /*************************************************************************************/
 
-#include "glcompdefs.h"
+#include <glcomp/glcompdefs.h>
 #define ARCBALL_C
 #include "smyrnadefs.h"
 #include "arcball.h"
 
-static void setBounds(ArcBall_t * a, GLfloat NewWidth, GLfloat NewHeight)
-{
+static void setBounds(ArcBall_t *a, float NewWidth, float NewHeight) {
     assert((NewWidth > 1.0f) && (NewHeight > 1.0f));
     //Set adjustment factor for width/height
     a->AdjustWidth = 1.0f / ((NewWidth - 1.0f) * 0.5f);
@@ -42,7 +38,6 @@ static void mapToSphere(ArcBall_t * a, const Point2fT * NewPt,
 			Vector3fT * NewVec)
 {
     Point2fT TempPt;
-    GLfloat length;
 
     //Copy paramter into temp point
     TempPt = *NewPt;
@@ -52,14 +47,13 @@ static void mapToSphere(ArcBall_t * a, const Point2fT * NewPt,
     TempPt.s.Y = 1.0f - (TempPt.s.Y * a->AdjustHeight);
 
     //Compute the square of the length of the vector to the point from the center
-    length = (TempPt.s.X * TempPt.s.X) + (TempPt.s.Y * TempPt.s.Y);
+    float length = TempPt.s.X * TempPt.s.X + TempPt.s.Y * TempPt.s.Y;
 
     //If the point is mapped outside of the sphere... (length > radius squared)
     if (length > 1.0f) {
-	GLfloat norm;
 
 	//Compute a normalizing factor (radius / sqrt(length))
-	norm = 1.0f / FuncSqrt(length);
+	float norm = 1.0f / FuncSqrt(length);
 
 	//Return the "normalized" vector, a point on the sphere
 	NewVec->s.X = TempPt.s.X * norm;
@@ -91,8 +85,7 @@ static Matrix3fT ThisRot = { {1.0f, 0.0f, 0.0f,	// NEW: This Rotation
 };
 
 //Create/Destroy
-void init_arcBall(ArcBall_t * a, GLfloat NewWidth, GLfloat NewHeight)
-{
+void init_arcBall(ArcBall_t *a, float NewWidth, float NewHeight) {
     a->Transform = Transform;
     a->LastRot = LastRot;
     a->ThisRot = ThisRot;
@@ -146,26 +139,15 @@ static void drag(ArcBall_t * a, const Point2fT * NewPt, Quat4fT * NewRot)
     }
 }
 
-#ifdef UNUSED
-static void arcmouseRClick(ViewInfo * v)
-{
-    Matrix3fSetIdentity(&view->arcball->LastRot);	// Reset Rotation
-    Matrix3fSetIdentity(&view->arcball->ThisRot);	// Reset Rotation
-    Matrix4fSetRotationFromMatrix3f(&view->arcball->Transform, &view->arcball->ThisRot);	// Reset Rotation
-
-}
-#endif
-
-void arcmouseClick(ViewInfo * v)
+void arcmouseClick(void)
 {
     view->arcball->isDragging = 1;	// Prepare For Dragging
     view->arcball->LastRot = view->arcball->ThisRot;	// Set Last Static Rotation To Last Dynamic One
     click(view->arcball, &view->arcball->MousePt);
-//    printf ("arcmouse click \n");
 
 }
 
-void arcmouseDrag(ViewInfo * v)
+void arcmouseDrag(void)
 {
     Quat4fT ThisQuat;
     drag(view->arcball, &view->arcball->MousePt, &ThisQuat);
@@ -174,37 +156,3 @@ void arcmouseDrag(ViewInfo * v)
     Matrix4fSetRotationFromMatrix3f(&view->arcball->Transform, &view->arcball->ThisRot);	// Set Our Final Transform's Rotation From This One
 
 }
-
-#ifdef UNUSED
-void Update(ViewInfo * view)
-{
-
-    if (view->arcball->isRClicked)	// If Right Mouse Clicked, Reset All Rotations
-    {
-	Matrix3fSetIdentity(&view->arcball->LastRot);	// Reset Rotation
-	Matrix3fSetIdentity(&view->arcball->ThisRot);	// Reset Rotation
-	Matrix4fSetRotationFromMatrix3f(&view->arcball->Transform, &view->arcball->ThisRot);	// Reset Rotation
-    }
-
-    if (!view->arcball->isDragging)	// Not Dragging
-    {
-	if (view->arcball->isClicked)	// First Click
-	{
-	    view->arcball->isDragging = 1;	// Prepare For Dragging
-	    view->arcball->LastRot = view->arcball->ThisRot;	// Set Last Static Rotation To Last Dynamic One
-	    click(view->arcball, &view->arcball->MousePt);
-	}
-    } else {
-	if (view->arcball->isClicked)	// Still Clicked, So Still Dragging
-	{
-	    Quat4fT ThisQuat;
-
-	    drag(view->arcball, &view->arcball->MousePt, &ThisQuat);
-	    Matrix3fSetRotationFromQuat4f(&view->arcball->ThisRot, &ThisQuat);	// Convert Quaternion Into Matrix3fT
-	    Matrix3fMulMatrix3f(&view->arcball->ThisRot, &view->arcball->LastRot);	// Accumulate Last Rotation Into This One
-	    Matrix4fSetRotationFromMatrix3f(&view->arcball->Transform, &view->arcball->ThisRot);	// Set Our Final Transform's Rotation From This One
-	} else			// No Longer Dragging
-	    view->arcball->isDragging = 0;
-    }
-}
-#endif

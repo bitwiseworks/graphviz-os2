@@ -1,84 +1,68 @@
-# $Id$ $Revision$
 ## Process this file with automake to produce Makefile.in
 
 AM_CPPFLAGS = \
-        -I$(top_srcdir) \
-        -I$(top_srcdir)/libltdl \
+	-I$(top_srcdir)/lib \
+	-I$(top_builddir)/lib \
+	-I$(top_srcdir)/libltdl \
 	-I$(top_srcdir)/lib/gvc \
 	-I$(top_srcdir)/lib/pack \
-	-I$(top_srcdir)/lib/label \
 	-I$(top_srcdir)/lib/xdot \
-	-I$(top_srcdir)/lib/fdpgen \
 	-I$(top_srcdir)/lib/pathplan \
 	-I$(top_srcdir)/lib/cgraph \
-	-I$(top_srcdir)/lib/cdt $(GD_INCLUDES) $(EXPAT_INCLUDES) $(Z_INCLUDES)
+	-I$(top_srcdir)/lib/cdt $(GD_INCLUDES) $(Z_INCLUDES)
 
 if WITH_WIN32
-AM_CFLAGS = -D_BLD_gvc=1
-AM_CPPFLAGS += -O0
+AM_CFLAGS = -DGVC_EXPORTS
 endif
 
-BUILT_SOURCES = colortbl.h ps_font_equiv.h htmlparse.h
+BUILT_SOURCES = colortbl.h htmlparse.h
 
 pkginclude_HEADERS = arith.h geom.h color.h types.h textspan.h usershape.h
-noinst_HEADERS = render.h utils.h memory.h \
+noinst_HEADERS = boxes.h render.h utils.h \
 	geomprocs.h colorprocs.h colortbl.h entities.h globals.h \
-	logic.h const.h macros.h htmllex.h htmltable.h pointset.h intset.h \
-	timing.h
+	const.h macros.h htmllex.h htmltable.h pointset.h intset.h \
+	textspan_lut.h ps_font_equiv.h
 noinst_LTLIBRARIES = libcommon_C.la
 
-libcommon_C_la_SOURCES = arrows.c colxlate.c ellipse.c textspan.c \
-	args.c memory.c globals.c htmllex.c htmlparse.y htmltable.c input.c \
+libcommon_C_la_SOURCES = arrows.c colxlate.c ellipse.c textspan.c textspan_lut.c \
+	args.c globals.c htmllex.c htmlparse.y htmltable.c input.c \
 	pointset.c intset.c postproc.c routespl.c splines.c psusershape.c \
 	timing.c labels.c ns.c shapes.c utils.c geom.c taper.c \
-	output.c emit.c ps_font_equiv.txt ps_fontmap.txt fontmap.cfg \
+	output.c emit.c xml.c \
 	color_names
-
-textfont.o textfont.lo: ps_font_equiv.h
-
-# ensure font names are properly sorted for bsearch operation 
-ps_font_equiv.h: $(srcdir)/ps_font_equiv.txt $(srcdir)/fontmap.cfg $(srcdir)/ps_fontmap.txt
-	cp $(srcdir)/ps_fontmap.txt ps_font_equiv.h
-	./mksvgfonts.pl fontmap.cfg ps_font_equiv.txt | LC_ALL=C $(SORT) >>ps_font_equiv.h
+libcommon_C_la_CPPFLAGS = $(AM_CPPFLAGS) $(EXPAT_CFLAGS)
+libcommon_C_la_LIBADD = \
+	$(top_builddir)/lib/xdot/libxdot.la $(EXPAT_LIBS)
 
 colxlate.o colxlate.lo : colortbl.h
 
-colortbl.h : color_lib
-	$(AWK) -f $(top_srcdir)/awk/colortbl.awk color_lib > colortbl.h
+colortbl.h: brewer_lib svgcolor_lib $(top_srcdir)/lib/common/color_names \
+            $(top_srcdir)/lib/common/make_colortbl.py
+	python3 $(top_srcdir)/lib/common/make_colortbl.py brewer_lib svgcolor_lib \
+	  $(top_srcdir)/lib/common/color_names colortbl.h
 
-# ensure color names are properly sorted for bsearch operation 
-color_lib : brewer_lib svgcolor_lib $(top_srcdir)/lib/common/color_names
-	cat brewer_lib svgcolor_lib $(top_srcdir)/lib/common/color_names | LC_ALL=C $(SORT) > color_lib
+brewer_lib: $(top_srcdir)/lib/common/brewer_colors \
+            $(top_srcdir)/lib/common/make_brewer_lib.py
+	python3 $(top_srcdir)/lib/common/make_brewer_lib.py \
+	  "$(top_srcdir)/lib/common/brewer_colors" "$@"
 
-brewer_lib : $(top_srcdir)/lib/common/brewer_colors  $(top_srcdir)/awk/brewer.awk
-	$(AWK) -f $(top_srcdir)/awk/brewer.awk $(top_srcdir)/lib/common/brewer_colors > brewer_lib
-
-svgcolor_lib : $(top_srcdir)/lib/common/svgcolor_names  $(top_srcdir)/awk/svgcolor.awk
-	 $(AWK) -f $(top_srcdir)/awk/svgcolor.awk $(top_srcdir)/lib/common/svgcolor_names > svgcolor_lib
+svgcolor_lib: $(top_srcdir)/lib/common/svgcolor_names \
+              $(top_srcdir)/lib/common/make_svgcolor_lib.py
+	python3 $(top_srcdir)/lib/common/make_svgcolor_lib.py \
+	  "$(top_srcdir)/lib/common/svgcolor_names" "$@"
 
 htmllex.o htmllex.lo: htmllex.c htmllex.h htmlparse.h
 htmlparse.o htmlparse.lo: htmlparse.c htmlparse.h
-                                                                                
-htmlparse.c: y.tab.c
-	@SED@ "s/yy/html/g" < y.tab.c | \
-		@SED@ "s/unsigned long int/uint64_t/g" | \
-                @SED@ "s/unsigned long/uint64_t/g" > htmlparse.c
 
-htmlparse.h: y.tab.h
-	@SED@ "s/yy/html/g" < y.tab.h | \
-		@SED@ "s/unsigned long int/uint64_t/g" | \
-                @SED@ "s/unsigned long/uint64_t/g"> htmlparse.h
+htmlparse.c htmlparse.h: $(top_srcdir)/lib/common/htmlparse.y
+	$(YACC) -Wno-yacc -dv $(top_srcdir)/lib/common/htmlparse.y -o htmlparse.c
 
-y.tab.c y.tab.h: y.output
+DISTCLEANFILES = brewer_lib colortbl.h \
+	htmlparse.[ch] svgcolor_lib
 
-y.output: $(top_srcdir)/lib/common/htmlparse.y
-	@YACC@ -dv $(top_srcdir)/lib/common/htmlparse.y
-
-DISTCLEANFILES = brewer_lib color_lib colortbl.h ps_font_equiv.h \
-	y.output y.tab.[ch] htmlparse.[ch]
-
-EXTRA_DIST = README.imap chars.tcl ps_font_equiv.h \
-	strcasecmp.c strncasecmp.c htmlparse.c htmlparse.h \
-	y.tab.c y.tab.h y.output entities.html entities.tcl \
+EXTRA_DIST = README.imap \
+	htmlparse.c htmlparse.h \
+	entities.html entities.tcl \
 	brewer_colors brewer_lib svgcolor_names svgcolor_lib \
-	color_names color_lib colortbl.h mksvgfonts.pl
+	color_names colortbl.h \
+	make_brewer_lib.py make_colortbl.py make_svgcolor_lib.py

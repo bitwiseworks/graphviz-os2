@@ -1,24 +1,19 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <stdbool.h>
 #include <stdint.h>
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 
-#include "gvplugin_device.h"
+#include <gvc/gvplugin_device.h>
 
 #ifdef HAVE_GTK
 #include <gtk/gtk.h>
@@ -32,30 +27,28 @@
 #include "support.h"
 
 // note that we do not own the newly entered string - must copy
-void
+static void
 attr_value_edited_cb(GtkCellRendererText *renderer, gchar *pathStr, gchar *newText, gpointer data)
 {
+	(void)renderer;
+
 	GtkTreeModel *model = GTK_TREE_MODEL(data);
-//	GVJ_t *job = (GVJ_t *)g_object_get_data(G_OBJECT(model), "job");
-	GtkTreePath *path;
 	GtkTreeIter iter;
 	gchar *old_attr;
-	gint row;
 	
-	path = gtk_tree_path_new_from_string(pathStr);
-	row = gtk_tree_path_get_indices(path)[0];
+	GtkTreePath *treepath = gtk_tree_path_new_from_string(pathStr);
 	
 	// need to free old attr value in job and allocate new attr value - how?
 	
 	// free old attr value in model
-	gtk_tree_model_get_iter(model, &iter, path);
+	gtk_tree_model_get_iter(model, &iter, treepath);
 	gtk_tree_model_get(model, &iter, 1, &old_attr, -1);
 	g_free(old_attr);
 	
 	// set new attr value in model
 	gtk_list_store_set(GTK_LIST_STORE(model), &iter, 1, g_strdup(newText), -1);
 	
-	gtk_tree_path_free(path);
+	gtk_tree_path_free(treepath);
 }
 
 static void gtk_initialize(GVJ_t *firstjob)
@@ -63,28 +56,10 @@ static void gtk_initialize(GVJ_t *firstjob)
     Display *dpy;
     const char *display_name = NULL;
     int scr;
-//    GdkScreen *scr1;
-//    GtkWidget *window1;
-
-#if 0
-#ifdef ENABLE_NLS
-    bindtextdomain (GETTEXT_PACKAGE, PACKAGE_LOCALE_DIR);
-    bind_textdomain_codeset (GETTEXT_PACKAGE, "UTF-8");
-    textdomain (GETTEXT_PACKAGE);
-#endif
-#endif
 
     gtk_set_locale ();
-//    gtk_init (&argc, &argv);
     gtk_init (NULL, NULL);
 
-//  add_pixmap_directory (PACKAGE_DATA_DIR "/" PACKAGE "/pixmaps");
-
-//    window1 = create_window1 ();
-
-//    scr = gdk_drawable_get_screen (window1);
-//    firstjob->device_dpi.x = gdk_screen_get_width(scr) * 25.4 / gdk_screen_get_width_mm(scr);  /* pixels_per_inch */
-//    firstjob->device_dpi.y = gdk_screen_get_height(scr) * 25.4 / gdk_screen_get_height_mm(scr);
     dpy = XOpenDisplay(display_name);
     if (dpy == NULL) {
         fprintf(stderr, "Failed to open XLIB display: %s\n",
@@ -94,7 +69,7 @@ static void gtk_initialize(GVJ_t *firstjob)
     scr = DefaultScreen(dpy);
     firstjob->device_dpi.x = DisplayWidth(dpy, scr) * 25.4 / DisplayWidthMM(dpy, scr);
     firstjob->device_dpi.y = DisplayHeight(dpy, scr) * 25.4 / DisplayHeightMM(dpy, scr);
-    firstjob->device_sets_dpi = TRUE;
+    firstjob->device_sets_dpi = true;
 }
 
 static void gtk_finalize(GVJ_t *firstjob)
@@ -107,16 +82,16 @@ static void gtk_finalize(GVJ_t *firstjob)
     for (job = firstjob; job; job = job->next_active) {
 	window1 = create_window1 ();
 
-	g_object_set_data(G_OBJECT(window1), "job", (gpointer) job);
+	g_object_set_data(G_OBJECT(window1), "job", job);
 
 	drawingarea1 = lookup_widget (window1, "drawingarea1");      /* main graph view */
-	g_object_set_data(G_OBJECT(drawingarea1), "job", (gpointer) job);
+	g_object_set_data(G_OBJECT(drawingarea1), "job", job);
 
 	drawingarea2 = lookup_widget (window1, "drawingarea2");      /* keyholeview */
-	g_object_set_data(G_OBJECT(drawingarea2), "job", (gpointer) job);
+	g_object_set_data(G_OBJECT(drawingarea2), "job", job);
 
 	treeview2 = lookup_widget (window1, "treeview2"); /* attribute/value view */
-	g_object_set_data(G_OBJECT(treeview2), "job", (gpointer) job);
+	g_object_set_data(G_OBJECT(treeview2), "job", job);
 	
 	attr_store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
 	

@@ -1,20 +1,17 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include "matrix_ops.h"
-#include "conjgrad.h"
-/* #include <math.h> */
+#include <cgraph/alloc.h>
+#include <neatogen/matrix_ops.h>
+#include <neatogen/conjgrad.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
 
@@ -31,13 +28,13 @@ int conjugate_gradient
     int i, rv = 0;
 
     double alpha, beta, r_r, r_r_new, p_Ap;
-    double *r = N_GNEW(n, double);
-    double *p = N_GNEW(n, double);
-    double *Ap = N_GNEW(n, double);
-    double *Ax = N_GNEW(n, double);
-    double *alphap = N_GNEW(n, double);
+    double *r = gv_calloc(n, sizeof(double));
+    double *p = gv_calloc(n, sizeof(double));
+    double *Ap = gv_calloc(n, sizeof(double));
+    double *Ax = gv_calloc(n, sizeof(double));
+    double *alphap = gv_calloc(n, sizeof(double));
 
-    double *orth_b = N_GNEW(n, double);
+    double *orth_b = gv_calloc(n, sizeof(double));
     copy_vector(n, b, orth_b);
     orthog1(n, orth_b);
     orthog1(n, x);
@@ -62,13 +59,9 @@ int conjugate_gradient
 	    vectors_scalar_mult(n, Ap, alpha, Ap);
 	    vectors_subtraction(n, r, Ap, r);	/* fast computation of r, the residual */
 
-	    /* Alternaive accurate, but slow, computation of the residual - r */
-	    /* right_mult_with_vector(A, n, x, Ax); */
-	    /* vectors_subtraction(n,b,Ax,r); */
-
 	    r_r_new = vectors_inner_product(n, r, r);
 	    if (r_r == 0) {
-		agerr (AGERR, "conjugate_gradient: unexpected length 0 vector\n");
+		agerrorf("conjugate_gradient: unexpected length 0 vector\n");
 		rv = 1;
 		goto cleanup0;
 	    }
@@ -97,20 +90,20 @@ cleanup0 :
 
 int conjugate_gradient_f
     (float **A, double *x, double *b, int n, double tol,
-     int max_iterations, boolean ortho1) {
+     int max_iterations, bool ortho1) {
     /* Solves Ax=b using Conjugate-Gradients method */
     /* 'x' and 'b' are orthogonalized against 1 if 'ortho1=true' */
 
     int i, rv = 0;
 
     double alpha, beta, r_r, r_r_new, p_Ap;
-    double *r = N_GNEW(n, double);
-    double *p = N_GNEW(n, double);
-    double *Ap = N_GNEW(n, double);
-    double *Ax = N_GNEW(n, double);
-    double *alphap = N_GNEW(n, double);
+    double *r = gv_calloc(n, sizeof(double));
+    double *p = gv_calloc(n, sizeof(double));
+    double *Ap = gv_calloc(n, sizeof(double));
+    double *Ax = gv_calloc(n, sizeof(double));
+    double *alphap = gv_calloc(n, sizeof(double));
 
-    double *orth_b = N_GNEW(n, double);
+    double *orth_b = gv_calloc(n, sizeof(double));
     copy_vector(n, b, orth_b);
     if (ortho1) {
 	orthog1(n, orth_b);
@@ -144,7 +137,7 @@ int conjugate_gradient_f
 	    r_r_new = vectors_inner_product(n, r, r);
 	    if (r_r == 0) {
 		rv = 1;
-		agerr (AGERR, "conjugate_gradient: unexpected length 0 vector\n");
+		agerrorf("conjugate_gradient: unexpected length 0 vector\n");
 		goto cleanup1;
 	    }
 	    beta = r_r_new / r_r;
@@ -175,10 +168,10 @@ conjugate_gradient_mkernel(float *A, float *x, float *b, int n,
     int i, rv = 0;
 
     double alpha, beta, r_r, r_r_new, p_Ap;
-    float *r = N_NEW(n, float);
-    float *p = N_NEW(n, float);
-    float *Ap = N_NEW(n, float);
-    float *Ax = N_NEW(n, float);
+    float *r = gv_calloc(n, sizeof(float));
+    float *p = gv_calloc(n, sizeof(float));
+    float *Ap = gv_calloc(n, sizeof(float));
+    float *Ax = gv_calloc(n, sizeof(float));
 
     /* centering x and b  */
     orthog1f(n, x);
@@ -189,7 +182,7 @@ conjugate_gradient_mkernel(float *A, float *x, float *b, int n,
     orthog1f(n, Ax);
 
 
-    vectors_substractionf(n, b, Ax, r);
+    vectors_subtractionf(n, b, Ax, r);
     copy_vectorf(n, r, p);
 
     r_r = vectors_inner_productf(n, r, r);
@@ -220,15 +213,15 @@ conjugate_gradient_mkernel(float *A, float *x, float *b, int n,
 
 	    if (r_r == 0) {
 		rv = 1;
-		agerr (AGERR, "conjugate_gradient: unexpected length 0 vector\n");
+		agerrorf("conjugate_gradient: unexpected length 0 vector\n");
 		goto cleanup2;
 	    }
 	    beta = r_r_new / r_r;
 	    r_r = r_r_new;
 
-	    vectors_scalar_multf(n, p, (float) beta, p);
-
-	    vectors_additionf(n, r, p, p);
+		for (size_t j = 0; j < (size_t)n; ++j) {
+			p[j] = (float)beta * p[j] + r[j];
+		}
 	}
     }
 

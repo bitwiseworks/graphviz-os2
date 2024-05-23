@@ -1,30 +1,29 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
+#include <cgraph/alloc.h>
+#include <neatogen/overlap.h>
 
 #if ((defined(HAVE_GTS) || defined(HAVE_TRIANGLE)) && defined(SFDP))
 
-#include "SparseMatrix.h"
-#include "overlap.h"
-#include "call_tri.h"
-#include "red_black_tree.h"
-#include "types.h"
-#include "memory.h"
-#include "globals.h"
+#include <sparse/SparseMatrix.h>
+#include <neatogen/call_tri.h>
+#include <rbtree/red_black_tree.h>
+#include <common/types.h>
+#include <math.h>
+#include <common/globals.h>
+#include <stdbool.h>
 #include <time.h>
 
-static void ideal_distance_avoid_overlap(int dim, SparseMatrix A, real *x, real *width, real *ideal_distance, real *tmax, real *tmin){
+static void ideal_distance_avoid_overlap(int dim, SparseMatrix A, double *x, double *width, double *ideal_distance, double *tmax, double *tmin){
   /*  if (x1>x2 && y1 > y2) we want either x1 + t (x1-x2) - x2 > (width1+width2), or y1 + t (y1-y2) - y2 > (height1+height2),
       hence t = MAX(expandmin, MIN(expandmax, (width1+width2)/(x1-x2) - 1, (height1+height2)/(y1-y2) - 1)), and
       new ideal distance = (1+t) old_distance. t can be negative sometimes.
@@ -32,23 +31,23 @@ static void ideal_distance_avoid_overlap(int dim, SparseMatrix A, real *x, real 
   */
   int i, j, jj;
   int *ia = A->ia, *ja = A->ja;
-  real dist, dx, dy, wx, wy, t;
-  real expandmax = 1.5, expandmin = 1;
+  double dist, dx, dy, wx, wy, t;
+  double expandmax = 1.5, expandmin = 1;
 
   *tmax = 0;
   *tmin = 1.e10;
-  assert(SparseMatrix_is_symmetric(A, FALSE));
+  assert(SparseMatrix_is_symmetric(A, false));
   for (i = 0; i < A->m; i++){
     for (j = ia[i]; j < ia[i+1]; j++){
       jj = ja[j];
       if (jj == i) continue;
       dist = distance(x, dim, i, jj);
-      dx = ABS(x[i*dim] - x[jj*dim]);
-      dy = ABS(x[i*dim+1] - x[jj*dim+1]);
+      dx = fabs(x[i*dim] - x[jj*dim]);
+      dy = fabs(x[i*dim+1] - x[jj*dim+1]);
       wx = width[i*dim]+width[jj*dim];
       wy = width[i*dim+1]+width[jj*dim+1];
       if (dx < MACHINEACC*wx && dy < MACHINEACC*wy){
-	ideal_distance[j] = sqrt(wx*wx+wy*wy);
+	ideal_distance[j] = hypot(wx, wy);
 	*tmax = 2;
       } else {
 	if (dx < MACHINEACC*wx){
@@ -72,16 +71,13 @@ static void ideal_distance_avoid_overlap(int dim, SparseMatrix A, real *x, real 
 
     }
   }
-  return;
 }
-
-#define collide(i,j) ((ABS(x[(i)*dim] - x[(j)*dim]) < width[(i)*dim]+width[(j)*dim]) || (ABS(x[(i)*dim+1] - x[(j)*dim+1]) < width[(i)*dim+1]+width[(j)*dim+1]))
 
 enum {INTV_OPEN, INTV_CLOSE};
 
 struct scan_point_struct{
   int node;
-  real x;
+  double x;
   int status;
 };
 
@@ -89,8 +85,8 @@ typedef struct scan_point_struct scan_point;
 
 
 static int comp_scan_points(const void *p, const void *q){
-  scan_point *pp = (scan_point *) p;
-  scan_point *qq = (scan_point *) q;
+  const scan_point *pp = p;
+  const scan_point *qq = q;
   if (pp->x > qq->x){
     return 1;
   } else if (pp->x < qq->x){
@@ -106,46 +102,31 @@ static int comp_scan_points(const void *p, const void *q){
   return 0;
 }
 
-
 static void NodeDest(void* a) {
+  (void)a;
   /*  free((int*)a);*/
 }
-
-
 
 static int NodeComp(const void* a,const void* b) {
   return comp_scan_points(a,b);
 
 }
 
-static void NodePrint(const void* a) {
-  scan_point *aa;
-
-  aa = (scan_point *) a;
-  fprintf(stderr, "node {%d, %f, %d}\n", aa->node, aa->x, aa->status);
-
-}
-
-static void InfoPrint(void* a) {
-  ;
-}
-
 static void InfoDest(void *a){
-  ;
+  (void)a;
 }
 
-static SparseMatrix get_overlap_graph(int dim, int n, real *x, real *width, int check_overlap_only){
+static SparseMatrix get_overlap_graph(int dim, int n, double *x, double *width, int check_overlap_only){
   /* if check_overlap_only = TRUE, we only check whether there is one overlap */
-  scan_point *scanpointsx, *scanpointsy;
   int i, k, neighbor;
   SparseMatrix A = NULL, B = NULL;
   rb_red_blk_node *newNode, *newNode0, *newNode2 = NULL;
   rb_red_blk_tree* treey;
-  real one = 1;
+  double one = 1;
 
   A = SparseMatrix_new(n, n, 1, MATRIX_TYPE_REAL, FORMAT_COORD);
 
-  scanpointsx = N_GNEW(2*n,scan_point);
+  scan_point *scanpointsx = gv_calloc(2 * n, sizeof(scan_point));
   for (i = 0; i < n; i++){
     scanpointsx[2*i].node = i;
     scanpointsx[2*i].x = x[i*dim] - width[i*dim];
@@ -156,7 +137,7 @@ static SparseMatrix get_overlap_graph(int dim, int n, real *x, real *width, int 
   }
   qsort(scanpointsx, 2*n, sizeof(scan_point), comp_scan_points);
 
-  scanpointsy = N_GNEW(2*n,scan_point);
+  scan_point *scanpointsy = gv_calloc(2 * n, sizeof(scan_point));
   for (i = 0; i < n; i++){
     scanpointsy[i].node = i;
     scanpointsy[i].x = x[i*dim+1] - width[i*dim+1];
@@ -166,8 +147,7 @@ static SparseMatrix get_overlap_graph(int dim, int n, real *x, real *width, int 
     scanpointsy[i+n].status = INTV_CLOSE;
   }
 
-
-  treey = RBTreeCreate(NodeComp,NodeDest,InfoDest,NodePrint,InfoPrint);
+  treey = RBTreeCreate(NodeComp, NodeDest, InfoDest);
 
   for (i = 0; i < 2*n; i++){
 #ifdef DEBUG_RBTREE
@@ -192,7 +172,7 @@ static SparseMatrix get_overlap_graph(int dim, int n, real *x, real *width, int 
 
       RBTreeInsert(treey, &(scanpointsy[k+n]), NULL);
     } else {
-      real bsta, bbsta, bsto, bbsto; int ii; 
+      double bsta, bbsta, bsto, bbsto; int ii; 
 
       assert(scanpointsx[i].node >= n);
 
@@ -214,8 +194,8 @@ static SparseMatrix get_overlap_graph(int dim, int n, real *x, real *width, int 
 	fprintf(stderr," predecessor is node %d y = %f\n", ((scan_point *)newNode->key)->node, ((scan_point *)newNode->key)->x);
 #endif
 	if (neighbor != k){
-	  if (ABS(0.5*(bsta+bsto) - 0.5*(bbsta+bbsto)) < 0.5*(bsto-bsta) + 0.5*(bbsto-bbsta)){/* if the distance of the centers of the interval is less than sum of width, we have overlap */
-	    A = SparseMatrix_coordinate_form_add_entries(A, 1, &neighbor, &k, &one);
+	  if (fabs(0.5*(bsta+bsto) - 0.5*(bbsta+bbsto)) < 0.5*(bsto-bsta) + 0.5*(bbsto-bbsta)){/* if the distance of the centers of the interval is less than sum of width, we have overlap */
+	    A = SparseMatrix_coordinate_form_add_entry(A, neighbor, k, &one);
 #ifdef DEBUG_RBTREE
 	    fprintf(stderr,"======================================  %d %d\n",k,neighbor);
 #endif
@@ -249,13 +229,13 @@ static SparseMatrix get_overlap_graph(int dim, int n, real *x, real *width, int 
   }
 
 check_overlap_RETURN:
-   FREE(scanpointsx);
-  FREE(scanpointsy);
+   free(scanpointsx);
+  free(scanpointsy);
   RBTreeDestroy(treey);
 
   B = SparseMatrix_from_coordinate_format(A);
   SparseMatrix_delete(A);
-  A = SparseMatrix_symmetrize(B, FALSE);
+  A = SparseMatrix_symmetrize(B, false);
   SparseMatrix_delete(B);
   if (Verbose) fprintf(stderr, "found %d clashes\n", A->nz);
   return A;
@@ -267,20 +247,18 @@ check_overlap_RETURN:
 
 
 static void relative_position_constraints_delete(void *d){
-  relative_position_constraints data;
   if (!d) return;
-  data = (relative_position_constraints) d;
-  if (data->irn) FREE(data->irn);
-  if (data->jcn) FREE(data->jcn);
-  if (data->val) FREE(data->val);
+  relative_position_constraints data = d;
+  free(data->irn);
+  free(data->jcn);
+  free(data->val);
   /* other stuff inside relative_position_constraints is assed back to the user hence no need to deallocator*/
-  FREE(d);
+  free(d);
 }
 
 static relative_position_constraints relative_position_constraints_new(SparseMatrix A_constr, int edge_labeling_scheme, int n_constr_nodes, int *constr_nodes){
-    relative_position_constraints data;
     assert(A_constr);
-    data = MALLOC(sizeof(struct relative_position_constraints_struct));
+    relative_position_constraints data = gv_alloc(sizeof(struct relative_position_constraints_struct));
     data->constr_penalty = 1;
     data->edge_labeling_scheme = edge_labeling_scheme;
     data->n_constr_nodes = n_constr_nodes;
@@ -292,14 +270,16 @@ static relative_position_constraints relative_position_constraints_new(SparseMat
 
     return data;
 }
-static void scale_coord(int dim, int m, real *x, real scale){
+static void scale_coord(int dim, int m, double *x, double scale){
   int i;
   for (i = 0; i < dim*m; i++) {
     x[i] *= scale;
   }
 }
 
-real overlap_scaling(int dim, int m, real *x, real *width, real scale_sta, real scale_sto, real epsilon, int maxiter){
+static double overlap_scaling(int dim, int m, double *x, double *width,
+                              double scale_sta, double scale_sto,
+                              double epsilon, int maxiter) {
   /* do a bisection between scale_sta and scale_sto, up to maxiter iterations or till interval <= epsilon, to find the best scaling to avoid overlap
      m: number of points
      x: the coordinates
@@ -310,11 +290,11 @@ real overlap_scaling(int dim, int m, real *x, real *width, real scale_sta, real 
      - for shrinking down a layout to reduce white space, we will assume scale_sta and scale_sto are both given and positive, and scale_sta is the current guess.
      - for scaling up, we assume scale_sta, scale_sto <= 0
    */
-  real scale = -1, scale_best = -1;
+  double scale = -1, scale_best = -1;
   SparseMatrix C = NULL;
   int check_overlap_only = 1;
   int overlap = 0;
-  real two = 2;
+  double two = 2;
   int iter = 0;
 
   assert(epsilon > 0);
@@ -374,18 +354,17 @@ real overlap_scaling(int dim, int m, real *x, real *width, real scale_sta, real 
 }
  
 OverlapSmoother OverlapSmoother_new(SparseMatrix A, int m, 
-				    int dim, real lambda0, real *x, real *width, int include_original_graph, int neighborhood_only, 
-				    real *max_overlap, real *min_overlap,
+				    int dim, double *x, double *width, bool neighborhood_only,
+				    double *max_overlap, double *min_overlap,
 				    int edge_labeling_scheme, int n_constr_nodes, int *constr_nodes, SparseMatrix A_constr, int shrink
 				    ){
-  OverlapSmoother sm;
   int i, j, k, *iw, *jw, jdiag;
   SparseMatrix B;
-  real *lambda, *d, *w, diag_d, diag_w, dist;
+  double *d, *w, diag_d, diag_w, dist;
 
-  assert((!A) || SparseMatrix_is_symmetric(A, FALSE));
+  assert((!A) || SparseMatrix_is_symmetric(A, false));
 
-  sm = GNEW(struct OverlapSmoother_struct);
+  OverlapSmoother sm = gv_alloc(sizeof(struct OverlapSmoother_struct));
   sm->scheme = SM_SCHEME_NORMAL;
   if (constr_nodes && n_constr_nodes > 0 && edge_labeling_scheme != ELSCHEME_NONE){
     sm->scheme = SM_SCHEME_NORMAL_ELABEL;
@@ -398,10 +377,9 @@ OverlapSmoother OverlapSmoother_new(SparseMatrix A, int m,
   sm->tol_cg = 0.01;
   sm->maxit_cg = sqrt((double) A->m);
 
-  lambda = sm->lambda = N_GNEW(m,real);
-  for (i = 0; i < m; i++) sm->lambda[i] = lambda0;
+  sm->lambda = gv_calloc(m, sizeof(double));
   
-  B= call_tri(m, dim, x);
+  B= call_tri(m, x);
 
   if (!neighborhood_only){
     SparseMatrix C, D;
@@ -411,12 +389,7 @@ OverlapSmoother OverlapSmoother_new(SparseMatrix A, int m,
     SparseMatrix_delete(C);
     B = D;
   }
-  if (include_original_graph){
-    sm->Lw = SparseMatrix_add(A, B);
-    SparseMatrix_delete(B);
-  } else {
-    sm->Lw = B;
-  }
+  sm->Lw = B;
   sm->Lwd = SparseMatrix_copy(sm->Lw);
 
 #ifdef DEBUG
@@ -439,11 +412,11 @@ OverlapSmoother OverlapSmoother_new(SparseMatrix A, int m,
 
   assert((sm->Lwd)->type == MATRIX_TYPE_REAL);
   
-  ideal_distance_avoid_overlap(dim, sm->Lwd, x, width, (real*) (sm->Lwd->a), max_overlap, min_overlap);
+  ideal_distance_avoid_overlap(dim, sm->Lwd, x, width, sm->Lwd->a, max_overlap, min_overlap);
 
   /* no overlap at all! */
   if (*max_overlap < 1 && shrink){
-    real scale_sta = MIN(1, *max_overlap*1.0001), scale_sto = 1;
+    double scale_sta = MIN(1, *max_overlap*1.0001), scale_sto = 1;
 
     if (Verbose) fprintf(stderr," no overlap (overlap = %f), rescale to shrink\n", *max_overlap - 1);
 
@@ -454,7 +427,8 @@ OverlapSmoother OverlapSmoother_new(SparseMatrix A, int m,
   }
 
   iw = sm->Lw->ia; jw = sm->Lw->ja;
-  w = (real*) sm->Lw->a; d = (real*) sm->Lwd->a;
+  w = sm->Lw->a;
+  d = sm->Lwd->a;
 
   for (i = 0; i < m; i++){
     diag_d = diag_w = 0;
@@ -467,9 +441,7 @@ OverlapSmoother OverlapSmoother_new(SparseMatrix A, int m,
       }
       if (d[j] > 0){/* those edges that needs expansion */
 	w[j] = -100/d[j]/d[j];
-	/*w[j] = 100/d[j]/d[j];*/
       } else {/* those that needs shrinking is set to negative in ideal_distance_avoid_overlap */
-	/*w[j] = 1/d[j]/d[j];*/
 	w[j] = -1/d[j]/d[j];
 	d[j] = -d[j];
       }
@@ -480,10 +452,8 @@ OverlapSmoother OverlapSmoother_new(SparseMatrix A, int m,
 
     }
 
-    lambda[i] *= (-diag_w);/* alternatively don't do that then we have a constant penalty term scaled by lambda0 */
-
     assert(jdiag >= 0);
-    w[jdiag] = -diag_w + lambda[i];
+    w[jdiag] = -diag_w;
     d[jdiag] = -diag_d;
   }
  RETURN:
@@ -496,10 +466,10 @@ void OverlapSmoother_delete(OverlapSmoother sm){
 
 }
 
-real OverlapSmoother_smooth(OverlapSmoother sm, int dim, real *x){
+double OverlapSmoother_smooth(OverlapSmoother sm, int dim, double *x){
   int maxit_sm = 1;/* only using 1 iteration of stress majorization 
 		      is found to give better results and save time! */
-  real res = StressMajorizationSmoother_smooth(sm, dim, x, maxit_sm, 0.001);
+  double res = StressMajorizationSmoother_smooth(sm, dim, x, maxit_sm);
 #ifdef DEBUG
   {FILE *fp;
 #ifdef __OS2__
@@ -515,8 +485,8 @@ real OverlapSmoother_smooth(OverlapSmoother sm, int dim, real *x){
 
 /*================================= end OverlapSmoother =============*/
 
-static void scale_to_edge_length(int dim, SparseMatrix A, real *x, real avg_label_size){
-  real dist;
+static void scale_to_edge_length(int dim, SparseMatrix A, double *x, double avg_label_size){
+  double dist;
   int i;
 
   if (!A) return;
@@ -529,12 +499,11 @@ static void scale_to_edge_length(int dim, SparseMatrix A, real *x, real avg_labe
   for (i = 0; i < dim*A->m; i++) x[i] *= dist;
 }
 
-static void print_bounding_box(int n, int dim, real *x){
-  real *xmin, *xmax;
+static void print_bounding_box(int n, int dim, double *x){
   int i, k;
 
-  xmin = N_GNEW(dim,real);
-  xmax = N_GNEW(dim,real);
+  double *xmin = gv_calloc(dim, sizeof(double));
+  double *xmax = gv_calloc(dim, sizeof(double));
 
   for (i = 0; i < dim; i++) xmin[i]=xmax[i] = x[i];
 
@@ -548,17 +517,19 @@ static void print_bounding_box(int n, int dim, real *x){
   for (i = 0; i < dim; i++) fprintf(stderr,"{%f,%f}, ",xmin[i], xmax[i]);
   fprintf(stderr,"\n");
 
-  FREE(xmin);
-  FREE(xmax);
+  free(xmin);
+  free(xmax);
 }
 
-static int check_convergence(real max_overlap, real res, int has_penalty_terms, real epsilon){
-  if (!has_penalty_terms) return (max_overlap <= 1);
+static int check_convergence(double max_overlap, double res,
+                             bool has_penalty_terms, double epsilon) {
+  if (!has_penalty_terms)
+    return (max_overlap <= 1);
   return res < epsilon;
 }
 
-void remove_overlap(int dim, SparseMatrix A, real *x, real *label_sizes, int ntry, real initial_scaling, 
-		    int edge_labeling_scheme, int n_constr_nodes, int *constr_nodes, SparseMatrix A_constr, int do_shrinking, int *flag){
+void remove_overlap(int dim, SparseMatrix A, double *x, double *label_sizes, int ntry, double initial_scaling, 
+		    int edge_labeling_scheme, int n_constr_nodes, int *constr_nodes, SparseMatrix A_constr, bool do_shrinking) {
   /* 
      edge_labeling_scheme: if ELSCHEME_NONE, n_constr_nodes/constr_nodes/A_constr are not used
 
@@ -571,15 +542,13 @@ void remove_overlap(int dim, SparseMatrix A, real *x, real *label_sizes, int ntr
 
   */
 
-  real lambda = 0.00;
   OverlapSmoother sm;
-  int include_original_graph = 0, i;
-  real LARGE = 100000;
-  real avg_label_size, res = LARGE;
-  real max_overlap = 0, min_overlap = 999;
-  int neighborhood_only = TRUE;
-  int has_penalty_terms = FALSE;
-  real epsilon = 0.005;
+  int i;
+  double LARGE = 100000;
+  double avg_label_size, res = LARGE;
+  double max_overlap = 0, min_overlap = 999;
+  bool neighborhood_only = true;
+  double epsilon = 0.005;
   int shrink = 0;
 
 #ifdef TIME
@@ -595,7 +564,6 @@ void remove_overlap(int dim, SparseMatrix A, real *x, real *label_sizes, int ntr
   if (initial_scaling < 0) {
     avg_label_size = 0;
     for (i = 0; i < A->m; i++) avg_label_size += label_sizes[i*dim]+label_sizes[i*dim+1];
-    /*  for (i = 0; i < A->m; i++) avg_label_size += 2*MAX(label_sizes[i*dim],label_sizes[i*dim+1]);*/
     avg_label_size /= A->m;
     scale_to_edge_length(dim, A, x, -initial_scaling*avg_label_size);
   } else if (initial_scaling > 0){
@@ -603,8 +571,6 @@ void remove_overlap(int dim, SparseMatrix A, real *x, real *label_sizes, int ntr
   }
 
   if (!ntry) return;
-
-  *flag = 0;
 
 #ifdef DEBUG
   _statistics[0] = _statistics[1] = 0.;
@@ -617,54 +583,46 @@ void remove_overlap(int dim, SparseMatrix A, real *x, real *label_sizes, int ntr
   }
 #endif
 
-#ifdef ANIMATE
-  {FILE*fp;
-#ifdef __OS2__
-    fp = fopen("/@unixroot/var/tmp/m","wa");
-#else
-    fp = fopen("/tmp/m","wa");
-#endif
-    fprintf(fp,"{");
-#endif
-
-  has_penalty_terms = (edge_labeling_scheme != ELSCHEME_NONE && n_constr_nodes > 0);
+  bool has_penalty_terms =
+      edge_labeling_scheme != ELSCHEME_NONE && n_constr_nodes > 0;
   for (i = 0; i < ntry; i++){
     if (Verbose) print_bounding_box(A->m, dim, x);
-    sm = OverlapSmoother_new(A, A->m, dim, lambda, x, label_sizes, include_original_graph, neighborhood_only,
+    sm = OverlapSmoother_new(A, A->m, dim, x, label_sizes, neighborhood_only,
 			     &max_overlap, &min_overlap, edge_labeling_scheme, n_constr_nodes, constr_nodes, A_constr, shrink); 
-    if (Verbose) fprintf(stderr, "overlap removal neighbors only?= %d iter -- %d, overlap factor = %g underlap factor = %g\n", neighborhood_only, i, max_overlap - 1, min_overlap);
-    if (check_convergence(max_overlap, res, has_penalty_terms, epsilon)){
+    if (Verbose) {
+      fprintf(stderr,
+              "overlap removal neighbors only?= %d iter -- %d, overlap factor = %g underlap factor = %g\n",
+              (int)neighborhood_only, i, max_overlap - 1, min_overlap);
+    }
+    if (check_convergence(max_overlap, res, has_penalty_terms, epsilon)) {
     
       OverlapSmoother_delete(sm);
-      if (neighborhood_only == FALSE){
+      if (!neighborhood_only){
 	break;
       } else {
 	res = LARGE;
-	neighborhood_only = FALSE; if (do_shrinking) shrink = 1;
+	neighborhood_only = false;
+        if (do_shrinking) {
+          shrink = 1;
+        }
 	continue;
       }
     }
     
     res = OverlapSmoother_smooth(sm, dim, x);
     if (Verbose) fprintf(stderr,"res = %f\n",res);
-#ifdef ANIMATE
-    if (i != 0) fprintf(fp,",");
-    export_embedding(fp, dim, A, x, label_sizes);
-#endif
     OverlapSmoother_delete(sm);
   }
-  if (Verbose) fprintf(stderr, "overlap removal neighbors only?= %d iter -- %d, overlap factor = %g underlap factor = %g\n", neighborhood_only, i, max_overlap - 1, min_overlap);
-
-#ifdef ANIMATE
-  fprintf(fp,"}");
-    fclose(fp);
+  if (Verbose) {
+    fprintf(stderr,
+            "overlap removal neighbors only?= %d iter -- %d, overlap factor = %g underlap factor = %g\n",
+            (int)neighborhood_only, i, max_overlap - 1, min_overlap);
   }
-#endif
 
   if (has_penalty_terms){
     /* now do without penalty */
     remove_overlap(dim, A, x, label_sizes, ntry, 0.,
-		   ELSCHEME_NONE, 0, NULL, NULL, do_shrinking, flag);
+		   ELSCHEME_NONE, 0, NULL, NULL, do_shrinking);
   }
 
 #ifdef DEBUG
@@ -692,20 +650,33 @@ void remove_overlap(int dim, SparseMatrix A, real *x, real *label_sizes, int ntr
   }
 #endif
 #ifdef TIME
-  fprintf(stderr, "post processing %f\n",((real) (clock() - cpu)) / CLOCKS_PER_SEC);
+  fprintf(stderr, "post processing %f\n",((double) (clock() - cpu)) / CLOCKS_PER_SEC);
 #endif
 }
 
 #else
-#include "types.h"
-#include "SparseMatrix.h"
-void remove_overlap(int dim, SparseMatrix A, int m, real *x, real *label_sizes, int ntry, real initial_scaling, int do_shrinking, int *flag)
+#include <common/types.h>
+#include <sparse/SparseMatrix.h>
+void remove_overlap(int dim, SparseMatrix A, double *x, double *label_sizes, int ntry, double initial_scaling,
+		    int edge_labeling_scheme, int n_constr_nodes, int *constr_nodes, SparseMatrix A_constr, bool do_shrinking)
 {
     static int once;
 
+    (void)dim;
+    (void)A;
+    (void)x;
+    (void)label_sizes;
+    (void)ntry;
+    (void)initial_scaling;
+    (void)edge_labeling_scheme;
+    (void)n_constr_nodes;
+    (void)constr_nodes;
+    (void)A_constr;
+    (void)do_shrinking;
+
     if (once == 0) {
 	once = 1;
-	agerr(AGERR, "remove_overlap: Graphviz not built with triangulation library\n");
+	agerrorf("remove_overlap: Graphviz not built with triangulation library\n");
     }
 }
 #endif

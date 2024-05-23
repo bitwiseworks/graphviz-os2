@@ -1,33 +1,28 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "glcompbutton.h"
-#include "glcomplabel.h"
-#include "glcompimage.h"
-#include "glcompfont.h"
-#include "glutils.h"
-#include "glcompset.h"
-#include "memory.h"
+#include <cgraph/alloc.h>
+#include <glcomp/glcompbutton.h>
+#include <glcomp/glcomplabel.h>
+#include <glcomp/glcompimage.h>
+#include <glcomp/glcompfont.h>
+#include <glcomp/glutils.h>
+#include <glcomp/glcompset.h>
+#include <stddef.h>
 #include <string.h>
 #include <GL/glut.h>
 
 
-glCompButton *glCompButtonNew(glCompObj * par, GLfloat x, GLfloat y,
-			      GLfloat w, GLfloat h, char *caption)
-{
-    glCompButton *p;
-//      glCompCommon* parent=&par->common;
-    p = NEW(glCompButton);
+glCompButton *glCompButtonNew(glCompObj *par, float x, float y, float w,
+                              float h, char *caption) {
+    glCompButton *p = gv_alloc(sizeof(glCompButton));
     glCompInitCommon((glCompObj *) p, par, x, y);
     p->objType = glButtonObj;
     /*customize button color */
@@ -36,16 +31,13 @@ glCompButton *glCompButtonNew(glCompObj * par, GLfloat x, GLfloat y,
     p->common.color.B = GLCOMPSET_BUTTON_COLOR_B;
     p->common.color.A = GLCOMPSET_BUTTON_COLOR_ALPHA;
 
-    p->common.borderType = glBorderSolid;
-
     p->common.borderWidth = GLCOMPSET_BUTTON_BEVEL;
 
     p->common.width = w;
     p->common.height = h;
     p->status = 0;		//0 not pressed 1 pressed;
     p->groupid = 0;
-    p->common.callbacks.click = '\0';
-    p->customptr = '\0';
+    p->common.callbacks.click = NULL;
     /*set event functions */
 
     p->common.functions.draw = (glcompdrawfunc_t)glCompButtonDraw;
@@ -60,13 +52,12 @@ glCompButton *glCompButtonNew(glCompObj * par, GLfloat x, GLfloat y,
 
     /*caption */
     p->common.font = glNewFontFromParent ((glCompObj *) p, NULL);
-    p->label = glCompLabelNew((glCompObj *) p, 0, 0, caption);
+    p->label = glCompLabelNew((glCompObj*) p, caption);
     p->label->common.font->justify.VJustify = glFontVJustifyCenter;
     p->label->common.font->justify.HJustify = glFontHJustifyCenter;
     p->label->common.align = glAlignParent;
     /*image */
-    p->image = (glCompImage *) 0;
-    p->glyphPos = glButtonGlyphLeft;
+    p->image = NULL;
     return p;
 }
 
@@ -134,29 +125,26 @@ void glCompButtonDraw(glCompButton * p)
 	return;
     /*draw panel */
     glCompDrawRectPrism(&(ref.pos), ref.width, ref.height,
-			p->common.borderWidth, 0.01, &(ref.color),
+			p->common.borderWidth, 0.01f, &(ref.color),
 			!p->status);
     if (p->label)
-	p->label->common.functions.draw((void *) p->label);
+	p->label->common.functions.draw(p->label);
     if (p->image)
-	p->image->common.functions.draw((void *) p->image);
+	p->image->common.functions.draw(p->image);
     if (p->common.callbacks.draw)
-	p->common.callbacks.draw((void *) p);	/*user defined drawing routines are called here. */
+	p->common.callbacks.draw(p);	/*user defined drawing routines are called here. */
 }
 
-void glCompButtonClick(glCompObj * o, GLfloat x, GLfloat y,
-		       glMouseButtonType t)
-{
+void glCompButtonClick(glCompObj *o, float x, float y, glMouseButtonType t) {
     glCompButton *p = (glCompButton *) o;
     glCompObj *obj;
     glCompSet *s = o->common.compset;
-    int ind = 0;
     ((glCompButton *) o)->status=((glCompButton *) o)->refStatus ;
     if (p->groupid > 0) 
     {
-	for (; ind < s->objcnt; ind++) {
+	for (size_t ind = 0; ind < s->objcnt; ind++) {
 	    obj = s->obj[ind];
-	    if ((obj->objType == glButtonObj)&&(obj!=o)) {
+	    if (obj->objType == glButtonObj && obj != o) {
 		if (((glCompButton *) obj)->groupid == p->groupid)
 		    ((glCompButton *) obj)->status = 0;
 	    }
@@ -176,7 +164,7 @@ void glCompButtonClick(glCompObj * o, GLfloat x, GLfloat y,
 	p->common.callbacks.click((glCompObj *) p, x, y, t);
 }
 
-void glCompButtonDoubleClick(glCompObj * obj, GLfloat x, GLfloat y,
+void glCompButtonDoubleClick(glCompObj *obj, float x, float y,
 			     glMouseButtonType t)
 {
     /*Put your internal code here */
@@ -184,7 +172,7 @@ void glCompButtonDoubleClick(glCompObj * obj, GLfloat x, GLfloat y,
 	((glCompButton *) obj)->common.callbacks.doubleclick(obj, x, y, t);
 }
 
-void glCompButtonMouseDown(glCompObj * obj, GLfloat x, GLfloat y,
+void glCompButtonMouseDown(glCompObj *obj, float x, float y,
 			   glMouseButtonType t)
 {
     /*Put your internal code here */
@@ -196,40 +184,28 @@ void glCompButtonMouseDown(glCompObj * obj, GLfloat x, GLfloat y,
 	((glCompButton *) obj)->common.callbacks.mousedown(obj, x, y, t);
 }
 
-void glCompButtonMouseIn(glCompObj * obj, GLfloat x, GLfloat y)
-{
+void glCompButtonMouseIn(glCompObj *obj, float x, float y) {
     /*Put your internal code here */
     if (((glCompButton *) obj)->common.callbacks.mousein)
 	((glCompButton *) obj)->common.callbacks.mousein(obj, x, y);
 }
 
-void glCompButtonMouseOut(glCompObj * obj, GLfloat x, GLfloat y)
-{
+void glCompButtonMouseOut(glCompObj *obj, float x, float y) {
     /*Put your internal code here */
     if (((glCompButton *) obj)->common.callbacks.mouseout)
 	((glCompButton *) obj)->common.callbacks.mouseout(obj, x, y);
 }
 
-void glCompButtonMouseOver(glCompObj * obj, GLfloat x, GLfloat y)
-{
+void glCompButtonMouseOver(glCompObj *obj, float x, float y) {
     /*Put your internal code here */
     if (((glCompButton *) obj)->common.callbacks.mouseover)
 	((glCompButton *) obj)->common.callbacks.mouseover(obj, x, y);
 }
 
-void glCompButtonMouseUp(glCompObj * obj, GLfloat x, GLfloat y,
-			 glMouseButtonType t)
+void glCompButtonMouseUp(glCompObj *obj, float x, float y, glMouseButtonType t)
 {
     /*Put your internal code here */
 
     if (((glCompButton *) obj)->common.callbacks.mouseup)
 	((glCompButton *) obj)->common.callbacks.mouseup(obj, x, y, t);
-}
-
-
-
-
-void glCompButtonSetText(glCompButton * p, char *str)
-{
-//    replacestr(str, &p->text);
 }

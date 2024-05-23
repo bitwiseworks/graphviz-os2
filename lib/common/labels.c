@@ -1,32 +1,35 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup common_render
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include "render.h"
-#include "htmltable.h"
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <common/render.h>
+#include <common/htmltable.h>
 #include <limits.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 static char *strdup_and_subst_obj0 (char *str, void *obj, int escBackslash);
 
-static void storeline(GVC_t *gvc, textlabel_t *lp, char *line, char terminator)
-{
+static void storeline(GVC_t *gvc, textlabel_t *lp, char *line,
+                      char terminator) {
     pointf size;
     textspan_t *span;
     static textfont_t tf;
-    int oldsz = lp->u.txt.nspans + 1;
+    size_t oldsz = lp->u.txt.nspans + 1;
 
-    lp->u.txt.span = ZALLOC(oldsz + 1, lp->u.txt.span, textspan_t, oldsz);
-    span = &(lp->u.txt.span[lp->u.txt.nspans]);
+    lp->u.txt.span = gv_recalloc(lp->u.txt.span, oldsz, oldsz + 1,
+                                 sizeof(textspan_t));
+    span = &lp->u.txt.span[lp->u.txt.nspans];
     span->str = line;
     span->just = terminator;
     if (line && line[0]) {
@@ -50,28 +53,22 @@ static void storeline(GVC_t *gvc, textlabel_t *lp, char *line, char terminator)
 /* compiles <str> into a label <lp> */
 void make_simple_label(GVC_t * gvc, textlabel_t * lp)
 {
-    char c, *p, *line, *lineptr, *str = lp->text;
-    unsigned char byte = 0x00;
-
     lp->dimen.x = lp->dimen.y = 0.0;
-    if (*str == '\0')
+    if (*lp->text == '\0')
 	return;
 
-    line = lineptr = NULL;
-    p = str;
-    line = lineptr = N_GNEW(strlen(p) + 1, char);
-    *line = 0;
-    while ((c = *p++)) {
-	byte = (unsigned char) c;
+    agxbuf line = {0};
+    for (char c, *p = lp->text; (c = *p++);) {
+	unsigned char byte = (unsigned char) c;
 	/* wingraphviz allows a combination of ascii and big-5. The latter
          * is a two-byte encoding, with the first byte in 0xA1-0xFE, and
          * the second in 0x40-0x7e or 0xa1-0xfe. We assume that the input
          * is well-formed, but check that we don't go past the ending '\0'.
          */
-	if ((lp->charset == CHAR_BIG5) && 0xA1 <= byte && byte <= 0xFE) {
-	    *lineptr++ = c;
+	if (lp->charset == CHAR_BIG5 && 0xA1 <= byte && byte <= 0xFE) {
+	    agxbputc(&line, c);
 	    c = *p++;
-	    *lineptr++ = c;
+	    agxbputc(&line, c);
 	    if (!c) /* NB. Protect against unexpected string end here */
 		break;
 	} else {
@@ -80,31 +77,27 @@ void make_simple_label(GVC_t * gvc, textlabel_t * lp)
 		case 'n':
 		case 'l':
 		case 'r':
-		    *lineptr++ = '\0';
-		    storeline(gvc, lp, line, *p);
-		    line = lineptr;
+		    storeline(gvc, lp, agxbdisown(&line), *p);
 		    break;
 		default:
-		    *lineptr++ = *p;
+		    agxbputc(&line, *p);
 		}
 		if (*p)
 		    p++;
 		/* tcldot can enter real linend characters */
 	    } else if (c == '\n') {
-		*lineptr++ = '\0';
-		storeline(gvc, lp, line, 'n');
-		line = lineptr;
+		storeline(gvc, lp, agxbdisown(&line), 'n');
 	    } else {
-		*lineptr++ = c;
+		agxbputc(&line, c);
 	    }
 	}
     }
 
-    if (line != lineptr) {
-	*lineptr++ = '\0';
-	storeline(gvc, lp, line, 'n');
+    if (agxblen(&line) > 0) {
+	storeline(gvc, lp, agxbdisown(&line), 'n');
     }
 
+    agxbfree(&line);
     lp->space = lp->dimen;
 }
 
@@ -114,7 +107,7 @@ void make_simple_label(GVC_t * gvc, textlabel_t * lp)
  */
 textlabel_t *make_label(void *obj, char *str, int kind, double fontsize, char *fontname, char *fontcolor)
 {
-    textlabel_t *rv = NEW(textlabel_t);
+    textlabel_t *rv = gv_alloc(sizeof(textlabel_t));
     graph_t *g = NULL, *sg = NULL;
     node_t *n = NULL;
     edge_t *e = NULL;
@@ -122,15 +115,15 @@ textlabel_t *make_label(void *obj, char *str, int kind, double fontsize, char *f
 
     switch (agobjkind(obj)) {
     case AGRAPH:
-        sg = (graph_t*)obj;
+        sg = obj;
 	g = sg->root;
 	break;
     case AGNODE:
-        n = (node_t*)obj;
+        n = obj;
 	g = agroot(agraphof(n));
 	break;
     case AGEDGE:
-        e = (edge_t*)obj;
+        e = obj;
 	g = agroot(agraphof(aghead(e)));
 	break;
     }
@@ -139,14 +132,14 @@ textlabel_t *make_label(void *obj, char *str, int kind, double fontsize, char *f
     rv->fontsize = fontsize;
     rv->charset = GD_charset(g);
     if (kind & LT_RECD) {
-	rv->text = strdup(str);
+	rv->text = gv_strdup(str);
         if (kind & LT_HTML) {
-	    rv->html = TRUE;
+	    rv->html = true;
 	}
     }
     else if (kind == LT_HTML) {
-	rv->text = strdup(str);
-	rv->html = TRUE;
+	rv->text = gv_strdup(str);
+	rv->html = true;
 	if (make_html_label(obj, rv)) {
 	    switch (agobjkind(obj)) {
 	    case AGRAPH:
@@ -190,15 +183,12 @@ textlabel_t *make_label(void *obj, char *str, int kind, double fontsize, char *f
  * is all stored in one large buffer shared by all of the textspan_t,
  * so only the first one needs to free its tlp->str.
  */
-void free_textspan(textspan_t * tl, int cnt)
-{
-    int i;
+void free_textspan(textspan_t *tl, size_t cnt) {
     textspan_t* tlp = tl;
 
     if (!tl) return;
-    for (i = 0; i < cnt; i++) { 
-	if ((i == 0) && tlp->str)
-	    free(tlp->str);
+    for (size_t i = 0; i < cnt; i++) {
+	free(tlp->str);
 	if (tlp->layout && tlp->free_layout)
 	    tlp->free_layout (tlp->layout);
 	tlp++;
@@ -222,7 +212,6 @@ void free_label(textlabel_t * p)
 void emit_label(GVJ_t * job, emit_state_t emit_state, textlabel_t * lp)
 {
     obj_state_t *obj = job->obj;
-    int i;
     pointf p;
     emit_state_t old_emit_state;
 
@@ -257,7 +246,7 @@ void emit_label(GVJ_t * job, emit_state_t emit_state, textlabel_t * lp)
     }
     if (obj->labeledgealigned)
 	p.y -= lp->pos.y;
-    for (i = 0; i < lp->u.txt.nspans; i++) {
+    for (size_t i = 0; i < lp->u.txt.nspans; i++) {
 	switch (lp->u.txt.span[i].just) {
 	case 'l':
 	    p.x = lp->pos.x - lp->space.x / 2.0;
@@ -288,14 +277,12 @@ void emit_label(GVJ_t * job, emit_state_t emit_state, textlabel_t * lp)
  */
 static char *strdup_and_subst_obj0 (char *str, void *obj, int escBackslash)
 {
-    char c, *s, *p, *t, *newstr;
+    char c, *s;
     char *tp_str = "", *hp_str = "";
     char *g_str = "\\G", *n_str = "\\N", *e_str = "\\E",
 	*h_str = "\\H", *t_str = "\\T", *l_str = "\\L";
-    size_t g_len = 2, n_len = 2, e_len = 2,
-	h_len = 2, t_len = 2, l_len = 2,
-	tp_len = 0, hp_len = 0;
-    size_t newlen = 0;
+    bool has_hp = false;
+    bool has_tp = false;
     int isEdge = 0;
     textlabel_t *tl;
     port pt;
@@ -303,146 +290,93 @@ static char *strdup_and_subst_obj0 (char *str, void *obj, int escBackslash)
     /* prepare substitution strings */
     switch (agobjkind(obj)) {
 	case AGRAPH:
-	    g_str = agnameof((graph_t *)obj);
-	    g_len = strlen(g_str);
-	    tl = GD_label((graph_t *)obj);
+	    g_str = agnameof(obj);
+	    tl = GD_label(obj);
 	    if (tl) {
 		l_str = tl->text;
-	    	if (str) l_len = strlen(l_str);
 	    }
 	    break;
 	case AGNODE:
-	    g_str = agnameof(agraphof((node_t *)obj));
-	    g_len = strlen(g_str);
-	    n_str = agnameof((node_t *)obj);
-	    n_len = strlen(n_str);
-	    tl = ND_label((node_t *)obj);
+	    g_str = agnameof(agraphof(obj));
+	    n_str = agnameof(obj);
+	    tl = ND_label(obj);
 	    if (tl) {
 		l_str = tl->text;
-	    	if (str) l_len = strlen(l_str);
 	    }
 	    break;
 	case AGEDGE:
 	    isEdge = 1;
 	    g_str = agnameof(agroot(agraphof(agtail(((edge_t *)obj)))));
-	    g_len = strlen(g_str);
 	    t_str = agnameof(agtail(((edge_t *)obj)));
-	    t_len = strlen(t_str);
-	    pt = ED_tail_port((edge_t *)obj);
+	    pt = ED_tail_port(obj);
 	    if ((tp_str = pt.name))
-	        tp_len = strlen(tp_str);
+	        has_tp = *tp_str != '\0';
 	    h_str = agnameof(aghead(((edge_t *)obj)));
-	    h_len = strlen(h_str);
-	    pt = ED_head_port((edge_t *)obj);
+	    pt = ED_head_port(obj);
 	    if ((hp_str = pt.name))
-		hp_len = strlen(hp_str);
-	    h_len = strlen(h_str);
-	    tl = ED_label((edge_t *)obj);
+		has_hp = *hp_str != '\0';
+	    tl = ED_label(obj);
 	    if (tl) {
 		l_str = tl->text;
-	    	if (str) l_len = strlen(l_str);
 	    }
 	    if (agisdirected(agroot(agraphof(agtail(((edge_t*)obj))))))
 		e_str = "->";
 	    else
 		e_str = "--";
-	    e_len = t_len + (tp_len?tp_len+1:0) + 2 + h_len + (hp_len?hp_len+1:0);
 	    break;
     }
 
-    /* two passes over str.
-     *
-     * first pass prepares substitution strings and computes 
-     * total length for newstring required from malloc.
-     */
+    /* allocate a dynamic buffer that we will use to construct the result */
+    agxbuf buf = {0};
+
+    /* assemble new string */
     for (s = str; (c = *s++);) {
 	if (c == '\\' && *s != '\0') {
 	    switch (c = *s++) {
 	    case 'G':
-		newlen += g_len;
+		agxbput(&buf, g_str);
 		break;
 	    case 'N':
-		newlen += n_len;
-		break;
-	    case 'E':
-		newlen += e_len;
-		break;
-	    case 'H':
-		newlen += h_len;
-		break;
-	    case 'T':
-		newlen += t_len;
-		break; 
-	    case 'L':
-		newlen += l_len;
-		break; 
-	    case '\\':
-		if (escBackslash) {
-		    newlen += 1;
-		    break; 
-		}
-		/* Fall through */
-	    default:  /* leave other escape sequences unmodified, e.g. \n \l \r */
-		newlen += 2;
-	    }
-	} else {
-	    newlen++;
-	}
-    }
-    /* allocate new string */
-    newstr = gmalloc(newlen + 1);
-
-    /* second pass over str assembles new string */
-    for (s = str, p = newstr; (c = *s++);) {
-	if (c == '\\' && *s != '\0') {
-	    switch (c = *s++) {
-	    case 'G':
-		for (t = g_str; (*p = *t++); p++);
-		break;
-	    case 'N':
-		for (t = n_str; (*p = *t++); p++);
+		agxbput(&buf, n_str);
 		break;
 	    case 'E':
 		if (isEdge) {
-		    for (t = t_str; (*p = *t++); p++);
-		    if (tp_len) {
-			*p++ = ':';
-			for (t = tp_str; (*p = *t++); p++);
+		    agxbput(&buf, t_str);
+		    if (has_tp) {
+			agxbprint(&buf, ":%s", tp_str);
 		    }
-		    for (t = e_str; (*p = *t++); p++);
-		    for (t = h_str; (*p = *t++); p++);
-		    if (hp_len) {
-			*p++ = ':';
-			for (t = hp_str; (*p = *t++); p++);
+		    agxbprint(&buf, "%s%s", e_str, h_str);
+		    if (has_hp) {
+			agxbprint(&buf, ":%s", hp_str);
 		    }
 		}
 		break;
 	    case 'T':
-		for (t = t_str; (*p = *t++); p++);
+		agxbput(&buf, t_str);
 		break;
 	    case 'H':
-		for (t = h_str; (*p = *t++); p++);
+		agxbput(&buf, h_str);
 		break;
 	    case 'L':
-		for (t = l_str; (*p = *t++); p++);
+		agxbput(&buf, l_str);
 		break;
 	    case '\\':
 		if (escBackslash) {
-		    *p++ = '\\';
+		    agxbputc(&buf, '\\');
 		    break; 
 		}
 		/* Fall through */
 	    default:  /* leave other escape sequences unmodified, e.g. \n \l \r */
-		*p++ = '\\';
-		*p++ = c;
+		agxbprint(&buf, "\\%c", c);
 		break;
 	    }
 	} else {
-	    *p++ = c;
+	    agxbputc(&buf, c);
 	}
     }
-    *p++ = '\0';
-    return newstr;
+
+    /* extract the final string with replacements applied */
+    return agxbdisown(&buf);
 }
 
 /* strdup_and_subst_obj:
@@ -451,193 +385,4 @@ static char *strdup_and_subst_obj0 (char *str, void *obj, int escBackslash)
 char *strdup_and_subst_obj(char *str, void *obj)
 {
     return strdup_and_subst_obj0 (str, obj, 1);
-}
-
-/* return true if *s points to &[A-Za-z]*;      (e.g. &Ccedil; )
- *                          or &#[0-9]*;        (e.g. &#38; )
- *                          or &#x[0-9a-fA-F]*; (e.g. &#x6C34; )
- */
-static int xml_isentity(char *s)
-{
-    s++;			/* already known to be '&' */
-    if (*s == '#') {
-	s++;
-	if (*s == 'x' || *s == 'X') {
-	    s++;
-	    while ((*s >= '0' && *s <= '9')
-		   || (*s >= 'a' && *s <= 'f')
-		   || (*s >= 'A' && *s <= 'F'))
-		s++;
-	} else {
-	    while (*s >= '0' && *s <= '9')
-		s++;
-	}
-    } else {
-	while ((*s >= 'a' && *s <= 'z')
-	       || (*s >= 'A' && *s <= 'Z'))
-	    s++;
-    }
-    if (*s == ';')
-	return 1;
-    return 0;
-}
-
-char *xml_string(char *s)
-{
-    return xml_string0 (s, FALSE);
-}
-
-/* xml_string0:
- * Encode input string as an xml string.
- * If raw is true, the input is interpreted as having no
- * embedded escape sequences, and \n and \r are changed
- * into &#10; and &#13;, respectively.
- * Uses a static buffer, so non-re-entrant.
- */
-char *xml_string0(char *s, boolean raw)
-{
-    static char *buf = NULL;
-    static int bufsize = 0;
-    char *p, *sub, *prev = NULL;
-    int len, pos = 0;
-
-    if (!buf) {
-	bufsize = 64;
-	buf = gmalloc(bufsize);
-    }
-
-    p = buf;
-    while (s && *s) {
-	if (pos > (bufsize - 8)) {
-	    bufsize *= 2;
-	    buf = grealloc(buf, bufsize);
-	    p = buf + pos;
-	}
-	/* escape '&' only if not part of a legal entity sequence */
-	if (*s == '&' && (raw || !(xml_isentity(s)))) {
-	    sub = "&amp;";
-	    len = 5;
-	}
-	/* '<' '>' are safe to substitute even if string is already UTF-8 coded
-	 * since UTF-8 strings won't contain '<' or '>' */
-	else if (*s == '<') {
-	    sub = "&lt;";
-	    len = 4;
-	}
-	else if (*s == '>') {
-	    sub = "&gt;";
-	    len = 4;
-	}
-	else if (*s == '-') {	/* can't be used in xml comment strings */
-	    sub = "&#45;";
-	    len = 5;
-	}
-	else if (*s == ' ' && prev && *prev == ' ') {
-	    /* substitute 2nd and subsequent spaces with required_spaces */
-	    sub = "&#160;";  /* inkscape doesn't recognise &nbsp; */
-	    len = 6;
-	}
-	else if (*s == '"') {
-	    sub = "&quot;";
-	    len = 6;
-	}
-	else if (*s == '\'') {
-	    sub = "&#39;";
-	    len = 5;
-	}
-	else if ((*s == '\n') && raw) {
-	    sub = "&#10;";
-	    len = 5;
-	}
-	else if ((*s == '\r') && raw) {
-	    sub = "&#13;";
-	    len = 5;
-	}
-	else {
-	    sub = s;
-	    len = 1;
-	}
-	while (len--) {
-	    *p++ = *sub++;
-	    pos++;
-	}
-	prev = s;
-	s++;
-    }
-    *p = '\0';
-    return buf;
-}
-
-/* a variant of xml_string for urls in hrefs */
-char *xml_url_string(char *s)
-{
-    static char *buf = NULL;
-    static int bufsize = 0;
-    char *p, *sub;
-#if 0
-    char *prev = NULL;
-#endif
-    int len, pos = 0;
-
-    if (!buf) {
-	bufsize = 64;
-	buf = gmalloc(bufsize);
-    }
-
-    p = buf;
-    while (s && *s) {
-	if (pos > (bufsize - 8)) {
-	    bufsize *= 2;
-	    buf = grealloc(buf, bufsize);
-	    p = buf + pos;
-	}
-	/* escape '&' only if not part of a legal entity sequence */
-	if (*s == '&' && !(xml_isentity(s))) {
-	    sub = "&amp;";
-	    len = 5;
-	}
-	/* '<' '>' are safe to substitute even if string is already UTF-8 coded
-	 * since UTF-8 strings won't contain '<' or '>' */
-	else if (*s == '<') {
-	    sub = "&lt;";
-	    len = 4;
-	}
-	else if (*s == '>') {
-	    sub = "&gt;";
-	    len = 4;
-	}
-#if 0
-	else if (*s == '-') {	/* can't be used in xml comment strings */
-	    sub = "&#45;";
-	    len = 5;
-	}
-	else if (*s == ' ' && prev && *prev == ' ') {
-	    /* substitute 2nd and subsequent spaces with required_spaces */
-	    sub = "&#160;";  /* inkscape doesn't recognise &nbsp; */
-	    len = 6;
-	}
-#endif
-	else if (*s == '"') {
-	    sub = "&quot;";
-	    len = 6;
-	}
-	else if (*s == '\'') {
-	    sub = "&#39;";
-	    len = 5;
-	}
-	else {
-	    sub = s;
-	    len = 1;
-	}
-	while (len--) {
-	    *p++ = *sub++;
-	    pos++;
-	}
-#if 0
-	prev = s;
-#endif
-	s++;
-    }
-    *p = '\0';
-    return buf;
 }

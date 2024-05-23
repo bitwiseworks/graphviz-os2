@@ -1,17 +1,14 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-/* Modularity Quality definitation:
+/* Modularity Quality definition:
 
    We assume undirected graph. Directed graph should be converted by summing edge weights.
 
@@ -59,15 +56,18 @@
 */
 
 #define STANDALONE
-#include "general.h"
-#include "SparseMatrix.h"
-#include "mq.h"
-#include "LinkedList.h"
+#include <cgraph/alloc.h>
+#include <cgraph/list.h>
+#include <limits.h>
+#include <sparse/general.h>
+#include <sparse/SparseMatrix.h>
+#include <sparse/mq.h>
+#include <stdbool.h>
 #include <string.h>
 
-static real get_mq(SparseMatrix A, int *assignment, int *ncluster0, real *mq_in0, real *mq_out0, real **dout0){
+static double get_mq(SparseMatrix A, int *assignment, int *ncluster0, double *mq_in0, double *mq_out0, double **dout0){
   /* given a symmetric matrix representation of a graph and an assignment of nodes into clusters, calculate the modularity quality.
-   assignment: assignmenet[i] gives the cluster assignment of node i. 0 <= assignment[i] < ncluster.
+   assignment: assignment[i] gives the cluster assignment of node i. 0 <= assignment[i] < ncluster.
    ncluster: number of clusters
    mq_in: the part of MQ to do with intra-cluster edges, before divide by 1/k
    mq_out: the part of MQ to do with inter-cluster edges, before divide by 1/(k*(k-1))
@@ -75,20 +75,19 @@ static real get_mq(SparseMatrix A, int *assignment, int *ncluster0, real *mq_in0
   */
   int ncluster = 0;
   int n = A->m;
-  int test_pattern_symmetry_only = FALSE;
+  bool test_pattern_symmetry_only = false;
   int *counts, *ia = A->ia, *ja = A->ja, k, i, j, jj;
-  real mq_in = 0, mq_out = 0, *a = NULL, Vi, Vj;
+  double mq_in = 0, mq_out = 0, *a = NULL, Vi, Vj;
   int c;
-  real *dout;
+  double *dout;
 
 
   assert(SparseMatrix_is_symmetric(A, test_pattern_symmetry_only));
+  (void)test_pattern_symmetry_only;
   assert(A->n == n);
-  if (A->type == MATRIX_TYPE_REAL) a = (real*) A->a;
+  if (A->type == MATRIX_TYPE_REAL) a = A->a;
 
-  counts = MALLOC(sizeof(int)*n);
-
-  for (i = 0; i < n; i++) counts[i] = 0;
+  counts = gv_calloc(n, sizeof(int));
 
   for (i = 0; i < n; i++){
     assert(assignment[i] >= 0 && assignment[i] < n);
@@ -126,16 +125,15 @@ static real get_mq(SparseMatrix A, int *assignment, int *ncluster0, real *mq_in0
   }
 
   /* calculate scaled out degree */
-  dout = MALLOC(sizeof(real)*n);
+  dout = gv_calloc(n, sizeof(double));
   for (i = 0; i < n; i++){
-    dout[i] = 0;
     for (j = ia[i]; j < ia[i+1]; j++){
       jj = ja[j];
       if (jj == i) continue;
       if (a){
-	dout[i] += a[j]/(real) counts[assignment[jj]];
+	dout[i] += a[j]/(double) counts[assignment[jj]];
       } else {
-	dout[i] += 1./(real) counts[assignment[jj]];
+	dout[i] += 1./(double) counts[assignment[jj]];
       }
     }
   }
@@ -144,7 +142,7 @@ static real get_mq(SparseMatrix A, int *assignment, int *ncluster0, real *mq_in0
   *mq_in0 = mq_in;
   *mq_out0 = mq_out;
   *dout0 = dout;
-  FREE(counts);
+  free(counts);
 
   if (k > 1){
     return 2*(mq_in/k - mq_out/(k*(k-1)));
@@ -159,33 +157,32 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_init(SparseMatrix A, in
   int *matching;
 
   assert(A->type == MATRIX_TYPE_REAL);
-  assert(SparseMatrix_is_symmetric(A, FALSE));
+  assert(SparseMatrix_is_symmetric(A, false));
 
   if (!A) return NULL;
   assert(A->m == n);
-  grid = MALLOC(sizeof(struct Multilevel_MQ_Clustering_struct));
+  grid = gv_alloc(sizeof(struct Multilevel_MQ_Clustering_struct));
   grid->level = level;
   grid->n = n;
   grid->A = A;
   grid->P = NULL;
-  grid->R = NULL;
   grid->next = NULL;
   grid->prev = NULL;
-  grid->delete_top_level_A = FALSE;
-  matching = grid->matching = MALLOC(sizeof(real)*(n));
+  grid->delete_top_level_A = false;
+  matching = grid->matching = gv_calloc(n, sizeof(double));
   grid->deg_intra = NULL;
   grid->dout = NULL;
   grid->wgt = NULL;
 
   if (level == 0){
-    real mq = 0, mq_in, mq_out;
-    int n = A->n, ncluster;
-    real *deg_intra, *wgt, *dout;
+    double mq = 0, mq_in, mq_out;
+    int ncluster;
+    double *deg_intra, *wgt, *dout;
 
-    grid->deg_intra = MALLOC(sizeof(real)*(n));
+    grid->deg_intra = gv_calloc(n, sizeof(double));
     deg_intra = grid->deg_intra;
 
-    grid->wgt = MALLOC(sizeof(real)*n);
+    grid->wgt = gv_calloc(n, sizeof(double));
     wgt = grid->wgt;
 
     for (i = 0; i < n; i++){
@@ -217,44 +214,40 @@ static void Multilevel_MQ_Clustering_delete(Multilevel_MQ_Clustering grid){
     }
   }
   SparseMatrix_delete(grid->P);
-  SparseMatrix_delete(grid->R);
-  FREE(grid->matching);
-  FREE(grid->deg_intra);
-  FREE(grid->dout);
-  FREE(grid->wgt);
+  free(grid->matching);
+  free(grid->deg_intra);
+  free(grid->dout);
+  free(grid->wgt);
   Multilevel_MQ_Clustering_delete(grid->next);
-  FREE(grid);
+  free(grid);
 }
+
+DEFINE_LIST(ints, int)
 
 static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_establish(Multilevel_MQ_Clustering grid, int maxcluster){
   int *matching = grid->matching;
   SparseMatrix A = grid->A;
   int n = grid->n, level = grid->level, nc = 0, nclusters = n;
-  real mq = 0, mq_in = 0, mq_out = 0, mq_new, mq_in_new, mq_out_new, mq_max = 0, mq_in_max = 0, mq_out_max = 0;
+  double mq = 0, mq_in = 0, mq_out = 0, mq_new, mq_in_new, mq_out_new, mq_max = 0, mq_in_max = 0, mq_out_max = 0;
   int *ia = A->ia, *ja = A->ja;
-  real *a, amax = 0;
-  real *deg_intra = grid->deg_intra, *wgt = grid->wgt;
-  real *deg_intra_new, *wgt_new = NULL;
+  double amax = 0;
+  double *deg_intra = grid->deg_intra, *wgt = grid->wgt;
   int i, j, k, jj, jc, jmax;
-  real *deg_inter, gain = 0, *dout = grid->dout, *dout_new, deg_in_i, deg_in_j, wgt_i, wgt_j, a_ij, dout_i, dout_j, dout_max = 0, wgt_jmax = 0;
-  int *mask;
-  real maxgain = 0;
-  real total_gain = 0;
-  SingleLinkedList *neighbors = NULL, lst;
+  double gain = 0, *dout = grid->dout, deg_in_i, deg_in_j, wgt_i, wgt_j, a_ij, dout_i, dout_j, dout_max = 0, wgt_jmax = 0;
+  double maxgain = 0;
+  double total_gain = 0;
 
-
-  neighbors = MALLOC(sizeof(SingleLinkedList)*n);
-  for (i = 0; i < n; i++) neighbors[i] = NULL;
+  ints_t *neighbors = gv_calloc(n, sizeof(ints_t));
 
   mq = grid->mq;
   mq_in = grid->mq_in;
   mq_out = grid->mq_out;
 
-  deg_intra_new = MALLOC(sizeof(real)*n);
-  wgt_new = MALLOC(sizeof(real)*n);
-  deg_inter = MALLOC(sizeof(real)*n);
-  mask = MALLOC(sizeof(int)*n);
-  dout_new = MALLOC(sizeof(real)*n);
+  double *deg_intra_new = gv_calloc(n, sizeof(double));
+  double *wgt_new = gv_calloc(n, sizeof(double));
+  double *deg_inter = gv_calloc(n, sizeof(double));
+  int *mask = gv_calloc(n, sizeof(int));
+  double *dout_new = gv_calloc(n, sizeof(double));
   for (i = 0; i < n; i++) mask[i] = -1;
 
   assert(n == A->n);
@@ -284,7 +277,7 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_establish(Multilevel_MQ
      mq_new = mq_in_new/(k-1) - mq_out_new/((k-1)*(k-2))
      gain = mq_new - mq
   */
-  a = (real*) A->a;
+  double *a = A->a;
   for (i = 0; i < n; i++){
     if (matching[i] != UNMATCHED) continue;
     /* accumulate connections between i and clusters */
@@ -320,7 +313,7 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_establish(Multilevel_MQ
       } else {
 	a_ij = deg_inter[jc];
 	wgt_j = wgt_new[jc];
-	deg_inter[jc] = -1; /* so that we do not redo the calulation when we hit another neighbor in cluster jc */
+	deg_inter[jc] = -1; // so that we do not redo the calculation when we hit another neighbor in cluster jc
 	deg_in_j = deg_intra_new[jc];
 	dout_j = dout_new[jc];
       }
@@ -339,9 +332,9 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_establish(Multilevel_MQ
 #ifdef DEBUG
       {int ncluster;
 	double mq2, mq_in2, mq_out2, *dout2;
-	int *matching2, nc2 = nc;
-	matching2 = MALLOC(sizeof(int)*A->m);
-	memcpy(matching2, matching, sizeof(real)*A->m);
+	int nc2 = nc;
+	int *matching2 = gv_calloc(A->m, sizeof(int));
+	memcpy(matching2, matching, sizeof(double)*A->m);
 	if (jc != UNMATCHED) {
 	  matching2[i] = jc;
 	} else {
@@ -379,8 +372,8 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_establish(Multilevel_MQ
       jc = matching[jmax];
       if (jc == UNMATCHED){
 	fprintf(stderr, "maxgain=%f, merge %d, %d\n",maxgain, i, jmax);
-	neighbors[nc] = SingleLinkedList_new_int(jmax);
-	neighbors[nc] = SingleLinkedList_prepend_int(neighbors[nc], i);
+	ints_append(&neighbors[nc], jmax);
+	ints_append(&neighbors[nc], i);
 	dout_new[nc] = dout_i + dout_max;
 	matching[i] = matching[jmax] = nc;
 	wgt_new[nc] = wgt[i] + wgt[jmax];
@@ -388,7 +381,7 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_establish(Multilevel_MQ
 	nc++;
       } else {	
 	fprintf(stderr,"maxgain=%f, merge with existing cluster %d, %d\n",maxgain, i, jc);
-	neighbors[jc] = SingleLinkedList_prepend_int(neighbors[jc], i);
+	ints_append(&neighbors[jc], i);
 	dout_new[jc] = dout_i + dout_max;
 	wgt_new[jc] += wgt[i];
 	matching[i] = jc;
@@ -401,7 +394,7 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_establish(Multilevel_MQ
     } else {
       fprintf(stderr,"gain: %f -- no gain, skip merging node %d\n", maxgain, i);
       assert(maxgain <= 0);
-      neighbors[nc] = SingleLinkedList_new_int(i);
+      ints_append(&neighbors[nc], i);
       matching[i] = nc;
       deg_intra_new[nc] = deg_intra[i];
       wgt_new[nc] = wgt[i];
@@ -411,16 +404,12 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_establish(Multilevel_MQ
 
     /* update scaled outdegree of neighbors of i and its merged node/cluster jmax */
     jc = matching[i];
-    lst = neighbors[jc];
-    do {
-      mask[*((int*) SingleLinkedList_get_data(lst))] = n+i;
-      lst = SingleLinkedList_get_next(lst);
-    } while (lst);
+    for (size_t l = ints_size(&neighbors[jc]) - 1; l != SIZE_MAX; --l) {
+      mask[ints_get(&neighbors[jc], l)] = n + i;
+    }
 
-    lst = neighbors[jc];
-
-    do {
-      k = *((int*) SingleLinkedList_get_data(lst));
+    for (size_t l = ints_size(&neighbors[jc]) - 1; l != SIZE_MAX; --l) {
+      k = ints_get(&neighbors[jc], l);
       for (j = ia[k]; j < ia[k+1]; j++){
 	jj = ja[j]; 
 	if (mask[jj] == n+i) continue;/* link to within cluster */
@@ -438,8 +427,7 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_establish(Multilevel_MQ
 	  }
 	}
       }
-      lst = SingleLinkedList_get_next(lst);
-    } while (lst);
+    }
 
   }
 
@@ -459,32 +447,42 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_establish(Multilevel_MQ
   if (nc >= 1 && (total_gain > 0 || nc < n)){
     /* now set up restriction and prolongation operator */
     SparseMatrix P, R, R0, B, cA;
-    real one = 1.;
+    double one = 1.;
     Multilevel_MQ_Clustering cgrid;
 
     R0 = SparseMatrix_new(nc, n, 1, MATRIX_TYPE_REAL, FORMAT_COORD);
     for (i = 0; i < n; i++){
       jj = matching[i];
-      SparseMatrix_coordinate_form_add_entries(R0, 1, &jj, &i, &one);
+      SparseMatrix_coordinate_form_add_entry(R0, jj, i, &one);
     }
     R = SparseMatrix_from_coordinate_format(R0);
     SparseMatrix_delete(R0);
     P = SparseMatrix_transpose(R);
     B = SparseMatrix_multiply(R, A);
-    if (!B) goto RETURN;
+    SparseMatrix_delete(R);
+    if (!B) {
+        free(deg_intra_new);
+        free(wgt_new);
+        free(dout_new);
+        goto RETURN;
+    }
     cA = SparseMatrix_multiply(B, P); 
-    if (!cA) goto RETURN;
     SparseMatrix_delete(B);
+    if (!cA) {
+        free(deg_intra_new);
+        free(wgt_new);
+        free(dout_new);
+        goto RETURN;
+    }
     grid->P = P;
-    grid->R = R;
     level++;
     cgrid = Multilevel_MQ_Clustering_init(cA, level); 
-    deg_intra_new = REALLOC(deg_intra_new, nc*sizeof(real));
-    wgt_new = REALLOC(wgt_new, nc*sizeof(real));
+    deg_intra_new = gv_recalloc(deg_intra_new, n, nc, sizeof(double));
+    wgt_new = gv_recalloc(wgt_new, n, nc, sizeof(double));
     cgrid->deg_intra = deg_intra_new;
     cgrid->mq = grid->mq + total_gain;
     cgrid->wgt = wgt_new;
-    dout_new =  REALLOC(dout_new, nc*sizeof(real));
+    dout_new = gv_recalloc(dout_new, n, nc, sizeof(double));
     cgrid->dout = dout_new;
 
     cgrid = Multilevel_MQ_Clustering_establish(cgrid, maxcluster);
@@ -495,17 +493,17 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_establish(Multilevel_MQ
     /* no more improvement, stop and final clustering found */
     for (i = 0; i < n; i++) matching[i] = i;
 
-    FREE(deg_intra_new);
-    FREE(wgt_new);
-    FREE(dout_new);
+    free(deg_intra_new);
+    free(wgt_new);
+    free(dout_new);
   }
 
  RETURN:
-  for (i = 0; i < n; i++) SingleLinkedList_delete(neighbors[i], free);
-  FREE(neighbors);
+  for (i = 0; i < n; i++) ints_free(&neighbors[i]);
+  free(neighbors);
 
-  FREE(deg_inter);
-  FREE(mask);
+  free(deg_inter);
+  free(mask);
   return grid;
 }
 
@@ -516,20 +514,20 @@ static Multilevel_MQ_Clustering Multilevel_MQ_Clustering_new(SparseMatrix A0, in
   SparseMatrix A = A0;
 
   if (maxcluster <= 0) maxcluster = A->m;
-  if (!SparseMatrix_is_symmetric(A, FALSE) || A->type != MATRIX_TYPE_REAL){
+  if (!SparseMatrix_is_symmetric(A, false) || A->type != MATRIX_TYPE_REAL){
     A = SparseMatrix_get_real_adjacency_matrix_symmetrized(A);
   }
   grid = Multilevel_MQ_Clustering_init(A, 0);
 
   grid = Multilevel_MQ_Clustering_establish(grid, maxcluster);
 
-  if (A != A0) grid->delete_top_level_A = TRUE;/* be sure to clean up later */
+  if (A != A0) grid->delete_top_level_A = true; // be sure to clean up later
   return grid;
 }
 
 
 static void hierachical_mq_clustering(SparseMatrix A, int maxcluster,
-					      int *nclusters, int **assignment, real *mq, int *flag){
+					      int *nclusters, int **assignment, double *mq){
   /* find a clustering of vertices by maximize mq
      A: symmetric square matrix n x n. If real value, value will be used as edges weights, otherwise edge weights are considered as 1.
      maxcluster: used to specify the maximum number of cluster desired, e.g., maxcluster=10 means that a maximum of 10 clusters
@@ -541,12 +539,9 @@ static void hierachical_mq_clustering(SparseMatrix A, int maxcluster,
   Multilevel_MQ_Clustering grid, cgrid;
   int *matching, i;
   SparseMatrix P;
-  real *u;
   assert(A->m == A->n);
 
   *mq = 0.;
-
-  *flag = 0;
 
   grid = Multilevel_MQ_Clustering_new(A, maxcluster);
 
@@ -557,16 +552,16 @@ static void hierachical_mq_clustering(SparseMatrix A, int maxcluster,
   }
 
   /* project clustering up */
-  u =  MALLOC(sizeof(real)*cgrid->n);
-  for (i = 0; i < cgrid->n; i++) u[i] = (real) (cgrid->matching)[i];
+  double *u = gv_calloc(cgrid->n, sizeof(double));
+  for (i = 0; i < cgrid->n; i++) u[i] = (double) (cgrid->matching)[i];
   *nclusters = cgrid->n;
   *mq = cgrid->mq;
 
   while (cgrid->prev){
-    real *v = NULL;
+    double *v = NULL;
     P = cgrid->prev->P;
-    SparseMatrix_multiply_vector(P, u, &v, FALSE);
-    FREE(u);
+    SparseMatrix_multiply_vector(P, u, &v);
+    free(u);
     u = v;
     cgrid = cgrid->prev;
   }
@@ -574,23 +569,21 @@ static void hierachical_mq_clustering(SparseMatrix A, int maxcluster,
   if (*assignment){
     matching = *assignment; 
   } else {
-    matching = MALLOC(sizeof(int)*(grid->n));
+    matching = gv_calloc(grid->n, sizeof(int));
     *assignment = matching;
   }
   for (i = 0; i < grid->n; i++) (matching)[i] = (int) u[i];
-  FREE(u);
+  free(u);
 
   Multilevel_MQ_Clustering_delete(grid);
-  
 }
 
 
 
-void mq_clustering(SparseMatrix A, int inplace, int maxcluster, int use_value,
-			   int *nclusters, int **assignment, real *mq, int *flag){
+void mq_clustering(SparseMatrix A, int maxcluster,
+			   int *nclusters, int **assignment, double *mq){
   /* find a clustering of vertices by maximize mq
      A: symmetric square matrix n x n. If real value, value will be used as edges weights, otherwise edge weights are considered as 1.
-     inplace: whether A can e modified. If true, A will be modified by removing diagonal.
      maxcluster: used to specify the maximum number of cluster desired, e.g., maxcluster=10 means that a maximum of 10 clusters
      .   is desired. this may not always be realized, and mq may be low when this is specified. Default: maxcluster = 0 
      nclusters: on output the number of clusters
@@ -598,21 +591,19 @@ void mq_clustering(SparseMatrix A, int inplace, int maxcluster, int use_value,
    */
   SparseMatrix B;
 
-  *flag = 0;
-  
   assert(A->m == A->n);
 
-  B = SparseMatrix_symmetrize(A, FALSE);
+  B = SparseMatrix_symmetrize(A, false);
 
-  if (!inplace && B == A) {
+  if (B == A) {
     B = SparseMatrix_copy(A);
   }
 
   B = SparseMatrix_remove_diagonal(B);
 
-  if (B->type != MATRIX_TYPE_REAL || !use_value) B = SparseMatrix_set_entries_to_real_one(B);
+  if (B->type != MATRIX_TYPE_REAL) B = SparseMatrix_set_entries_to_real_one(B);
 
-  hierachical_mq_clustering(B, maxcluster, nclusters, assignment, mq, flag);
+  hierachical_mq_clustering(B, maxcluster, nclusters, assignment, mq);
 
   if (B != A) SparseMatrix_delete(B);
 

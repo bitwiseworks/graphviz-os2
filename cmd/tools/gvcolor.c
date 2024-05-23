@@ -1,14 +1,16 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief flow colors through a ranked digraph
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -17,14 +19,20 @@
  * Updated by Emden Gansner
  */
 
-#include "config.h"
-
 /* if NC changes, a bunch of scanf calls below are in trouble */
 #define	NC	3		/* size of HSB color vector */
 
-#include "cgraph.h"
+#include <assert.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <cgraph/cgraph.h>
+#include <cgraph/exit.h>
+#include <cgraph/ingraphs.h>
+#include "colorxlate.h"
+#include <math.h>
+#include <stdbool.h>
 #include <stdlib.h>
-typedef struct Agnodeinfo_t {
+typedef struct {
     Agrec_t h;
     double relrank;	/* coordinate of its rank, smaller means lower rank */
     double x[NC];	/* color vector */
@@ -33,11 +41,7 @@ typedef struct Agnodeinfo_t {
 #define ND_relrank(n) (((Agnodeinfo_t*)((n)->base.data))->relrank)
 #define ND_x(n) (((Agnodeinfo_t*)((n)->base.data))->x)
 
-#include "ingraphs.h"
 #include <stdio.h>
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 
 #include <getopt.h>
 
@@ -49,26 +53,36 @@ int AdjustSaturation;
 double MinRankSaturation;
 double MaxRankSaturation;
 
-extern char *colorxlate(char *str, char *buf);
-
-static int cmpf(Agnode_t ** n0, Agnode_t ** n1)
-{
-    double t;
-    t = ND_relrank(*n0) - ND_relrank(*n1);
-    if (t < 0.0)
+static int cmpf(const void *x, const void *y) {
+// Suppress Clang/GCC -Wcast-qual warning. Casting away const here is acceptable
+// as the later usage is const. We need the cast because the macros use
+// non-const pointers for genericity.
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
+  Agnode_t **n0 = (Agnode_t **)x;
+  Agnode_t **n1 = (Agnode_t **)y;
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+    double relrank0 = ND_relrank(*n0);
+    double relrank1 = ND_relrank(*n1);
+    if (relrank0 < relrank1)
 	return -1;
-    if (t > 0.0)
+    if (relrank0 > relrank1)
 	return 1;
     return 0;
 }
 
 static void setcolor(char *p, double *v)
 {
-    char buf[64];
-    if ((sscanf(p, "%lf %lf %lf", v, v + 1, v + 2) != 3) && p[0]) {
-	colorxlate(p, buf);
-	sscanf(buf, "%lf %lf %lf", v, v + 1, v + 2);
+    agxbuf buf = {0};
+    if (sscanf(p, "%lf %lf %lf", v, v + 1, v + 2) != 3 && p[0]) {
+	colorxlate(p, &buf);
+	sscanf(agxbuse(&buf), "%lf %lf %lf", v, v + 1, v + 2);
     }
+    agxbfree(&buf);
 }
 
 static char **Files;
@@ -80,7 +94,7 @@ If no files are specified, stdin is used\n";
 static void usage(int v)
 {
     printf("%s",useString);
-    exit(v);
+    graphviz_exit(v);
 }
 
 static void init(int argc, char *argv[])
@@ -88,15 +102,20 @@ static void init(int argc, char *argv[])
     int c;
 
     opterr = 0;
-    while ((c = getopt(argc, argv, ":")) != -1) {
+    while ((c = getopt(argc, argv, ":?")) != -1) {
 	switch (c) {
 	case '?':
-	    if (optopt == '?')
+	    if (optopt == '\0' || optopt == '?')
 		usage(0);
-	    else
-		fprintf(stderr, "gvcolor: option -%c unrecognized - ignored\n",
+	    else {
+		fprintf(stderr, "gvcolor: option -%c unrecognized\n",
 			optopt);
+		usage(1);
+	    }
 	    break;
+	default:
+	    fprintf(stderr, "gvcolor: unexpected error\n");
+	    graphviz_exit(EXIT_FAILURE);
 	}
     }
     argv += optind;
@@ -108,7 +127,7 @@ static void init(int argc, char *argv[])
 
 static void color(Agraph_t * g)
 {
-    int nn, i, j, cnt;
+    int nn, j, cnt;
     Agnode_t *n, *v, **nlist;
     Agedge_t *e;
     char *p;
@@ -118,17 +137,17 @@ static void color(Agraph_t * g)
     if (agattr(g, AGNODE, "pos", 0) == NULL) {
 	fprintf(stderr,
 		"graph must be run through 'dot' before 'gvcolor'\n");
-	exit(1);
+	graphviz_exit(1);
     }
-    aginit(g, AGNODE, "nodeinfo", sizeof(Agnodeinfo_t), TRUE);
+    aginit(g, AGNODE, "nodeinfo", sizeof(Agnodeinfo_t), true);
     if (agattr(g, AGNODE, "style", 0) == NULL)
 	agattr(g, AGNODE, "style", "filled");
     if ((p = agget(g, "Defcolor")))
 	setcolor(p, Defcolor);
 
-    if ((p = agget(g, "rankdir")) && (p[0] == 'L'))
+    if ((p = agget(g, "rankdir")) && p[0] == 'L')
 	LR = 1;
-    if ((p = agget(g, "flow")) && (p[0] == 'b'))
+    if ((p = agget(g, "flow")) && p[0] == 'b')
 	Forward = 0;
     if ((p = agget(g, "saturation"))) {
 	if (sscanf(p, "%lf,%lf", &lowsat, &highsat) == 2) {
@@ -140,8 +159,10 @@ static void color(Agraph_t * g)
 
     /* assemble the sorted list of nodes and store the initial colors */
     nn = agnnodes(g);
-    nlist = (Agnode_t **) malloc(nn * sizeof(Agnode_t *));
-    i = 0;
+    assert(nn >= 0);
+    size_t nnodes = (size_t)nn;
+    nlist = gv_calloc(nnodes, sizeof(Agnode_t *));
+    size_t i = 0;
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	nlist[i++] = n;
 	if ((p = agget(n, "color")))
@@ -149,19 +170,17 @@ static void color(Agraph_t * g)
 	p = agget(n, "pos");
 	sscanf(p, "%lf,%lf", &x, &y);
 	ND_relrank(n) = (LR ? x : y);
-	if (maxrank < ND_relrank(n))
-	    maxrank = ND_relrank(n);
+	maxrank = fmax(maxrank, ND_relrank(n));
     }
     if (LR != Forward)
-	for (i = 0; i < nn; i++) {
+	for (i = 0; i < nnodes; i++) {
 	    n = nlist[i];
 	    ND_relrank(n) = maxrank - ND_relrank(n);
 	}
-    qsort((void *) nlist, (size_t) nn, sizeof(Agnode_t *),
-	  (int (*)(const void *, const void *)) cmpf);
+    qsort(nlist, nnodes, sizeof(Agnode_t *), cmpf);
 
     /* this is the pass that pushes the colors through the edges */
-    for (i = 0; i < nn; i++) {
+    for (i = 0; i < nnodes; i++) {
 	n = nlist[i];
 
 	/* skip nodes that were manually colored */
@@ -196,7 +215,7 @@ static void color(Agraph_t * g)
     }
 
     /* apply saturation adjustment and convert color to string */
-    for (i = 0; i < nn; i++) {
+    for (i = 0; i < nnodes; i++) {
 	double h, s, b, t;
 	char buf[64];
 
@@ -222,15 +241,10 @@ static void color(Agraph_t * g)
 	    s = Defcolor[1];
 	    b = Defcolor[2];
 	}
-	sprintf(buf, "%f %f %f", h, s, b);
+	snprintf(buf, sizeof(buf), "%f %f %f", h, s, b);
 	agset(n, "color", buf);
     }
     free (nlist);
-}
-
-static Agraph_t *gread(FILE * fp)
-{
-    return agread(fp, (Agdisc_t *) 0);
 }
 
 int main(int argc, char **argv)
@@ -239,7 +253,7 @@ int main(int argc, char **argv)
     ingraph_state ig;
 
     init(argc, argv);
-    newIngraph(&ig, Files, gread);
+    newIngraph(&ig, Files);
 
     while ((g = nextGraph(&ig)) != 0) {
 	color(g);
@@ -248,5 +262,5 @@ int main(int argc, char **argv)
 	agclose(g);
     }
 
-    exit(0);
+    graphviz_exit(0);
 }

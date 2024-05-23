@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -16,29 +13,14 @@
 /*    specifically just the change to Tcl_CmdProc */
 #define USE_NON_CONST
 #include <tcl.h>
-#include "render.h"
-#include "gvc.h"
-#include "gvio.h"
+#include <common/render.h>
+#include <gvc/gvc.h>
+#include <gvc/gvio.h>
 #include "tclhandle.h"
 
 #ifndef CONST84
 #define CONST84
 #endif
-
-/* ******* not ready yet
-#if (TCL_MAJOR_VERSION > 7)
-#define TCLOBJ
-#if (TCL_MAJOR_VERSION == 8) && (TCL_MINOR_VERSION == 0)
-char *
-Tcl_GetString(Tcl_Obj *obj) {
-    int len;
-	return (Tcl_GetStringFromObj(obj, &len));
-}
-#else
-#define UTF8
-#endif
-#endif
-********* */
 
 /*
  * ictx - one per tcl interpreter, may support multiple graph namespaces
@@ -117,11 +99,3 @@ extern size_t Tcldot_string_writer(GVJ_t *job, const char *s, size_t len);
 extern size_t Tcldot_channel_writer(GVJ_t *job, const char *s, size_t len);
 
 extern void tcldot_layout(GVC_t *gvc, Agraph_t * g, char *engine);
-
-/* Check whether string str corresponds to option opname.
- * opname: literal string.
- * str: the string to check.
- * str0: first character of str.
- * strn: length of str. */
-#define MATCHES_OPTION(opname, str, str0, strn) \
-	(opname[0] == str0) && (sizeof(opname)-1 == strn) && (strncmp(opname, str, sizeof(opname)) == 0)

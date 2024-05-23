@@ -1,94 +1,92 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup common_render
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef _WIN32
-#include <unistd.h>
-#endif
-
 #include <sys/stat.h>
-
-#include "render.h"
-#include "gvio.h"
+#include <cgraph/alloc.h>
+#include <common/render.h>
+#include <gvc/gvio.h>
+#include <cgraph/strcasecmp.h>
+#include <stdbool.h>
+#include <stdio.h>
 
 static int N_EPSF_files;
 static Dict_t *EPSF_contents;
 
-static void ps_image_free(Dict_t * dict, usershape_t * p, Dtdisc_t * disc)
-{
+static void ps_image_free(usershape_t *p, Dtdisc_t *disc) {
+    (void)disc;
     free(p->data);
 }
 
 static Dtdisc_t ImageDictDisc = {
-    offsetof(usershape_t, name),/* key */
-    -1,				/* size */
-    0,				/* link offset */
-    NIL(Dtmake_f),
-    (Dtfree_f) ps_image_free,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .key = offsetof(usershape_t, name),
+    .size = -1,
+    .freef = (Dtfree_f)ps_image_free,
 };
 
 static usershape_t *user_init(const char *str)
 {
-    char *contents;
     char line[BUFSIZ];
     FILE *fp;
     struct stat statbuf;
-    int saw_bb, must_inline, rc;
     int lx, ly, ux, uy;
-    usershape_t *us;
 
     if (!EPSF_contents)
 	EPSF_contents = dtopen(&ImageDictDisc, Dtoset);
 
-    us = dtmatch(EPSF_contents, str);
+    usershape_t *us = dtmatch(EPSF_contents, str);
     if (us)
 	return us;
 
     if (!(fp = fopen(str, "r"))) {
-	agerr(AGWARN, "couldn't open epsf file %s\n", str);
+	agwarningf("couldn't open epsf file %s\n", str);
 	return NULL;
     }
     /* try to find size */
-    saw_bb = must_inline = FALSE;
+    bool saw_bb = false;
+    bool must_inline = false;
     while (fgets(line, sizeof(line), fp)) {
 	if (sscanf
 	    (line, "%%%%BoundingBox: %d %d %d %d", &lx, &ly, &ux, &uy) == 4) {
-	    saw_bb = TRUE;
+	    saw_bb = true;
 	}
-	if ((line[0] != '%') && strstr(line,"read")) must_inline = TRUE;
+	if (line[0] != '%' && strstr(line,"read")) must_inline = true;
 	if (saw_bb && must_inline) break;
     }
 
     if (saw_bb) {
-	us = GNEW(usershape_t);
+	us = gv_alloc(sizeof(usershape_t));
 	us->x = lx;
 	us->y = ly;
 	us->w = ux - lx;
-	us->y = uy - ly;
+	us->h = uy - ly;
 	us->name = str;
 	us->macro_id = N_EPSF_files++;
 	fstat(fileno(fp), &statbuf);
-	contents = us->data = N_GNEW(statbuf.st_size + 1, char);
+	char *contents = us->data = gv_calloc((size_t)statbuf.st_size + 1, sizeof(char));
 	fseek(fp, 0, SEEK_SET);
-	rc = fread(contents, statbuf.st_size, 1, fp);
-	contents[statbuf.st_size] = '\0';
-	dtinsert(EPSF_contents, us);
-	us->must_inline = must_inline;
+	size_t rc = fread(contents, (size_t)statbuf.st_size, 1, fp);
+	if (rc == 1) {
+            contents[statbuf.st_size] = '\0';
+            dtinsert(EPSF_contents, us);
+            us->must_inline = must_inline;
+        }
+        else {
+            agwarningf("couldn't read from epsf file %s\n", str);
+            free(us->data);
+            free(us);
+            us = NULL;
+        }
     } else {
-	agerr(AGWARN, "BoundingBox not found in epsf file %s\n", str);
+	agwarningf("BoundingBox not found in epsf file %s\n", str);
 	us = NULL;
     }
     fclose(fp);
@@ -99,30 +97,27 @@ void epsf_init(node_t * n)
 {
     epsf_t *desc;
     const char *str;
-    usershape_t *us;
-    int dx, dy;
 
     if ((str = safefile(agget(n, "shapefile")))) {
-	us = user_init(str);
+	usershape_t *us = user_init(str);
 	if (!us)
 	    return;
-	dx = us->w;
-	dy = us->h;
+	int dx = us->w;
+	int dy = us->h;
 	ND_width(n) = PS2INCH(dx);
 	ND_height(n) = PS2INCH(dy);
-	ND_shape_info(n) = desc = NEW(epsf_t);
+	ND_shape_info(n) = desc = gv_alloc(sizeof(epsf_t));
 	desc->macro_id = us->macro_id;
-	desc->offset.x = -us->x - (dx) / 2;
-	desc->offset.y = -us->y - (dy) / 2;
+	desc->offset.x = -us->x - dx / 2;
+	desc->offset.y = -us->y - dy / 2;
     } else
-	agerr(AGWARN, "shapefile not set or not found for epsf node %s\n", agnameof(n));
+	agwarningf("shapefile not set or not found for epsf node %s\n", agnameof(n));
 }
 
 void epsf_free(node_t * n)
 {
 
-    if (ND_shape_info(n))
-	free(ND_shape_info(n));
+    free(ND_shape_info(n));
 }
 
 
@@ -139,43 +134,46 @@ void epsf_free(node_t * n)
 void cat_libfile(GVJ_t * job, const char **arglib, const char **stdlib)
 {
     FILE *fp;
-    const char **s, *bp, *p, *path;
-    int i;
-    boolean use_stdlib = TRUE;
+    const char *p;
+    bool use_stdlib = true;
 
     /* check for empty string to turn off stdlib */
     if (arglib) {
-        for (i = 0; use_stdlib && ((p = arglib[i])); i++) {
+        for (int i = 0; use_stdlib && (p = arglib[i]); i++) {
             if (*p == '\0')
-                use_stdlib = FALSE;
+                use_stdlib = false;
         }
     }
     if (use_stdlib)
-        for (s = stdlib; *s; s++) {
+        for (const char **s = stdlib; *s; s++) {
             gvputs(job, *s);
             gvputs(job, "\n");
         }
     if (arglib) {
-        for (i = 0; (p = arglib[i]) != 0; i++) {
+        for (int i = 0; (p = arglib[i]) != 0; i++) {
             if (*p == '\0')
                 continue;       /* ignore empty string */
-            path = safefile(p);    /* make sure filename is okay */
-	    if (!path) {
-		agerr(AGWARN, "can't find library file %s\n", p);
+            const char *safepath = safefile(p);    /* make sure filename is okay */
+	    if (!safepath) {
+		agwarningf("can't find library file %s\n", p);
 	    }
-            else if ((fp = fopen(path, "r"))) {
-                while ((bp = Fgets(fp)))
-                    gvputs(job, bp);
+            else if ((fp = fopen(safepath, "r"))) {
+                while (true) {
+                    char bp[BUFSIZ] = {0};
+                    size_t r = fread(bp, 1, sizeof(bp), fp);
+                    gvwrite(job, bp, r);
+                    if (r < sizeof(bp)) {
+                      break;
+                    }
+                }
                 gvputs(job, "\n"); /* append a newline just in case */
 		fclose (fp);
             } else
-                agerr(AGWARN, "can't open library file %s\n", path);
+                agwarningf("can't open library file %s\n", safepath);
         }
     }
 }
 
-#define FILTER_EPSF 1
-#ifdef FILTER_EPSF
 /* this removes EPSF DSC comments that, when nested in another
  * document, cause errors in Ghostview and other Postscript
  * processors (although legal according to the Adobe EPSF spec).
@@ -184,47 +182,33 @@ void cat_libfile(GVJ_t * job, const char **arglib, const char **stdlib)
  */
 void epsf_emit_body(GVJ_t *job, usershape_t *us)
 {
-    char *p;
-    char c;
-    p = us->data;
+    char *p = us->data;
     while (*p) {
 	/* skip %%EOF lines */
-	if ((p[0] == '%') && (p[1] == '%')
-		&& (!strncasecmp(&p[2], "EOF", 3)
-		|| !strncasecmp(&p[2], "BEGIN", 5)
-		|| !strncasecmp(&p[2], "END", 3)
-		|| !strncasecmp(&p[2], "TRAILER", 7)
-	)) {
+	if (!strncasecmp(p, "%%EOF", 5) || !strncasecmp(p, "%%BEGIN", 7) ||
+	    !strncasecmp(p, "%%END", 5) || !strncasecmp(p, "%%TRAILER", 9)) {
 	    /* check for *p since last line might not end in '\n' */
-	    while ((c = *p) && (c != '\r') && (c != '\n')) p++;
-	    if ((*p == '\r') && (*(p+1) == '\n')) p += 2;
+	    while (*p != '\0' && *p != '\r' && *p != '\n') p++;
+	    if (*p == '\r' && p[1] == '\n') p += 2;
 	    else if (*p) p++;
 	    continue;
 	}
 	/* output line */
-	while ((c = *p) && (c != '\r') && (c != '\n')) {
-	    gvputc(job, c);
+	while (*p != '\0' && *p != '\r' && *p != '\n') {
+	    gvputc(job, *p);
 	    p++;
 	}
-	if ((*p == '\r') && (*(p+1) == '\n')) p += 2;
+	if (*p == '\r' && p[1] == '\n') p += 2;
 	else if (*p) p++;
 	gvputc(job, '\n');
     }
 }
-#else
-void epsf_emit_body(GVJ_t *job, usershape_t *us)
-{
-	gvputs(job, us->data);
-}
-#endif
 
 void epsf_define(GVJ_t *job)
 {
-    usershape_t *us;
-
     if (!EPSF_contents)
 	return;
-    for (us = dtfirst(EPSF_contents); us; us = dtnext(EPSF_contents, us)) {
+    for (usershape_t *us = dtfirst(EPSF_contents); us; us = dtnext(EPSF_contents, us)) {
 	if (us->must_inline)
 	    continue;
 	gvprintf(job, "/user_shape_%d {\n", us->macro_id);
@@ -268,7 +252,6 @@ charsetOf (char* s)
  */
 char *ps_string(char *ins, int chset)
 {
-    char *s;
     char *base;
     static agxbuf  xb;
     static int warned;
@@ -290,7 +273,7 @@ char *ps_string(char *ins, int chset)
 	    break;
 	case NONLATIN :
 	    if (!warned) {
-		agerr (AGWARN, "UTF-8 input uses non-Latin1 characters which cannot be handled by this PostScript driver\n");
+		agwarningf("UTF-8 input uses non-Latin1 characters which cannot be handled by this PostScript driver\n");
 		warned = 1;
 	    }
 	    base = ins;
@@ -301,13 +284,10 @@ char *ps_string(char *ins, int chset)
 	}
     }
 
-    if (xb.buf == NULL)
-        agxbinit (&xb, 0, NULL);
-
     agxbputc (&xb, LPAREN);
-    s = base;
+    char *s = base;
     while (*s) {
-        if ((*s == LPAREN) || (*s == RPAREN) || (*s == '\\'))
+        if (*s == LPAREN || *s == RPAREN || *s == '\\')
             agxbputc (&xb, '\\');
         agxbputc (&xb, *s++);
     }

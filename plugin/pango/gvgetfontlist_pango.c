@@ -1,14 +1,11 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
@@ -17,6 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <cgraph/alloc.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/strcasecmp.h>
+#include <cgraph/strview.h>
 
 /* FIXME - the following declaration should be removed
  * when configure is coordinated with flags passed to the
@@ -39,23 +40,22 @@ char* strcasestr (const char *str, const char *pat)
     endp = str + slen - plen;
     p0 = toupper (p0);
     do {
-        while ((str <= endp) && (p0 != toupper(*str))) str++;
+        while (str <= endp && p0 != toupper(*str)) str++;
         if (str > endp) return NULL;
         pp = pat;
         sp = ++str;
-        while ((pc = *pp++) && (toupper(pc) == toupper(*sp))) sp++;
+        while ((pc = *pp++) && toupper(pc) == toupper(*sp)) sp++;
     } while (pc);
     return (char*)(str-1);
 }
 
 #endif
 
-#include "agxbuf.h"
-#include "gvplugin_textlayout.h"
+#include <cgraph/agxbuf.h>
+#include <gvc/gvplugin_textlayout.h>
 #include <pango/pangocairo.h>
 #include "gvgetfontlist.h"
-
-extern unsigned char Verbose;
+#include <common/globals.h>
 
 #define FNT_BOLD	1<<0
 #define FNT_BOOK	1<<1
@@ -244,30 +244,31 @@ typedef struct {
     int faces;
 } availfont_t;
 
-#define NEW(t)          (t*)malloc(sizeof(t))
-#define N_NEW(n,t)      (t*)calloc((n),sizeof(t))
+/// list of available fonts
+///
+/// The i-th entry corresponds to the i-th entry from \p gv_ps_fontdefs. An
+/// entry will have zeroed fields if the corresponding font is unavailable at
+/// runtime.
+typedef struct {
+  availfont_t fonts[GV_FONT_LIST_SIZE];
+} availfonts_t;
 
 static PostscriptAlias postscript_alias[] = {
 #include "ps_font_equiv.h"
 };
 
 /* Frees memory used by the available system font definitions */
-static void gv_flist_free_af(availfont_t* gv_af_p)
-{
-    int i;
-
-    for (i = 0; i < GV_FONT_LIST_SIZE; i++) {
-	if (gv_af_p[i].fontname)
-	    free(gv_af_p[i].fontname);
+static void gv_flist_free_af(availfonts_t gv_af_p) {
+    for (size_t i = 0; i < GV_FONT_LIST_SIZE; i++) {
+	free(gv_af_p.fonts[i].fontname);
     }
-    free(gv_af_p);
 }
 
 static int get_faces(PangoFontFamily * family)
 {
     PangoFontFace **faces;
     PangoFontFace *face;
-    int i, j, n_faces;
+    int i, n_faces;
     const char *name;
     int availfaces = 0;
     /* Get the faces (Bold, Italic, etc.) for the current font family */
@@ -278,7 +279,7 @@ static int get_faces(PangoFontFamily * family)
 
 	/* if the family face type is one of the known types, logically OR the known type value
 	   to the available faces integer */
-	for (j = 0; j < FACELIST_SZ; j++) {
+	for (size_t j = 0; j < FACELIST_SZ; j++) {
 	    if (strcasestr(name, facelist[j].name)) {
 		availfaces |= facelist[j].flag;
 		break;
@@ -291,20 +292,20 @@ static int get_faces(PangoFontFamily * family)
 
 #ifdef DEBUG
 static void
-display_available_fonts(availfont_t* gv_af_p)
-{
-    int i, j, faces;
+display_available_fonts(availfonts_t gv_af_p) {
+    int faces;
 
 /* Displays the Graphviz PS font name, system available font name and associated faces */
-    for (j = 0; j < GV_FONT_LIST_SIZE; j++) {
-	if ((gv_af_p[j].faces == 0) || (gv_af_p[j].fontname == NULL)) {
+    for (size_t j = 0; j < GV_FONT_LIST_SIZE; j++) {
+	if (gv_af_p.fonts[j].faces == 0 || gv_af_p.fonts[j].fontname == NULL) {
 	    fprintf (stderr, "ps font = %s not available\n", gv_ps_fontdefs[j].fontname);
 	    continue;
 	}
 	fprintf (stderr, "ps font = %s available %d font = %s\n",
-	    gv_ps_fontdefs[j].fontname, gv_af_p[j].faces, gv_af_p[j].fontname);
-	faces = gv_af_p[j].faces;
-	for (i = 0; i < FACELIST_SZ; i++) {
+	         gv_ps_fontdefs[j].fontname, gv_af_p.fonts[j].faces,
+	         gv_af_p.fonts[j].fontname);
+	faces = gv_af_p.fonts[j].faces;
+	for (size_t i = 0; i < FACELIST_SZ; i++) {
 	    if (faces & facelist[i].flag)
 		fprintf (stderr, "\t%s\n", facelist[i].name);
 	}
@@ -315,11 +316,9 @@ display_available_fonts(availfont_t* gv_af_p)
 /* Construct the list of font faces */
 static char *get_avail_faces(int faces, agxbuf* xb)
 {
-    int i;
-    for (i = 0; i < FACELIST_SZ; i++) {
+    for (size_t i = 0; i < FACELIST_SZ; i++) {
 	if (faces & facelist[i].flag) {
-	    agxbput (xb, facelist[i].name);
-	    agxbputc(xb, ' ');
+	    agxbprint (xb, "%s ", facelist[i].name);
 	}
     }
     return agxbuse (xb);
@@ -331,30 +330,25 @@ static char *get_avail_faces(int faces, agxbuf* xb)
    of equivalent fonts that can be used in place of the PS font if the PS font is not
    available on the system
 */
-static availfont_t *gv_get_ps_fontlist(PangoFontMap * fontmap)
-{
+static availfonts_t gv_get_ps_fontlist(PangoFontMap *fontmap) {
     PangoFontFamily **families;
     PangoFontFamily *family;
     fontdef_t* gv_ps_fontdef;
     int n_families;
-    int i, j, k, array_sz, availfaces;
-    availfont_t *gv_af_p, *gv_afs;
+    int i, k, array_sz, availfaces = 0;
     const char *name;
-    char *family_name;
 
     /* Get a list of font families installed on the system */
     pango_font_map_list_families(fontmap, &families, &n_families);
 
-    /* Setup a pointer to available font structs */
-    gv_af_p = N_NEW(GV_FONT_LIST_SIZE, availfont_t);
-
-    for (j = 0; j < GV_FONT_LIST_SIZE; j++) {
+    availfonts_t gv_af_p = {0};
+    for (size_t j = 0; j < GV_FONT_LIST_SIZE; j++) {
 	/* get the Graphviz PS font information and create the
 	   available font definition structs */
-	gv_afs = gv_af_p+j;
+	availfont_t *gv_afs = &gv_af_p.fonts[j];
 	gv_ps_fontdef = gv_ps_fontdefs+j;
 	gv_afs->gv_ps_fontname = gv_ps_fontdef->fontname;
-	family_name = NULL;
+	strview_t family_name = {0};
 	/* Search the installed system font families for the current
 	   Graphvis PS font family name, i.e. AvantGarde */
 	for (i = 0; i < n_families; i++) {
@@ -362,38 +356,38 @@ static availfont_t *gv_get_ps_fontlist(PangoFontMap * fontmap)
 	    name = pango_font_family_get_name(family);
 	    /* if a match is found get the installed font faces */
 	    if (strcasecmp(gv_ps_fontdef->fontname, name) == 0) {
-		family_name = strdup(name);
+		family_name = strview(name, '\0');
 		availfaces = get_faces(family);
 	    }
-	    if (family_name)
+	    if (family_name.data != NULL)
 		break;
 	}
 	/* if a match is not found on the primary Graphviz font family,
 	   search for a match on the equivalent font family names */
-	if (!family_name) {
+	if (family_name.data == NULL) {
 	    array_sz = gv_ps_fontdef->eq_sz;
 	    for (k = 0; k < array_sz; k++) {
 		for (i = 0; i < n_families; i++) {
 		    family = families[i];
 		    name = pango_font_family_get_name(family);
 		    if (strcasecmp(gv_ps_fontdef->equiv[k], name) == 0) {
-			family_name = strdup(name);
+			family_name = strview(name, '\0');
 			availfaces = get_faces(family);
 			break;
 		    }
 		}
-		if (family_name)
+		if (family_name.data != NULL)
 		    break;
 	    }
 	}
 	/* if a match is not found on the equivalent font family names, search
 	   for a match on the generic family name assigned to the Graphviz PS font */
-	if (!family_name) {
+	if (family_name.data == NULL) {
 	    for (i = 0; i < n_families; i++) {
 		family = families[i];
 		name = pango_font_family_get_name(family);
 		if (strcasecmp(gv_ps_fontdef->generic_name, name) == 0) {
-		    family_name = strdup(name);
+		    family_name = strview(name, '\0');
 		    availfaces = get_faces(family);
 		    break;
 		}
@@ -401,8 +395,8 @@ static availfont_t *gv_get_ps_fontlist(PangoFontMap * fontmap)
 	}
 	/* if not match is found on the generic name, set the available font
 	   name to NULL */
-	if (family_name && availfaces) {
-	    gv_afs->fontname = family_name;
+	if (family_name.data != NULL && availfaces) {
+	    gv_afs->fontname = strview_str(family_name);
 	    gv_afs->faces = availfaces;
 	} else {
 	    gv_afs->fontname = NULL;
@@ -414,7 +408,7 @@ static availfont_t *gv_get_ps_fontlist(PangoFontMap * fontmap)
     display_available_fonts(gv_af_p);
 #endif
 /* Free the Graphviz PS font definitions */
-    return (gv_af_p);
+    return gv_af_p;
 }
 
 static void copyUpper (agxbuf* xb, char* s)
@@ -422,40 +416,37 @@ static void copyUpper (agxbuf* xb, char* s)
     int c;
 
     while ((c = *s++))
-	(void)agxbputc (xb, toupper(c));
+      (void)agxbputc(xb, gv_toupper(c));
 }
 
 /* Returns the font corresponding to a Graphviz PS font.
    AvantGarde-Book may return URW Gothic L, book
    Returns NULL if no appropriate font found.
 */
-static char *gv_get_font(availfont_t* gv_af_p,
+static char *gv_get_font(availfonts_t gv_af_p,
 		  PostscriptAlias * ps_alias, agxbuf* xb, agxbuf *xb2)
 {
     char *avail_faces;
-    int i;
 
-    for (i = 0; i < GV_FONT_LIST_SIZE; i++) {
+    for (size_t i = 0; i < GV_FONT_LIST_SIZE; i++) {
 	/* Searches the array of available system fonts for the one that
 	   corresponds to the current Graphviz PS font name. Sets up the
 	   font string with the available font name and the installed font
 	   faces that match what are required by the Graphviz PS font.
 	 */
-	if (gv_af_p[i].faces && strstr(ps_alias->name, gv_af_p[i].gv_ps_fontname)) {
-	    agxbput(xb2, gv_af_p[i].fontname);
-	    agxbput(xb2, ", ");
-	    avail_faces = get_avail_faces(gv_af_p[i].faces, xb);
+	if (gv_af_p.fonts[i].faces &&
+	    strstr(ps_alias->name, gv_af_p.fonts[i].gv_ps_fontname)) {
+	    agxbprint(xb2, "%s, ", gv_af_p.fonts[i].fontname);
+	    avail_faces = get_avail_faces(gv_af_p.fonts[i].faces, xb);
 	    if (ps_alias->weight) {
 		if (strcasestr(avail_faces, ps_alias->weight)) {
 		    agxbputc(xb2, ' ');
 		    copyUpper(xb2, ps_alias->weight);
 		}
 	    } else if (strcasestr(avail_faces, "REGULAR")) {
-		agxbputc(xb2, ' ');
-		agxbput(xb2, "REGULAR");
+		agxbput(xb2, " REGULAR");
 	    } else if (strstr(avail_faces, "ROMAN")) {
-		agxbputc(xb2, ' ');
-		agxbput(xb2, "ROMAN");
+		agxbput(xb2, " ROMAN");
 	    }
 	    if (ps_alias->stretch) {
 		if (strcasestr(avail_faces, ps_alias->stretch)) {
@@ -470,17 +461,15 @@ static char *gv_get_font(availfont_t* gv_af_p,
 		} else if (!strcasecmp(ps_alias->style, "ITALIC")) {
                     /* try to use ITALIC in place of OBLIQUE & visa versa */
 		    if (strcasestr(avail_faces, "OBLIQUE")) {
-			agxbputc(xb2, ' ');
-			agxbput(xb2, "OBLIQUE");
+			agxbput(xb2, " OBLIQUE");
 		    }
 		} else if (!strcasecmp(ps_alias->style, "OBLIQUE")) {
 		    if (strcasestr(avail_faces, "ITALIC")) {
-			agxbputc(xb2, ' ');
-			agxbput(xb2, "ITALIC");
+			agxbput(xb2, " ITALIC");
 		    }
 		}
 	    }
-	    return strdup(agxbuse(xb2));
+	    return agxbdisown(xb2);
 	}
     }
     return NULL;
@@ -507,19 +496,14 @@ printFontMap (gv_font_map*gv_fmap, int sz)
 gv_font_map* get_font_mapping(PangoFontMap * fontmap)
 {
     PostscriptAlias *ps_alias;
-    availfont_t *gv_af_p;
-    int j, ps_fontnames_sz = sizeof(postscript_alias) / sizeof(PostscriptAlias);
-    gv_font_map* gv_fmap = N_NEW(ps_fontnames_sz, gv_font_map);
-    agxbuf xb;
-    agxbuf xb2;
-    unsigned char buf[BUFSIZ];
-    unsigned char buf2[BUFSIZ];
-
-    agxbinit(&xb, BUFSIZ, buf);
-    agxbinit(&xb2, BUFSIZ, buf2);
-    gv_af_p = gv_get_ps_fontlist(fontmap);	// get the available installed fonts
+    static const size_t ps_fontnames_sz =
+      sizeof(postscript_alias) / sizeof(PostscriptAlias);
+    gv_font_map* gv_fmap = gv_calloc(ps_fontnames_sz, sizeof(gv_font_map));
+    agxbuf xb = {0};
+    agxbuf xb2 = {0};
+    availfonts_t gv_af_p = gv_get_ps_fontlist(fontmap);	// get the available installed fonts
     /* add the Graphviz PS font name and available system font string to the array */
-    for (j = 0; j < ps_fontnames_sz; j++) {
+    for (size_t j = 0; j < ps_fontnames_sz; j++) {
 	ps_alias = &postscript_alias[j];
 	gv_fmap[ps_alias->xfig_code].gv_ps_fontname = ps_alias->name;
 	gv_fmap[ps_alias->xfig_code].gv_font = gv_get_font(gv_af_p, ps_alias, &xb, &xb2);
@@ -527,46 +511,9 @@ gv_font_map* get_font_mapping(PangoFontMap * fontmap)
     gv_flist_free_af(gv_af_p);
     agxbfree(&xb);
     agxbfree(&xb2);
-#ifndef _WIN32
     if (Verbose > 1) {
 	fprintf(stderr, "Verbose %d\n", Verbose);
 	printFontMap (gv_fmap, ps_fontnames_sz);
     }
-#endif
     return gv_fmap;
-}
-
-/* Returns a list of the fonts that are available for use
-
-*/
-
-void get_font_list(char **fonts[], int *cnt){
-
-PangoFontMap *fontmap;
-availfont_t *gv_af_p;
-int j, i;
-char **fontlist;
-fontlist = N_NEW(GV_FONT_LIST_SIZE,char *);
-fontmap = pango_cairo_font_map_new();
-gv_af_p = gv_get_ps_fontlist(fontmap);	// get the available installed fonts
-g_object_unref(fontmap);
-/* load array with available font names */
-i=0;
-for (j = 0; j < GV_FONT_LIST_SIZE; j++) {
-	*(fontlist + j) = 0;
-	if ((gv_af_p[j].faces == 0) || (gv_af_p[j].fontname == NULL)) {
-	    continue;
-	}
-	*(fontlist + i++) = strdup(gv_af_p[j].fontname);
-}
-/* Free unused array elements */
-for(j=i;j<GV_FONT_LIST_SIZE;j++){
-    free(*(fontlist + j));
-}
-/* Free available fonts structure */
-gv_flist_free_af(gv_af_p);
-
-*cnt = i;
-*fonts = fontlist;
-return;
 }

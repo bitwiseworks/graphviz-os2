@@ -1,5 +1,3 @@
-/* vim:set shiftwidth=4 ts=8: */
-
 %{
 #include <stdlib.h>
 #include <stdio.h>
@@ -31,23 +29,23 @@ nonTerm (char* s)
 static void
 gen (char* name, term_t* ts)
 {
-    fprintf (outf, "<TR>\n  <TD ALIGN=RIGHT>");
+    fprintf (outf, "<TR>\n  <TD STYLE=\"text-align: right;\">");
     nonTerm (name);
-    fprintf (outf, "</TD>\n  <TD ALIGN=LEFT>:</TD>\n  <TD ALIGN=LEFT>");
+    fprintf (outf, "</TD>\n  <TD>:</TD>\n  <TD>");
     xlate (ts);
     fprintf (outf, "</TD>\n</TR>\n");
 
     for (ts = ts->next; ts; ts = ts->next) {
-	fprintf (outf, "<TR>\n  <TD ALIGN=RIGHT></TD>\n  <TD ALIGN=LEFT>|</TD>\n  <TD ALIGN=LEFT>");
-	xlate (ts);
-	fprintf (outf, "</TD>\n</TR>\n");
+        fprintf (outf, "<TR>\n  <TD></TD>\n  <TD>|</TD>\n  <TD>");
+        xlate (ts);
+        fprintf (outf, "</TD>\n</TR>\n");
     }
 }
 
 static term_t*
 mkLiteral (char c, int kind)
 {
-    term_t* nt = (term_t*)malloc(sizeof(term_t));
+    term_t* nt = malloc(sizeof(term_t));
     nt->kind = kind;
     nt->u.c = c;
     nt->next = 0;
@@ -57,7 +55,7 @@ mkLiteral (char c, int kind)
 static term_t*
 mkID (char* s, int kind)
 {
-    term_t* nt = (term_t*)malloc(sizeof(term_t));
+    term_t* nt = malloc(sizeof(term_t));
     nt->kind = kind;
     nt->u.s = s;
     nt->next = 0;
@@ -67,7 +65,7 @@ mkID (char* s, int kind)
 static term_t*
 mkSeq (term_t* t1, term_t* t2, int kind)
 {
-    term_t* nt = (term_t*)malloc(sizeof(term_t));
+    term_t* nt = malloc(sizeof(term_t));
     nt->kind = kind;
     nt->u.t = t1;
     t1->next = t2;
@@ -78,7 +76,7 @@ mkSeq (term_t* t1, term_t* t2, int kind)
 static term_t*
 mkTerm (term_t* t, int kind)
 {
-    term_t* nt = (term_t*)malloc(sizeof(term_t));
+    term_t* nt = malloc(sizeof(term_t));
     nt->kind = kind;
     nt->u.t = t;
     nt->next = 0;

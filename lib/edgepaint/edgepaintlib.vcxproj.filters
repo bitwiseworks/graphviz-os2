@@ -27,6 +27,9 @@
     <ClCompile Include="lab.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="lab_gamut.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="node_distinct_coloring.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -50,8 +53,5 @@
     <ClInclude Include="node_distinct_coloring.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="ReadMe.txt" />
   </ItemGroup>
 </Project>

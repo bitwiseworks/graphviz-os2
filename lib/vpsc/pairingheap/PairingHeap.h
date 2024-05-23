@@ -1,6 +1,3 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /**
  * \brief Pairing heap datastructure implementation
  *
@@ -19,7 +16,7 @@
  * This version is released under the CPL (Common Public License) with
  * the Graphviz distribution.
  * A version is also available under the LGPL as part of the Adaptagrams
- * project: http://sourceforge.net/projects/adaptagrams.  
+ * project: https://github.com/mjwybrow/adaptagrams.  
  * If you make improvements or bug fixes to this code it would be much
  * appreciated if you could also contribute those changes back to the
  * Adaptagrams repository.
@@ -37,10 +34,7 @@
 // deleteMin( minItem )   --> Remove (and optionally return) smallest item
 // T findMin( )  --> Return smallest item
 // bool isEmpty( )        --> Return true if empty; else false
-// bool isFull( )         --> Return true if empty; else false
 // void makeEmpty( )      --> Remove all items
-// void decreaseKey( PairNode p, newVal )
-//                        --> Decrease value in node p
 // ******************ERRORS********************************
 // Throws Underflow as warranted
 
@@ -64,16 +58,9 @@ class PairNode
 
 	PairNode( const T & theElement ) :
 	       	element( theElement ),
-		leftChild(NULL), nextSibling(NULL), prev(NULL)
+		leftChild(nullptr), nextSibling(nullptr), prev(nullptr)
        	{ }
 	friend class PairingHeap<T>;
-};
-
-template <class T>
-class Comparator
-{
-public:
-	virtual bool isLessThan(T const &lhs, T const &rhs) const = 0;
 };
 
 template <class T>
@@ -82,46 +69,42 @@ class PairingHeap
 	friend std::ostream& operator<< <T>(std::ostream &os,const PairingHeap<T> &b);
 public:
 	PairingHeap( bool (*lessThan)(T const &lhs, T const &rhs) );
-	PairingHeap( const PairingHeap & rhs );
 	~PairingHeap( );
 
 	bool isEmpty( ) const;
-	bool isFull( ) const;
-	int size();
 
 	PairNode<T> *insert( const T & x );
 	const T & findMin( ) const;
 	void deleteMin( );
 	void makeEmpty( );
-	void decreaseKey( PairNode<T> *p, const T & newVal );
 	void merge( PairingHeap<T> *rhs )
 	{	
 		PairNode<T> *broot=rhs->getRoot();
-		if (root == NULL) {
-			if(broot != NULL) {
+		if (root == nullptr) {
+			if(broot != nullptr) {
 				root = broot;
 			}
 		} else {
 			compareAndLink(root, broot);
 		}
-		counter+=rhs->size();
 	}
 
-	const PairingHeap & operator=( const PairingHeap & rhs );
+	PairingHeap(const PairingHeap &rhs) = delete;
+	PairingHeap(PairingHeap &&rhs) = delete;
+	PairingHeap &operator=(const PairingHeap &rhs) = delete;
+	PairingHeap &operator=(PairingHeap &&rhs) = delete;
 protected:
 	PairNode<T> * getRoot() {
 		PairNode<T> *r=root;
-		root=NULL;
+		root=nullptr;
 		return r;
 	}
 private:
 	PairNode<T> *root;
 	bool (*lessThan)(T const &lhs, T const &rhs);
-	int counter;
 	void reclaimMemory( PairNode<T> *t ) const;
 	void compareAndLink( PairNode<T> * & first, PairNode<T> *second ) const;
 	PairNode<T> * combineSiblings( PairNode<T> *firstSibling ) const;
-	PairNode<T> * clone( PairNode<T> * t ) const;
 };
 
 #include "PairingHeap.cpp"

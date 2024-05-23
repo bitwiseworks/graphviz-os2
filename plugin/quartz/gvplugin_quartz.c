@@ -1,22 +1,19 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
-#include "types.h"
-#include "gvplugin.h"
+#include <common/types.h>
+#include <gvc/gvplugin.h>
 #include "gvplugin_quartz.h"
-#include "gvio.h"
+#include <gvc/gvio.h>
 
 extern gvplugin_installed_t gvrender_quartz_types;
 extern gvplugin_installed_t gvtextlayout_quartz_types;
@@ -30,7 +27,7 @@ extern gvplugin_installed_t gvdevice_quartz_types_for_cairo;
 
 static size_t device_data_consumer_put_bytes (void *info, const void *buffer, size_t count)
 {
-	return gvwrite((GVJ_t *)info, (const char*)buffer, count);
+	return gvwrite(info, buffer, count);
 }
 
 CGDataConsumerCallbacks device_data_consumer_callbacks = {

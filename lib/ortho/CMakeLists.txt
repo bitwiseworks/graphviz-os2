@@ -1,37 +1,40 @@
-if (with_ortho)
+if(with_ortho)
 
-add_definitions(-D_BLD_gvc=1)
+add_definitions(-DGVC_EXPORTS)
 
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${GRAPHVIZ_LIB_DIR}/cdt
-    ${GRAPHVIZ_LIB_DIR}/cgraph
-    ${GRAPHVIZ_LIB_DIR}/common
-    ${GRAPHVIZ_LIB_DIR}/gvc
-    ${GRAPHVIZ_LIB_DIR}/neatogen
-    ${GRAPHVIZ_LIB_DIR}/pack
-    ${GRAPHVIZ_LIB_DIR}/pathplan
+add_library(ortho_obj OBJECT
+  # Header files
+  fPQ.h
+  maze.h
+  ortho.h
+  partition.h
+  rawgraph.h
+  sgraph.h
+  structures.h
+  trap.h
+
+  # Source files
+  fPQ.c
+  maze.c
+  ortho.c
+  partition.c
+  rawgraph.c
+  sgraph.c
+  trapezoid.c
+)
+
+target_include_directories(ortho_obj PRIVATE
+  ..
+  ../cdt
+  ../cgraph
+  ../common
+  ../gvc
+  ../pack
+  ../pathplan
 )
 
 add_library(ortho STATIC
-    # Header files
-    fPQ.h
-    maze.h
-    ortho.h
-    partition.h
-    rawgraph.h
-    sgraph.h
-    structures.h
-    trap.h
-
-    # Source files
-    fPQ.c
-    maze.c
-    ortho.c
-    partition.c
-    rawgraph.c
-    sgraph.c
-    trapezoid.c
+  $<TARGET_OBJECTS:ortho_obj>
 )
 
-endif (with_ortho)
+endif()

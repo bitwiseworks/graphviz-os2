@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
@@ -16,11 +13,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "types.h"
-#include "gvcjob.h"
+#include <common/types.h>
+#include <gvc/gvcjob.h>
 
 #include "gvplugin_quartz.h"
 
+#ifdef __ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__
 #if __ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__ >= 20000 && __ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__ < 30200
 
 #import "GVTextLayout.h"
@@ -95,4 +93,5 @@ static NSString* _defaultFontName = @"TimesNewRomanPSMT";
 
 @end
 
+#endif
 #endif

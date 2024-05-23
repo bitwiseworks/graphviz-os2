@@ -1,13 +1,16 @@
-/* $Id$Revision:  */
+/**
+ * @file
+ * @brief <a href=https://math.nist.gov/MatrixMarket/>Matrix Market</a> I/O API
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 /* 
 *   Matrix Market I/O library for ANSI C
@@ -17,8 +20,7 @@
 *
 */
 
-#ifndef MM_IO_H
-#define MM_IO_H
+#pragma once
 
 #define MM_MAX_LINE_LENGTH 100025
 #define MatrixMarketBanner "%%MatrixMarket"
@@ -26,16 +28,8 @@
 
 typedef char MM_typecode[4];
 
-char *mm_typecode_to_str(MM_typecode matcode);
-
 int mm_read_banner(FILE * f, MM_typecode * matcode);
 int mm_read_mtx_crd_size(FILE * f, int *M, int *N, int *nz);
-int mm_read_mtx_array_size(FILE * f, int *M, int *N);
-
-int mm_write_banner(FILE * f, MM_typecode matcode);
-int mm_write_mtx_crd_size(FILE * f, int M, int N, int nz);
-int mm_write_mtx_array_size(FILE * f, int M, int N);
-
 
 /********************* MM_typecode query fucntions ***************************/
 
@@ -55,9 +49,6 @@ int mm_write_mtx_array_size(FILE * f, int M, int N);
 #define mm_is_general(typecode)	((typecode)[3]=='G')
 #define mm_is_skew(typecode)	((typecode)[3]=='K')
 #define mm_is_hermitian(typecode)((typecode)[3]=='H')
-
-int mm_is_valid(MM_typecode matcode);	/* too complex for a macro */
-
 
 /********************* MM_typecode modify fucntions ***************************/
 
@@ -125,21 +116,3 @@ int mm_is_valid(MM_typecode matcode);	/* too complex for a macro */
 #define MM_HERM_STR		"hermitian"
 #define MM_SKEW_STR		"skew-symmetric"
 #define MM_PATTERN_STR  "pattern"
-
-
-/*  high level routines */
-
-int mm_write_mtx_crd(char fname[], int M, int N, int nz, int I[], int J[],
-		     double val[], MM_typecode matcode);
-int mm_read_mtx_crd_data(FILE * f, int M, int N, int nz, int I[], int J[],
-			 double val[], MM_typecode matcode);
-int mm_read_mtx_crd_entry(FILE * f, int *I, int *J, double *realpart,
-			  double *img, MM_typecode matcode);
-
-int mm_read_unsymmetric_sparse(const char *fname, int *M_, int *N_,
-			       int *nz_, double **val_, int **I_,
-			       int **J_);
-
-
-
-#endif

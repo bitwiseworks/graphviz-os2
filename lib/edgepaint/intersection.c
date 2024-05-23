@@ -3,13 +3,14 @@
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
-#include "general.h"
+#include <sparse/general.h>
+#include <math.h>
 
-static real cross(real *u, real *v){
+static double cross(double *u, double *v){
   return u[0]*v[1] - u[1]*v[0];
 }
 
@@ -55,19 +56,19 @@ of line segments if 0 <= t <= 1 and 0 <= u <= 1.
 
 */
 
-static real dist(int dim, real *x, real *y){
+static double dist(int dim, double *x, double *y){
   int k;
-  real d = 0;
+  double d = 0;
   for (k = 0; k < dim; k++) d += (x[k] - y[k])*(x[k]-y[k]);
   return sqrt(d);
 }
 
-static real point_line_distance(real *p, real *q, real *r){
+static double point_line_distance(double *p, double *q, double *r){
   /* distance between point p and line q--r */
   enum {dim = 2};
-  real t = 0, b = 0;
+  double t = 0, b = 0;
   int i;
-  real tmp;
+  double tmp;
   
   /*   t = ((p - q).(r - q))/((r - q).(r - q)) gives the position of the project of p on line r--q */
   for (i = 0; i < dim; i++){
@@ -95,9 +96,9 @@ static real point_line_distance(real *p, real *q, real *r){
 
 }
 
-static real line_segments_distance(real *p1, real *p2, real *q1, real *q2){
+static double line_segments_distance(double *p1, double *p2, double *q1, double *q2){
   /* distance between line segments p1--p2 and q1--q2 */
-  real t1, t2, t3, t4;
+  double t1, t2, t3, t4;
   t1 = point_line_distance(p1, q1, q2);
   t2 = point_line_distance(p2, q1, q2);
   t3 = point_line_distance(q1, p1, p2);
@@ -108,7 +109,7 @@ static real line_segments_distance(real *p1, real *p2, real *q1, real *q2){
 }
  
 
-real intersection_angle(real *p1, real *p2, real *q1, real *q2){
+double intersection_angle(double *p1, double *p2, double *q1, double *q2){
 
   /* give two lines p1--p2 and q1--q2, find their intersection agle
      and return Abs[Cos[theta]] of that angle. 
@@ -122,14 +123,14 @@ real intersection_angle(real *p1, real *p2, real *q1, real *q2){
      . from -1 to 1.
  */
   enum {dim = 2};
-  real r[dim], s[dim], qp[dim];
-  real rnorm = 0, snorm = 0, b, t, u;
-  // real epsilon = sqrt(MACHINEACC), close = 0.01;
-  //this may be better. Apply to ngk10_4 and look at double edge between 28 and 43.  real epsilon = sin(10/180.), close = 0.1;
-  real epsilon = sin(1/180.), close = 0.01;
+  double r[dim], s[dim], qp[dim];
+  double rnorm = 0, snorm = 0, b, t, u;
+  // double epsilon = sqrt(MACHINEACC), close = 0.01;
+  //this may be better. Apply to ngk10_4 and look at double edge between 28 and 43.  double epsilon = sin(10/180.), close = 0.1;
+  double epsilon = sin(1/180.), close = 0.01;
   int line_dist_close;
   int i;
-  real res;
+  double res;
 
   for (i = 0; i < dim; i++) {
     r[i] = p2[i] - p1[i];
@@ -144,7 +145,7 @@ real intersection_angle(real *p1, real *p2, real *q1, real *q2){
   snorm = sqrt(snorm);
   b = cross(r, s);
   line_dist_close = (line_segments_distance(p1, p2, q1, q2)  <= close*MAX(rnorm, snorm));
-  if (ABS(b) <= epsilon*snorm*rnorm){/* parallel */
+  if (fabs(b) <= epsilon*snorm*rnorm){/* parallel */
     if (line_dist_close) {/* two parallel lines that are close */
       return 1;
     }
@@ -155,7 +156,7 @@ real intersection_angle(real *p1, real *p2, real *q1, real *q2){
   u = cross(qp, r)/b;
   if ((t >= 0 && t <= 1 && u >= 0 && u <= 1) /* they intersect */
       || line_dist_close){/* or lines are close */
-    real rs = 0;
+    double rs = 0;
     if (rnorm*snorm < MACHINEACC) return 0;
     for (i = 0; i < dim; i++){
       rs += r[i]*s[i];
@@ -173,7 +174,7 @@ real intersection_angle(real *p1, real *p2, real *q1, real *q2){
     }
 
     /* normal case of intersect or very close */
-    return ABS(res);
+    return fabs(res);
   }
   return -2;/* no intersection, and lines are not even close */
 }

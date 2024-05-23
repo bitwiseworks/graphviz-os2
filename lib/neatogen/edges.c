@@ -1,20 +1,17 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "neato.h"
-#include "mem.h"
-#include "info.h"
-#include "edges.h"
+#include <neatogen/neato.h>
+#include <neatogen/mem.h>
+#include <neatogen/info.h>
+#include <neatogen/edges.h>
 #include <math.h>
 
 
@@ -23,7 +20,7 @@ double pxmin, pxmax, pymin, pymax;	/* clipping window */
 static int nedges;
 static Freelist efl;
 
-void edgeinit()
+void edgeinit(void)
 {
     freeinit(&efl, sizeof(Edge));
     nedges = 0;
@@ -34,19 +31,19 @@ Edge *gvbisect(Site * s1, Site * s2)
     double dx, dy, adx, ady;
     Edge *newedge;
 
-    newedge = (Edge *) getfree(&efl);
+    newedge = getfree(&efl);
 
     newedge->reg[0] = s1;
     newedge->reg[1] = s2;
     ref(s1);
     ref(s2);
-    newedge->ep[0] = (Site *) NULL;
-    newedge->ep[1] = (Site *) NULL;
+    newedge->ep[0] = NULL;
+    newedge->ep[1] = NULL;
 
     dx = s2->coord.x - s1->coord.x;
     dy = s2->coord.y - s1->coord.y;
-    adx = dx > 0 ? dx : -dx;
-    ady = dy > 0 ? dy : -dy;
+    adx = fabs(dx);
+    ady = fabs(dy);
     newedge->c =
 	s1->coord.x * dx + s1->coord.y * dy + (dx * dx + dy * dy) * 0.5;
     if (adx > ady) {
@@ -60,9 +57,6 @@ Edge *gvbisect(Site * s1, Site * s2)
     };
 
     newedge->edgenbr = nedges;
-#ifdef STANDALONE
-    out_bisector(newedge);
-#endif
     nedges += 1;
     return (newedge);
 }
@@ -90,7 +84,7 @@ void clip_line(Edge * e)
     }
 
     if (e->a == 1.0) {
-	if (s1 != (Site *) NULL) {
+	if (s1 != NULL) {
 	    y1 = s1->coord.y;
 	    if (y1 > pymax)
 		return;
@@ -105,7 +99,7 @@ void clip_line(Edge * e)
 	    x1 = e->c - e->b * y1;
 	}
 
-	if (s2 != (Site *) NULL) {
+	if (s2 != NULL) {
 	    y2 = s2->coord.y;
 	    if (y2 < pymin)
 		return;
@@ -120,7 +114,7 @@ void clip_line(Edge * e)
 	    x2 = e->c - e->b * y2;
 	}
 
-	if (((x1 > pxmax) & (x2 > pxmax)) | ((x1 < pxmin) & (x2 < pxmin)))
+	if ((x1 > pxmax && x2 > pxmax) || (x1 < pxmin && x2 < pxmin))
 	    return;
 	if (x1 > pxmax) {
 	    x1 = pxmax;
@@ -139,7 +133,7 @@ void clip_line(Edge * e)
 	    y2 = (e->c - x2) / e->b;
 	};
     } else {
-	if (s1 != (Site *) NULL) {
+	if (s1 != NULL) {
 	    x1 = s1->coord.x;
 	    if (x1 > pxmax)
 		return;
@@ -154,7 +148,7 @@ void clip_line(Edge * e)
 	    y1 = e->c - e->a * x1;
 	}
 
-	if (s2 != (Site *) NULL) {
+	if (s2 != NULL) {
 	    x2 = s2->coord.x;
 	    if (x2 < pxmin)
 		return;
@@ -169,7 +163,7 @@ void clip_line(Edge * e)
 	    y2 = e->c - e->a * x2;
 	}
 
-	if (((y1 > pymax) & (y2 > pymax)) | ((y1 < pymin) & (y2 < pymin)))
+	if ((y1 > pymax && y2 > pymax) || (y1 < pymin && y2 < pymin))
 	    return;
 	if (y1 > pymax) {
 	    y1 = pymax;
@@ -190,22 +184,15 @@ void clip_line(Edge * e)
     }
 
     doSeg(e, x1, y1, x2, y2);
-#ifdef STANDALONE
-    if (doPS)
-	line(x1, y1, x2, y2);
-#endif
 }
 
 void endpoint(Edge * e, int lr, Site * s)
 {
     e->ep[lr] = s;
     ref(s);
-    if (e->ep[re - lr] == (Site *) NULL)
+    if (e->ep[re - lr] == NULL)
 	return;
     clip_line(e);
-#ifdef STANDALONE
-    out_ep(e);
-#endif
     deref(e->reg[le]);
     deref(e->reg[re]);
     makefree(e, &efl);

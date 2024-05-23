@@ -51,27 +51,26 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <MinimalRebuild>true</MinimalRebuild>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)/lib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib />
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <PreprocessorDefinitions>NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)/lib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Lib />
   </ItemDefinitionGroup>
@@ -83,7 +82,6 @@
     <ClInclude Include="generate-constraints.h" />
     <ClInclude Include="pairingheap\dsexceptions.h" />
     <ClInclude Include="pairingheap\PairingHeap.h" />
-    <ClInclude Include="remove_rectangle_overlap.h" />
     <ClInclude Include="solve_VPSC.h" />
     <ClInclude Include="variable.h" />
   </ItemGroup>
@@ -94,7 +92,6 @@
     <ClCompile Include="csolve_VPSC.cpp" />
     <ClCompile Include="generate-constraints.cpp" />
     <ClCompile Include="pairingheap\PairingHeap.cpp" />
-    <ClCompile Include="remove_rectangle_overlap.cpp" />
     <ClCompile Include="solve_VPSC.cpp" />
     <ClCompile Include="variable.cpp" />
   </ItemGroup>

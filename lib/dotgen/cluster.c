@@ -1,18 +1,18 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include "dot.h"
+#include <assert.h>
+#include <cgraph/alloc.h>
+#include <cgraph/queue.h>
+#include <dotgen/dot.h>
+#include <stdbool.h>
 
 static node_t*
 map_interclust_node(node_t * n)
@@ -123,7 +123,6 @@ map_path(node_t * from, node_t * to, edge_t * orig, edge_t * ve, int type)
 	    }
 	}
 	if (ND_rank(to) - ND_rank(from) > 1) {
-	    e = ve;
 	    if (agtail(ve) != from) {
 		ED_to_virt(orig) = NULL;
 		e = ED_to_virt(orig) = virtual_edge(from, aghead(ve), orig);
@@ -142,9 +141,7 @@ map_path(node_t * from, node_t * to, edge_t * orig, edge_t * ve, int type)
     }
 }
 
-static void 
-make_interclust_chain(graph_t * g, node_t * from, node_t * to, edge_t * orig)
-{
+static void make_interclust_chain(node_t * from, node_t * to, edge_t * orig) {
     int newtype;
     node_t *u, *v;
 
@@ -187,7 +184,8 @@ static void interclexp(graph_t * subg)
 		    ED_to_virt(e) = NULL;
 		if (ED_to_virt(prev) == NULL)
 		    continue;	/* internal edge */
-		merge_chain(subg, e, ED_to_virt(prev), FALSE);
+		ED_to_virt(e) = NULL;
+		merge_chain(subg, e, ED_to_virt(prev), false);
 		safe_other_edge(e);
 		continue;
 	    }
@@ -207,7 +205,7 @@ static void interclexp(graph_t * subg)
 
 	    /* forward edges */
 	    if (ND_rank(aghead(e)) > ND_rank(agtail(e))) {
-		make_interclust_chain(g, agtail(e), aghead(e), e);
+		make_interclust_chain(agtail(e), aghead(e), e);
 		prev = e;
 		continue;
 	    }
@@ -219,7 +217,7 @@ I think that make_interclust_chain should create call other_edge(e) anyway
 				if (agcontains(subg,agtail(e))
 					&& agfindedge(g,aghead(e),agtail(e))) other_edge(e);
 */
-		make_interclust_chain(g, aghead(e), agtail(e), e);
+		make_interclust_chain(aghead(e), agtail(e), e);
 		prev = e;
 	    }
 	}
@@ -233,9 +231,11 @@ merge_ranks(graph_t * subg)
     node_t *v;
     graph_t *root;
 
+    assert(GD_minrank(subg) <= GD_maxrank(subg) && "corrupted rank bounds");
+
     root = dot_root(subg);
     if (GD_minrank(subg) > 0)
-	GD_rank(root)[GD_minrank(subg) - 1].valid = FALSE;
+	GD_rank(root)[GD_minrank(subg) - 1].valid = false;
     for (r = GD_minrank(subg); r <= GD_maxrank(subg); r++) {
 	d = GD_rank(subg)[r].n;
 	ipos = pos = ND_order(GD_rankleader(subg)[r]);
@@ -248,14 +248,13 @@ merge_ranks(graph_t * subg)
 		v->root = agroot(root);
 	    delete_fast_node(subg, v);
 	    fast_node(root, v);
-	    GD_n_nodes(root)++;
 	}
 	GD_rank(subg)[r].v = GD_rank(root)[r].v + ipos;
-	GD_rank(root)[r].valid = FALSE;
+	GD_rank(root)[r].valid = false;
     }
     if (r < GD_maxrank(root))
-	GD_rank(root)[r].valid = FALSE;
-    GD_expanded(subg) = TRUE;
+	GD_rank(root)[r].valid = false;
+    GD_expanded(subg) = true;
 }
 
 static void 
@@ -269,11 +268,20 @@ remove_rankleaders(graph_t * g)
 	v = GD_rankleader(g)[r];
 
 	/* remove the entire chain */
-	while ((e = ND_out(v).list[0]))
+	while ((e = ND_out(v).list[0])) {
 	    delete_fast_edge(e);
-	while ((e = ND_in(v).list[0]))
+	    free(e->base.data);
+	    free(e);
+	}
+	while ((e = ND_in(v).list[0])) {
 	    delete_fast_edge(e);
+	    free(e);
+	}
 	delete_fast_node(dot_root(g), v);
+	free(ND_in(v).list);
+	free(ND_out(v).list);
+	free(v->base.data);
+	free(v);
 	GD_rankleader(g)[r] = NULL;
     }
 }
@@ -314,7 +322,7 @@ void mark_clusters(graph_t * g)
 	for (n = agfstnode(clust); n; n = nn) {
 		nn = agnxtnode(clust,n);
 	    if (ND_ranktype(n) != NORMAL) {
-		agerr(AGWARN,
+		agwarningf(
 		      "%s was already in a rankset, deleted from cluster %s\n",
 		      agnameof(n), agnameof(g));
 		agdelete(clust,n);
@@ -346,7 +354,7 @@ void build_skeleton(graph_t * g, graph_t * subg)
     edge_t *e;
 
     prev = NULL;
-    GD_rankleader(subg) = N_NEW(GD_maxrank(subg) + 2, node_t *);
+    GD_rankleader(subg) = gv_calloc(GD_maxrank(subg) + 2, sizeof(node_t*));
     for (r = GD_minrank(subg); r <= GD_maxrank(subg); r++) {
 	v = GD_rankleader(subg)[r] = virtual_node(g);
 	ND_rank(v) = r;
@@ -376,8 +384,7 @@ void build_skeleton(graph_t * g, graph_t * subg)
     }
 }
 
-void install_cluster(graph_t * g, node_t * n, int pass, nodequeue * q)
-{
+void install_cluster(graph_t *g, node_t *n, int pass, queue_t *q) {
     int r;
     graph_t *clust;
 

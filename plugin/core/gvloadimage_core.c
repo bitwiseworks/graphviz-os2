@@ -1,18 +1,16 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -23,12 +21,12 @@
 #include <io.h>
 #endif
 
-#include "gvplugin_loadimage.h"
-#include "agxbuf.h"
-#include "utils.h"
-#include "gvio.h"
+#include <gvc/gvplugin_loadimage.h>
+#include <cgraph/agxbuf.h>
+#include <common/utils.h>
+#include <gvc/gvio.h>
 
-extern void core_loadimage_xdot(GVJ_t*, usershape_t*, boxf, boolean);
+extern void core_loadimage_xdot(GVJ_t*, usershape_t*, boxf, bool);
 extern shape_desc *find_user_shape(char *name);
 
 typedef enum {
@@ -39,12 +37,12 @@ typedef enum {
     FORMAT_PNG_FIG,  FORMAT_GIF_FIG,  FORMAT_JPEG_FIG,
     FORMAT_PNG_VRML, FORMAT_GIF_VRML, FORMAT_JPEG_VRML,
     FORMAT_PS_PS, FORMAT_PSLIB_PS, 
-    FORMAT_PNG_VML, FORMAT_GIF_VML, FORMAT_JPEG_VML, 
     FORMAT_GIF_TK,
 } format_type;
 
-static void core_loadimage_svg(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void core_loadimage_svg(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
+    (void)filled;
 
     double width = (b.UR.x-b.LL.x);
     double height = (b.UR.y-b.LL.y);
@@ -72,8 +70,10 @@ static void core_loadimage_svg(GVJ_t * job, usershape_t *us, boxf b, boolean fil
     gvputs(job, "/>\n");
 }
 
-static void core_loadimage_fig(GVJ_t * job, usershape_t *us, boxf bf, boolean filled)
+static void core_loadimage_fig(GVJ_t * job, usershape_t *us, boxf bf, bool filled)
 {
+    (void)filled;
+
     int object_code = 2;        /* always 2 for polyline */
     int sub_type = 5;           /* always 5 for image */
     int line_style = 0;		/* solid, dotted, dashed */
@@ -113,19 +113,17 @@ static void core_loadimage_fig(GVJ_t * job, usershape_t *us, boxf bf, boolean fi
 	    b.LL.x, b.LL.y);
 }
 
-static void core_loadimage_vrml(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void core_loadimage_vrml(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
-    obj_state_t *obj;
-    node_t *n;
+    (void)b;
+    (void)filled;
 
     assert(job);
-    obj = job->obj;
-    assert(obj);
+    assert(job->obj);
     assert(us);
     assert(us->name);
 
-    n = job->obj->u.n;
-    assert(n);
+    assert(job->obj->u.n);
 
     gvprintf(job, "Shape {\n");
     gvprintf(job, "  appearance Appearance {\n");
@@ -148,8 +146,10 @@ static void ps_freeimage(usershape_t *us)
 }
 
 /* usershape described by a postscript file */
-static void core_loadimage_ps(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void core_loadimage_ps(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
+    (void)filled;
+
     assert(job);
     assert(us);
     assert(us->name);
@@ -174,16 +174,17 @@ static void core_loadimage_ps(GVJ_t * job, usershape_t *us, boxf b, boolean fill
             case FT_PS:
             case FT_EPS:
 		fstat(fd, &statbuf);
-		us->datasize = statbuf.st_size;
+		us->datasize = (size_t)statbuf.st_size;
 #ifdef HAVE_SYS_MMAN_H
-		us->data = mmap(0, statbuf.st_size, PROT_READ, MAP_SHARED, fd, 0);
+		us->data = mmap(0, us->datasize, PROT_READ, MAP_SHARED, fd, 0);
 		if (us->data == MAP_FAILED)
 			us->data = NULL;
 #else
 		us->data = malloc(statbuf.st_size);
-		read(fd, us->data, statbuf.st_size);
+		if (us->data != NULL)
+			read(fd, us->data, statbuf.st_size);
 #endif
-		us->must_inline = TRUE;
+		us->must_inline = true;
                 break;
             default:
                 break;
@@ -205,7 +206,7 @@ static void core_loadimage_ps(GVJ_t * job, usershape_t *us, boxf b, boolean fill
 }
 
 /* usershape described by a member of a postscript library */
-static void core_loadimage_pslib(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void core_loadimage_pslib(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
     int i;
     pointf AF[4];
@@ -215,7 +216,7 @@ static void core_loadimage_pslib(GVJ_t * job, usershape_t *us, boxf b, boolean f
     assert(us);
     assert(us->name);
 
-    if ((shape = (shape_desc*)us->data)) {
+    if ((shape = us->data)) {
 	AF[0] = b.LL;
 	AF[2] = b.UR;
 	AF[1].x = AF[0].x;
@@ -223,14 +224,11 @@ static void core_loadimage_pslib(GVJ_t * job, usershape_t *us, boxf b, boolean f
 	AF[3].x = AF[2].x;
 	AF[3].y = AF[0].y;
         if (filled) {
-//            ps_begin_context();
-//            ps_set_color(S[SP].fillcolor);
             gvprintf(job, "[ ");
             for (i = 0; i < 4; i++)
                 gvprintf(job, "%g %g ", AF[i].x, AF[i].y);
             gvprintf(job, "%g %g ", AF[0].x, AF[0].y);
             gvprintf(job, "]  %d true %s\n", 4, us->name);
-//            ps_end_context();
         }
         gvprintf(job, "[ ");
         for (i = 0; i < 4; i++)
@@ -240,26 +238,23 @@ static void core_loadimage_pslib(GVJ_t * job, usershape_t *us, boxf b, boolean f
     }
 }
 
-static void core_loadimage_vml(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void core_loadimage_tk(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
-    unsigned int  graphHeight;
-    graphHeight =(int)(job->bb.UR.y - job->bb.LL.y);
-    gvprintf (job, "<v:image src=\"%s\" style=\" position:absolute; width:%.2f; height:%.2f; left:%.2f ; top:%.2f\"",
-           us->name,  b.UR.x - b.LL.x, b.UR.y - b.LL.y, b.LL.x, graphHeight-b.UR.y);
-    gvputs(job, " />\n");
-}
+    (void)filled;
 
-static void core_loadimage_tk(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
-{
     gvprintf (job, "image create photo \"photo_%s\" -file \"%s\"\n",
 	us->name, us->name);
     gvprintf (job, "$c create image %.2f %.2f -image \"photo_%s\"\n",
-	us->name, (b.UR.x + b.LL.x) / 2, (b.UR.y + b.LL.y) / 2);
+	(b.UR.x + b.LL.x) / 2, (b.UR.y + b.LL.y) / 2, us->name);
 }
 
-static void core_loadimage_null(GVJ_t *gvc, usershape_t *us, boxf b, boolean filled)
+static void core_loadimage_null(GVJ_t *gvc, usershape_t *us, boxf b, bool filled)
 {
     /* null function - basically suppress the missing loader message */
+    (void)gvc;
+    (void)us;
+    (void)b;
+    (void)filled;
 }
 
 static gvloadimage_engine_t engine_svg = {
@@ -288,10 +283,6 @@ static gvloadimage_engine_t engine_null = {
 
 static gvloadimage_engine_t engine_xdot = {
     core_loadimage_xdot
-};
-
-static gvloadimage_engine_t engine_vml = {
-    core_loadimage_vml
 };
 
 static gvloadimage_engine_t engine_tk = {
@@ -349,12 +340,6 @@ gvplugin_installed_t gvloadimage_core_types[] = {
     {FORMAT_SVG_XDOT, "svg:xdot", 1, &engine_xdot, NULL},
 
     {FORMAT_SVG_SVG, "svg:svg", 1, &engine_svg, NULL},
-
-    {FORMAT_PNG_VML, "png:vml", 1, &engine_vml, NULL},
-    {FORMAT_GIF_VML, "gif:vml", 1, &engine_vml, NULL},
-    {FORMAT_JPEG_VML, "jpeg:vml", 1, &engine_vml, NULL},
-    {FORMAT_JPEG_VML, "jpe:vml", 1, &engine_vml, NULL},
-    {FORMAT_JPEG_VML, "jpg:vml", 1, &engine_vml, NULL},
 
     {FORMAT_GIF_TK, "gif:tk", 1, &engine_tk, NULL},
 

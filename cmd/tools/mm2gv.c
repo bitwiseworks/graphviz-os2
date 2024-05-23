@@ -1,37 +1,35 @@
-/* $Id$Revision:  */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief <a href=https://math.nist.gov/MatrixMarket/>Matrix Market</a>-DOT converter
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
+#include <cgraph/alloc.h>
+#include <cgraph/unreachable.h>
 
 #define STANDALONE
-#include "cgraph.h"
-/* #include "arith.h" */
+#include <cgraph/cgraph.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <assert.h>
 #include "mmio.h"
-#include "agxbuf.h"
-#include "SparseMatrix.h"
+#include <cgraph/agxbuf.h>
+#include <sparse/SparseMatrix.h>
 #include "matrix_market.h"
 #include <getopt.h>
-
-#define MALLOC malloc
-#define FREE free
-#define test_flag(a, flag) ((a)&(flag))
-#define real double
-#define BUFS         1024
 
 typedef struct {
     Agrec_t h;
@@ -42,252 +40,96 @@ typedef struct {
 
 static char *cmd;
 
-static real Hue2RGB(real v1, real v2, real H)
+static double Hue2RGB(double v1, double v2, double H)
 {
     if (H < 0.0)
 	H += 1.0;
     if (H > 1.0)
 	H -= 1.0;
-    if ((6.0 * H) < 1.0)
+    if (6.0 * H < 1.0)
 	return (v1 + (v2 - v1) * 6.0 * H);
-    if ((2.0 * H) < 1.0)
+    if (2.0 * H < 1.0)
 	return v2;
-    if ((3.0 * H) < 2.0)
-	return (v1 + (v2 - v1) * ((2.0 / 3.0) - H) * 6.0);
+    if (3.0 * H < 2.0)
+	return v1 + (v2 - v1) * (2.0 / 3.0 - H) * 6.0;
     return v1;
 }
 
-char *hex[16] =
-    { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d",
-"e", "f" };
-
-static char *hue2rgb(real hue, char *color)
-{
-    real v1, v2, lightness = .5, saturation = 1;
+static char *hue2rgb(double hue, agxbuf *xb) {
+    double v1, v2, lightness = .5, saturation = 1;
     int red, blue, green;
 
-    if (lightness < 0.5)
-	v2 = lightness * (1.0 + saturation);
-    else
-	v2 = (lightness + saturation) - (saturation * lightness);
+    v2 = lightness + saturation - saturation * lightness;
 
     v1 = 2.0 * lightness - v2;
 
-    red = (int) (255.0 * Hue2RGB(v1, v2, hue + (1.0 / 3.0)) + 0.5);
+    red = (int) (255.0 * Hue2RGB(v1, v2, hue + 1.0 / 3.0) + 0.5);
     green = (int) (255.0 * Hue2RGB(v1, v2, hue) + 0.5);
-    blue = (int) (255.0 * Hue2RGB(v1, v2, hue - (1.0 / 3.0)) + 0.5);
-    color[0] = '#';
-    sprintf(color + 1, "%s", hex[red / 16]);
-    sprintf(color + 2, "%s", hex[red % 16]);
-    sprintf(color + 3, "%s", hex[green / 16]);
-    sprintf(color + 4, "%s", hex[green % 16]);
-    sprintf(color + 5, "%s", hex[blue / 16]);
-    sprintf(color + 6, "%s", hex[blue % 16]);
-    color[7] = '\0';
-    return color;
+    blue = (int) (255.0 * Hue2RGB(v1, v2, hue - 1.0 / 3.0) + 0.5);
+    agxbprint(xb, "#%02x%02x%02x", red, green, blue);
+    return agxbuse(xb);
 }
-
-#if 0
-static void posStr(char *buf, int dim, real * x, double sc)
-{
-    if (dim == 3) {
-	sprintf(buf, "%f,%f,%f", sc * x[0], sc * x[1], sc * x[2]);
-    } else {
-	sprintf(buf, "%f,%f", sc * x[0], sc * x[1]);
-    }
-}
-
-static void attach_embedding(Agraph_t * g, int dim, double sc, real * x)
-{
-    Agsym_t *sym = agattr(g, AGNODE, "pos", 0);
-    Agnode_t *n;
-    char buf[BUFS];
-    int i = 0;
-
-    if (!sym)
-	sym = agattr(g, AGNODE, "pos", "");
-
-    for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-	assert(i == ND_id(n));
-	posStr(buf, dim, x + i * dim, sc);
-	agxset(n, sym, buf);
-	i++;
-    }
-
-}
-
-/* SparseMatrix_import_dot:
- * Assumes g is connected and simple, i.e., we can have a->b and b->a
- * but not a->b and a->b
- */
-SparseMatrix
-SparseMatrix_import_dot(Agraph_t * g, int dim, real ** label_sizes,
-			real ** x, int format)
-{
-    SparseMatrix A = 0;
-    Agnode_t *n;
-    Agedge_t *e;
-    Agsym_t *sym;
-    int nnodes;
-    int nedges;
-    int i, row;
-    int *I;
-    int *J;
-    real *val;
-    real v;
-    int type = MATRIX_TYPE_REAL;
-    real padding = 10;
-
-    if (!g)
-	return NULL;
-    nnodes = agnnodes(g);
-    nedges = agnedges(g);
-    if (format != FORMAT_CSR) {
-	fprintf(stderr, "Format %d not supported\n", format);
-	exit(1);
-    }
-
-    /* Assign node ids */
-    i = 0;
-    for (n = agfstnode(g); n; n = agnxtnode(g, n))
-	ND_id(n) = i++;
-
-    I = N_NEW(nedges, int);
-    J = N_NEW(nedges, int);
-    val = N_NEW(nedges, real);
-
-    sym = agndattr(g->proto->e, "wt");
-    i = 0;
-    for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-	row = ND_id(n);
-	for (e = agfstout(g, n); e; e = agnxtout(g, e)) {
-	    I[i] = row;
-	    J[i] = ND_id(e->head);
-	    if (sym) {
-		if (sscanf(agxget(e, sym->index), "%lf", &v) != 1)
-		    v = 1;
-	    } else
-		v = 1;
-	    val[i] = v;
-	    i++;
-	}
-    }
-
-    *label_sizes = N_NEW(2 * nnodes, real);
-    for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-	real sz;
-	i = ND_id(n);
-	if (agget(n, "width") && agget(n, "height")) {
-	    sscanf(agget(n, "width"), "%lf", &sz);
-	    /*      (*label_sizes)[i*2] = POINTS(sz)*.6; */
-	    (*label_sizes)[i * 2] = POINTS(sz) * .5 + padding * 0.5;
-	    sscanf(agget(n, "height"), "%lf", &sz);
-	    /*(*label_sizes)[i*2+1] = POINTS(sz)*.6; */
-	    (*label_sizes)[i * 2 + 1] = POINTS(sz) * .5 + padding * 0.5;
-	} else {
-	    (*label_sizes)[i * 2] = 4 * POINTS(0.75) * .5;
-	    (*label_sizes)[i * 2 + 1] = 4 * POINTS(0.5) * .5;
-	}
-    }
-
-    if (x) {
-	*x = N_NEW(dim * nnodes, real);
-	for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-	    real xx, yy;
-	    i = ND_id(n);
-	    if (agget(n, "pos")) {
-		sscanf(agget(n, "pos"), "%lf,%lf", &xx, &yy);
-		(*x)[i * dim] = xx;
-		(*x)[i * dim + 1] = yy;
-	    } else {
-		(*x)[i * dim] = 0;
-		(*x)[i * dim + 1] = 0;
-	    }
-	}
-    }
-
-    A = SparseMatrix_from_coordinate_arrays(nedges, nnodes, nnodes, I, J,
-					    val, type);
-
-    FREE(I);
-    FREE(J);
-    FREE(val);
-
-    return A;
-}
-#endif
 
 static Agraph_t *makeDotGraph(SparseMatrix A, char *name, int dim,
-			      real * x, int with_color, int with_label, int with_val)
+			      double * x, int with_color, int with_label, int with_val)
 {
     Agraph_t *g;
     Agnode_t *n;
     Agnode_t *h;
     Agedge_t *e;
     int i, j;
-    agxbuf xb;
-    char buf[BUFS];
-    unsigned char string[BUFS];
-    Agsym_t *sym, *sym2 = NULL, *sym3 = NULL;
+    Agsym_t *sym = NULL, *sym2 = NULL, *sym3 = NULL;
     int *ia = A->ia;
     int *ja = A->ja;
-    real *val = (real *) (A->a);
-    Agnode_t **arr = N_NEW(A->m, Agnode_t *);
-    real *color = NULL;
-    char cstring[8];
+    double *val = A->a;
+    Agnode_t **arr = gv_calloc(A->m, sizeof(Agnode_t*));
+    double *color = NULL;
 
     name = strip_dir(name);
 
     if (with_color) {
-	if ((A->type == MATRIX_TYPE_REAL) && !val) {
+	if (A->type == MATRIX_TYPE_REAL && !val) {
 	    fprintf (stderr, "Warning: input matrix has no values, -c flag ignored\n");
 	    with_color = 0;
 	}
-	else if ((A->type != MATRIX_TYPE_REAL) && !x) {
+	else if (A->type != MATRIX_TYPE_REAL && !x) {
 	    fprintf (stderr, "Warning: input has no coordinates, -c flag ignored\n");
 	    with_color = 0;
 	}
     }
 
     if (SparseMatrix_known_undirected(A)) {
-	g = agopen("G", Agundirected, (Agdisc_t *) 0);
+	g = agopen("G", Agundirected, NULL);
     } else {
-	g = agopen("G", Agdirected, (Agdisc_t *) 0);
+	g = agopen("G", Agdirected, NULL);
     }
 
     if (with_val) {
 	sym = agattr(g, AGEDGE, "len", "1");
     }
-    agxbinit (&xb, BUFS, string);
+    agxbuf xb = {0};
     if (with_label) {
-	agxbput (&xb, name);
-	agxbput (&xb, ". ");
-	sprintf(buf, "%d", A->m);
-	agxbput (&xb, buf);
-	agxbput (&xb, " nodes, ");
-	sprintf(buf, "%d", A->nz);
-	agxbput (&xb, buf);
-	agxbput (&xb, " edges.");
+	agxbprint (&xb, "%s. %d nodes, %d edges.", name, A->m, A->nz);
 	agattr(g, AGRAPH, "label", agxbuse (&xb));
     }
 
     for (i = 0; i < A->m; i++) {
-	sprintf(buf, "%d", i);
-	n = agnode(g, buf, 1);
-	agbindrec(n, "nodeinfo", sizeof(Agnodeinfo_t), TRUE);
+	agxbprint(&xb, "%d", i);
+	n = agnode(g, agxbuse(&xb), 1);
+	agbindrec(n, "nodeinfo", sizeof(Agnodeinfo_t), true);
 	ND_id(n) = i;
 	arr[i] = n;
     }
 
     if (with_color) {
-	real maxdist = 0.;
-	real mindist = 0.;
-	int first = TRUE;
+	double maxdist = 0.;
+	double mindist = 0.;
+	bool first = true;
 
 	sym2 = agattr(g, AGEDGE, "color", "");
 	sym3 = agattr(g, AGEDGE, "wt", "");
 	agattr(g, AGRAPH, "bgcolor", "black");
-	color = N_NEW(A->nz, real);
+	color = gv_calloc(A->nz, sizeof(double));
 	for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	    i = ND_id(n);
 	    if (A->type != MATRIX_TYPE_REAL) {
@@ -296,60 +138,57 @@ static Agraph_t *makeDotGraph(SparseMatrix A, char *name, int dim,
 		    if (i != ja[j]) {
 			if (first) {
 			    mindist = color[j];
-			    first = FALSE;
+			    first = false;
 			} else {
-			    mindist = MIN(mindist, color[j]);
+			    mindist = fmin(mindist, color[j]);
 			}
 		    }
-		    maxdist = MAX(color[j], maxdist);
+		    maxdist = fmax(color[j], maxdist);
 		}
 	    } else {
 		for (j = ia[i]; j < ia[i + 1]; j++) {
-		    if (val) color[j] = ABS(val[j]);
+		    if (val) color[j] = fabs(val[j]);
 		    else color[j] = 1;
 		    if (i != ja[j]) {
 			if (first) {
 			    mindist = color[j];
-			    first = FALSE;
+			    first = false;
 			} else {
-			    mindist = MIN(mindist, color[j]);
+			    mindist = fmin(mindist, color[j]);
 			}
 		    }
-		    maxdist = MAX(color[j], maxdist);
+		    maxdist = fmax(color[j], maxdist);
 		}
 	    }
 	}
 	for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	    i = ND_id(n);
 	    for (j = ia[i]; j < ia[i + 1]; j++) {
-		color[j] =
-		    ((color[j] - mindist) / MAX(maxdist - mindist,
-						0.000001));
+		color[j] = (color[j] - mindist) / fmax(maxdist - mindist, 0.000001);
 	    }
 	}
     }
 
-    i = 0;
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	i = ND_id(n);
 	for (j = ia[i]; j < ia[i + 1]; j++) {
 	    h = arr[ja[j]];
 	    e = agedge(g, n, h, NULL, 1);
-	    if (with_val && val) {
-		sprintf(buf, "%f", val[j]);
-		agxset(e, sym, buf);
+	    if (sym && val) {
+		agxbprint(&xb, "%f", val[j]);
+		agxset(e, sym, agxbuse(&xb));
 	    }
 	    if (with_color) {
-		agxset (e, sym2, hue2rgb(.65 * color[j], cstring));
-		sprintf(buf, "%f", color[j]);
-		agxset(e, sym3, buf);
+		agxset(e, sym2, hue2rgb(.65 * color[j], &xb));
+		agxbprint(&xb, "%f", color[j]);
+		agxset(e, sym3, agxbuse(&xb));
 	    }
 	}
     }
 
     agxbfree (&xb);
-    FREE(color);
-    FREE(arr);
+    free(color);
+    free(arr);
     return g;
 }
 
@@ -368,7 +207,7 @@ static char* useString = "Usage: %s [-uvcl] [-o file] matrix_market_filename\n\
 static void usage(int eval)
 {
     fprintf(stderr, useString, cmd);
-    exit(eval);
+    graphviz_exit(eval);
 }
 
 static FILE *openF(char *fname, char *mode)
@@ -376,8 +215,8 @@ static FILE *openF(char *fname, char *mode)
     FILE *f = fopen(fname, mode);
     if (!f) {
 	fprintf(stderr, "Could not open %s for %s\n", fname,
-		((*mode == 'r') ? "reading" : "writing"));
-	exit(1);
+		*mode == 'r' ? "reading" : "writing");
+	graphviz_exit(1);
     }
     return f;
 }
@@ -399,7 +238,7 @@ static void init(int argc, char **argv, parms_t * p)
 
     cmd = argv[0];
     opterr = 0;
-    while ((c = getopt(argc, argv, ":o:uvclU:")) != -1) {
+    while ((c = getopt(argc, argv, ":o:uvclU:?")) != -1) {
 	switch (c) {
 	case 'o':
 	    p->outf = openF(optarg, "w");
@@ -429,13 +268,17 @@ static void init(int argc, char **argv, parms_t * p)
 	    fprintf(stderr, "%s: option -%c missing argument - ignored\n", cmd, optopt);
 	    break;
  	case '?':
-	    if (optopt == '?')
+	    if (optopt == '\0' || optopt == '?')
 		usage(0);
-	    else
+	    else {
 		fprintf(stderr,
-			"%s: option -%c unrecognized - ignored\n", cmd,
+			"%s: option -%c unrecognized\n", cmd,
 			optopt);
+		usage(1);
+	    }
 	    break;
+ 	default:
+	    UNREACHABLE();
 	}
     }
     argv += optind;
@@ -467,7 +310,7 @@ int main(int argc, char *argv[])
 
     /* ======================= read graph ==================== */
 
-    A = SparseMatrix_import_matrix_market(pv.inf, FORMAT_CSR);
+    A = SparseMatrix_import_matrix_market(pv.inf);
     if (!A) {
 	fprintf (stderr, "Unable to read input file \"%s\"\n", pv.infile); 
 	usage(1);
@@ -477,7 +320,7 @@ int main(int argc, char *argv[])
 
     if (!A) {
 	fprintf(stderr, "cannot import from file %s\n", pv.infile);
-	exit(1);
+	graphviz_exit(1);
     }
 
     if (pv.undirected) {
@@ -490,6 +333,6 @@ int main(int argc, char *argv[])
 
     agwrite(g, pv.outf);
 
-    return 0;
+    graphviz_exit(0);
 }
 

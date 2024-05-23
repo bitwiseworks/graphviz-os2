@@ -1,14 +1,16 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief count graph components
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -16,27 +18,24 @@
  * Written by Emden Gansner
  */
 
-#include "config.h"
-
+#include <stdbool.h>
 #include <stdio.h>
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
+#include <stdlib.h>
 #include <string.h>
 
-#define NEW(t)           (t*)malloc(sizeof(t))
-#define N_NEW(n,t)       (t*)calloc((n),sizeof(t))
+#include <cgraph/cgraph.h>
+#include <cgraph/cghdr.h>
+#include <cgraph/exit.h>
+#include <cgraph/ingraphs.h>
+#include <cgraph/stack.h>
+#include <cgraph/startswith.h>
 
-#include "cgraph.h"
-#include "cghdr.h"
 typedef struct {
     Agrec_t h;
     int dfs_mark;
 } Agnodeinfo_t;
 
 #define ND_dfs_mark(n) (((Agnodeinfo_t*)(n->base.data))->dfs_mark)
-
-#include "ingraphs.h"
 
 #include <getopt.h>
 
@@ -81,15 +80,15 @@ If no files are specified, stdin is used\n";
 static void usage(int v)
 {
     printf("%s",useString);
-    exit(v);
+    graphviz_exit(v);
 }
 
 static void init(int argc, char *argv[])
 {
-    unsigned int c;
+    int c;
 
     opterr = 0;
-    while ((c = getopt(argc, argv, "necCaDUrsv")) != -1) {
+    while ((c = getopt(argc, argv, "necCaDUrsv?")) != -1) {
 	switch (c) {
 	case 'e':
 	    flags |= EDGES;
@@ -123,12 +122,17 @@ static void init(int argc, char *argv[])
 	    gtype = UNDIRECTED;
 	    break;
 	case '?':
-	    if (optopt == '?')
+	    if (optopt == '\0' || optopt == '?')
 		usage(0);
-	    else
-		fprintf(stderr, "gc: option -%c unrecognized - ignored\n",
+	    else {
+		fprintf(stderr, "gc: option -%c unrecognized\n",
 			optopt);
+		usage(1);
+	    }
 	    break;
+	default:
+	    fprintf(stderr, "gc: unexpected error\n");
+	    graphviz_exit(EXIT_FAILURE);
 	}
     }
     argv += optind;
@@ -143,71 +147,20 @@ static void init(int argc, char *argv[])
     outfile = stdout;
 }
 
-typedef struct blk_t {
-    Agnode_t **data;
-    Agnode_t **endp;
-    struct blk_t *prev;
-    struct blk_t *next;
-} blk_t;
-
-typedef struct {
-    blk_t *fstblk;
-    blk_t *curblk;
-    Agnode_t **curp;
-} stk_t;
-
-
-#define SMALLBUF 1024
-#define BIGBUF 1000000
-
-static Agnode_t *base[SMALLBUF];
-static blk_t Blk;
-static stk_t Stk;
-
-static void initStk(void)
-{
-    Blk.data = base;
-    Blk.endp = Blk.data + SMALLBUF;
-    Stk.curblk = Stk.fstblk = &Blk;
-    Stk.curp = Stk.curblk->data;
-}
+static gv_stack_t Stk;
 
 static void push(Agnode_t * np)
 {
-    if (Stk.curp == Stk.curblk->endp) {
-	if (Stk.curblk->next == NULL) {
-	    blk_t *bp = NEW(blk_t);
-	    if (bp == 0) {
-		fprintf(stderr, "gc: Out of memory\n");
-		exit(1);
-	    }
-	    bp->prev = Stk.curblk;
-	    bp->next = NULL;
-	    bp->data = N_NEW(BIGBUF, Agnode_t *);
-	    if (bp->data == 0) {
-		fprintf(stderr, "gc: Out of memory\n");
-		exit(1);
-	    }
-	    bp->endp = bp->data + BIGBUF;
-	    Stk.curblk->next = bp;
-	}
-	Stk.curblk = Stk.curblk->next;
-	Stk.curp = Stk.curblk->data;
-    }
     ND_dfs_mark(np) = -1;
-    *Stk.curp++ = np;
+    stack_push(&Stk, np);
 }
 
 static Agnode_t *pop(void)
 {
-    if (Stk.curp == Stk.curblk->data) {
-	if (Stk.curblk == Stk.fstblk)
-	    return 0;
-	Stk.curblk = Stk.curblk->prev;
-	Stk.curp = Stk.curblk->endp;
+    if (stack_is_empty(&Stk)) {
+	return 0;
     }
-    Stk.curp--;
-    return *Stk.curp;
+    return stack_pop(&Stk);
 }
 
 static void cc_dfs(Agraph_t * g, Agnode_t * n)
@@ -231,9 +184,11 @@ static void cc_dfs(Agraph_t * g, Agnode_t * n)
 
 static void cntCluster(Agraph_t * g, Agobj_t * sg, void *arg)
 {
-    char *sgname = agnameof((Agraph_t *) sg);
+    (void)g;
 
-    if (strncmp(sgname, "cluster", 7) == 0)
+    char *sgname = agnameof(sg);
+
+    if (startswith(sgname, "cluster"))
 	*(int *) (arg) += 1;
 }
 
@@ -261,7 +216,7 @@ static void ipr(long num)
 }
 
 static void
-wcp(int nnodes, int nedges, int ncc, int ncl, char *gname, char *fname)
+wcp(int nnodes, int nedges, int ncc, int ncl, char *gname, char *filename)
 {
     int i;
 
@@ -278,7 +233,7 @@ wcp(int nnodes, int nedges, int ncc, int ncl, char *gname, char *fname)
     if (flags & CL)
 	ipr(ncl);
     if (fname)
-	printf(" %s (%s)\n", gname, fname);
+	printf(" %s (%s)\n", gname, filename);
     else
 	printf(" %s\n", gname);
 }
@@ -321,11 +276,11 @@ static int eval(Agraph_t * g, int root)
 	return 1;
 
     if (root) {
-	aginit(g, AGNODE, "nodeinfo", sizeof(Agnodeinfo_t), TRUE);
+	aginit(g, AGNODE, "nodeinfo", sizeof(Agnodeinfo_t), true);
     }
 
     if ((flags & CL) && root)
-        agapply(g, (Agobj_t *) g, cntCluster, &cl_count, 0);
+        agapply(g, (Agobj_t *) g, cntCluster, &cl_count, false);
 
     emit(g, root, cl_count);
 
@@ -338,11 +293,6 @@ static int eval(Agraph_t * g, int root)
     return 0;
 }
 
-static Agraph_t *gread(FILE * fp)
-{
-    return agread(fp, (Agdisc_t *) 0);
-}
-
 int main(int argc, char *argv[])
 {
     Agraph_t *g;
@@ -351,10 +301,7 @@ int main(int argc, char *argv[])
     int rv = 0;
 
     init(argc, argv);
-    newIngraph(&ig, Files, gread);
-
-    if (flags & CC)
-	initStk();
+    newIngraph(&ig, Files);
 
     while ((g = nextGraph(&ig)) != 0) {
 	if (prev)
@@ -370,5 +317,7 @@ int main(int argc, char *argv[])
     if (n_graphs > 1)
 	wcp(tot_nodes, tot_edges, tot_cc, tot_cl, "total", 0);
 
-    return rv;
+    stack_reset(&Stk);
+
+    graphviz_exit(rv);
 }

@@ -1,36 +1,42 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
+/**
+ * @file
+ * @brief graph pattern scanning and processing language API, main function @ref gvpr
+ * @ingroup public_apis
+ */
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
+
+#pragma once
+
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#ifndef GVPR_H
-#define GVPR_H
-
-#ifdef _WIN32
-#   ifdef EXPORT_GVPR
-#       define GVPR_API __declspec(dllexport)
-#   else
-#       define GVPR_API __declspec(dllimport)
-#   endif
+#ifdef GVDLL
+#ifdef EXPORT_GVPR
+#define GVPR_API __declspec(dllexport)
 #else
-#   define GVPR_API extern
+#define GVPR_API __declspec(dllimport)
+#endif
+#endif
+
+#ifndef GVPR_API
+#define GVPR_API /* nothing */
 #endif
 
 #include "cgraph.h"
 #ifdef _MSC_VER
-typedef int ssize_t;
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
 #endif
 
 /* Bits for flags variable in gvprstate_t.
@@ -56,7 +62,7 @@ typedef struct {
 
 typedef struct {
     Agraph_t** ingraphs;      /* NULL-terminated array of input graphs */
-    int n_outgraphs;          /* if GV_USE_OUTGRAPH set, output graphs */
+    size_t n_outgraphs; ///< if GV_USE_OUTGRAPH set, output graphs
     Agraph_t** outgraphs;
     gvprwr out;               /* write function for stdout */
     gvprwr err;               /* write function for stderr */
@@ -64,9 +70,7 @@ typedef struct {
     gvprbinding* bindings;    /* array of bindings, terminated with {NULL,NULL} */
 } gvpropts;
 
-GVPR_API int gvpr (int argc, char *argv[], gvpropts* opts);
-
-#endif
+GVPR_API extern int gvpr (int argc, char *argv[], gvpropts* opts);
 
 #ifdef __cplusplus
 }

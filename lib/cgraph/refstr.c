@@ -1,28 +1,31 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/**
+ * @file
+ * @brief API: cgraph.h, cghdr.h
+ * @ingroup cgraph_utils
+ */
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include <cghdr.h>
+#include <cgraph/cghdr.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include <stdio.h>
 
 /*
  * reference counted strings.
  */
 
-static uint64_t HTML_BIT;	/* msbit of uint64_t */
-static uint64_t CNT_BITS;	/* complement of HTML_BIT */
-
-typedef struct refstr_t {
+typedef struct {
     Dtlink_t link;
-    uint64_t refcnt;
+    uint64_t refcnt: sizeof(uint64_t) * 8 - 1;
+    uint64_t is_html: 1;
     char *s;
     char store[1];		/* this is actually a dynamic array */
 } refstr_t;
@@ -31,12 +34,9 @@ static Dtdisc_t Refstrdisc = {
     offsetof(refstr_t, s),	/* key */
     -1,				/* size */
     0,				/* link offset */
-    NIL(Dtmake_f),
+    NULL,
     agdictobjfree,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    agdictobjmem,
-    NIL(Dtevent_f)
+    NULL,
 };
 
 static Dict_t *Refdict_default;
@@ -54,10 +54,8 @@ static Dict_t *refdict(Agraph_t * g)
 	dictref = &(g->clos->strdict);
     else
 	dictref = &Refdict_default;
-    if (*dictref == NIL(Dict_t *)) {
+    if (*dictref == NULL) {
 	*dictref = agdtopen(g, &Refstrdisc, Dttree);
-	HTML_BIT = ((unsigned int) 1) << (sizeof(unsigned int) * 8 - 1);
-	CNT_BITS = ~HTML_BIT;
     }
     return *dictref;
 }
@@ -67,37 +65,45 @@ int agstrclose(Agraph_t * g)
     return agdtclose(g, refdict(g));
 }
 
-static refstr_t *refsymbind(Dict_t * strdict, char *s)
+static refstr_t *refsymbind(Dict_t * strdict, const char *s)
 {
     refstr_t key, *r;
-    key.s = s;
-    r = (refstr_t *) dtsearch(strdict, &key);
+// Suppress Clang/GCC -Wcast-qual warning. Casting away const here is acceptable
+// as dtsearch does not modify its input key.
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
+    key.s = (char*)s;
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+    r = dtsearch(strdict, &key);
     return r;
 }
 
-static char *refstrbind(Dict_t * strdict, char *s)
+static char *refstrbind(Dict_t * strdict, const char *s)
 {
     refstr_t *r;
     r = refsymbind(strdict, s);
     if (r)
 	return r->s;
     else
-	return NIL(char *);
+	return NULL;
 }
 
-char *agstrbind(Agraph_t * g, char *s)
+char *agstrbind(Agraph_t * g, const char *s)
 {
     return refstrbind(refdict(g), s);
 }
 
-char *agstrdup(Agraph_t * g, char *s)
-{
+static char *agstrdup_internal(Agraph_t *g, const char *s, bool is_html) {
     refstr_t *r;
     Dict_t *strdict;
     size_t sz;
 
-    if (s == NIL(char *))
-	 return NIL(char *);
+    if (s == NULL)
+	 return NULL;
     strdict = refdict(g);
     r = refsymbind(strdict, s);
     if (r)
@@ -105,10 +111,15 @@ char *agstrdup(Agraph_t * g, char *s)
     else {
 	sz = sizeof(refstr_t) + strlen(s);
 	if (g)
-	    r = (refstr_t *) agalloc(g, sz);
-	else
-	    r = (refstr_t *) malloc(sz);
+	    r = agalloc(g, sz);
+	else {
+	    r = malloc(sz);
+	    if (sz > 0 && r == NULL) {
+	        return NULL;
+	    }
+	}
 	r->refcnt = 1;
+	r->is_html = is_html;
 	strcpy(r->store, s);
 	r->s = r->store;
 	dtinsert(strdict, r);
@@ -116,53 +127,31 @@ char *agstrdup(Agraph_t * g, char *s)
     return r->s;
 }
 
-char *agstrdup_html(Agraph_t * g, char *s)
-{
-    refstr_t *r;
-    Dict_t *strdict;
-    size_t sz;
-
-    if (s == NIL(char *))
-	 return NIL(char *);
-    strdict = refdict(g);
-    r = refsymbind(strdict, s);
-    if (r)
-	r->refcnt++;
-    else {
-	sz = sizeof(refstr_t) + strlen(s);
-	if (g)
-	    r = (refstr_t *) agalloc(g, sz);
-	else
-	    r = (refstr_t *) malloc(sz);
-	r->refcnt = 1 | HTML_BIT;
-	strcpy(r->store, s);
-	r->s = r->store;
-	dtinsert(strdict, r);
-    }
-    return r->s;
+char *agstrdup(Agraph_t *g, const char *s) {
+  return agstrdup_internal(g, s, false);
 }
 
-int agstrfree(Agraph_t * g, char *s)
+char *agstrdup_html(Agraph_t *g, const char *s) {
+  return agstrdup_internal(g, s, true);
+}
+
+int agstrfree(Agraph_t * g, const char *s)
 {
     refstr_t *r;
     Dict_t *strdict;
 
-    if (s == NIL(char *))
+    if (s == NULL)
 	 return FAILURE;
 
     strdict = refdict(g);
     r = refsymbind(strdict, s);
-    if (r && (r->s == s)) {
+    if (r && r->s == s) {
 	r->refcnt--;
-	if ((r->refcnt && CNT_BITS) == 0) {
+	if (r->refcnt == 0) {
 	    agdtdelete(g, strdict, r);
-	    /*
-	       if (g) agfree(g,r);
-	       else free(r);
-	     */
 	}
     }
-    if (r == NIL(refstr_t *))
+    if (r == NULL)
 	return FAILURE;
     return SUCCESS;
 }
@@ -171,14 +160,14 @@ int agstrfree(Agraph_t * g, char *s)
  * Return true if s is an HTML string.
  * We assume s points to the datafield store[0] of a refstr.
  */
-int aghtmlstr(char *s)
+int aghtmlstr(const char *s)
 {
-    refstr_t *key;
+    const refstr_t *key;
 
     if (s == NULL)
 	return 0;
-    key = (refstr_t *) (s - offsetof(refstr_t, store[0]));
-    return (key->refcnt & HTML_BIT);
+    key = (const refstr_t *) (s - offsetof(refstr_t, store[0]));
+    return key->is_html;
 }
 
 void agmarkhtmlstr(char *s)
@@ -188,24 +177,19 @@ void agmarkhtmlstr(char *s)
     if (s == NULL)
 	return;
     key = (refstr_t *) (s - offsetof(refstr_t, store[0]));
-    key->refcnt |= HTML_BIT;
+    key->is_html = 1;
 }
 
 #ifdef DEBUG
-static int refstrprint(Dict_t * dict, void *ptr, void *user)
-{
-    refstr_t *r;
-
-    NOTUSED(dict);
-    r = ptr;
-    NOTUSED(user);
-    write(2, r->s, strlen(r->s));
-    write(2, "\n", 1);
+static int refstrprint(void *ptr, void *user) {
+    refstr_t *r = ptr;
+    (void)user;
+    fprintf(stderr, "%s\n", r->s);
     return 0;
 }
 
 void agrefstrdump(Agraph_t * g)
 {
-    dtwalk(Refdict_default, refstrprint, 0);
+    dtwalk(refdict(g), refstrprint, 0);
 }
 #endif

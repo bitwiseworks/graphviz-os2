@@ -1,28 +1,28 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
 #include "config.h"
-
+#include <cgraph/alloc.h>
 /* TODO:
  * If cut point is in exactly 2 blocks, expand block circles to overlap
  * especially in the case where one block is the sole child of the other.
  */
 
-#include	"blockpath.h"
+#include	<circogen/blockpath.h>
+#include	<circogen/circpos.h>
+#include	<circogen/nodelist.h>
+#include	<math.h>
+#include	<stddef.h>
 
-/* getRotation:
- * The function determines how much the block should be rotated
+/* The function determines how much the block should be rotated
  * for best positioning with parent, assuming its center is at x and y
  * relative to the parent.
  * angle gives the angle of the new position, i.e., tan(angle) = y/x.
@@ -46,23 +46,15 @@
  * Thus, 
  *    alpha = theta + M_PI/2 - phi - arcsin((l/R)*(cos phi))
  */
-static double
-getRotation(block_t * sn, Agraph_t * g, double x, double y, double theta)
-{
+static double getRotation(block_t *sn, double x, double y, double theta) {
     double mindist2;
     Agraph_t *subg;
-    /* Agedge_t* e; */
     Agnode_t *n, *closest_node, *neighbor;
-    nodelist_t *list;
     double len2, newX, newY;
-    int count;
 
     subg = sn->sub_graph;
-#ifdef OLD
-    parent = sn->parent;
-#endif
 
-    list = sn->circle_list;
+    nodelist_t *list = &sn->circle_list;
 
     if (sn->parent_pos >= 0) {
 	theta += M_PI - sn->parent_pos;
@@ -72,25 +64,13 @@ getRotation(block_t * sn, Agraph_t * g, double x, double y, double theta)
 	return theta;
     }
 
-    count = sizeNodelist(list);
+    size_t count = nodelist_size(list);
     if (count == 2) {
-	return (theta - M_PI / 2.0);
+	return theta - M_PI / 2.0;
     }
 
     /* Find node in block connected to block's parent */
     neighbor = CHILD(sn);
-#ifdef OLD
-    for (e = agfstedge(g, parent); e; e = agnxtedge(g, e, parent)) {
-	n = e->head;
-	if (n == parent)
-	    n = e->tail;
-
-	if ((BLOCK(n) == sn) && (PARENT(n) == parent)) {
-	    neighbor = n;
-	    break;
-	}
-    }
-#endif
     newX = ND_pos(neighbor)[0] + x;
     newY = ND_pos(neighbor)[1] + y;
     mindist2 = LEN2(newX, newY);    /* save sqrts by using sqr of dist to find min */
@@ -110,18 +90,17 @@ getRotation(block_t * sn, Agraph_t * g, double x, double y, double theta)
 	}
     }
 
-    /* if((neighbor != closest_node) && !ISPARENT(neighbor)) { */
     if (neighbor != closest_node) {
 	double rho = sn->rad0;
 	double r = sn->radius - rho;
 	double n_x = ND_pos(neighbor)[0];
-	if (COALESCED(sn) && (-r < n_x)) {
+	if (COALESCED(sn) && -r < n_x) {
 	    double R = LEN(x, y);
 	    double n_y = ND_pos(neighbor)[1];
 	    double phi = atan2(n_y, n_x + r);
-	    double l = r - rho / (cos(phi));
+	    double l = r - rho / cos(phi);
 
-	    theta += M_PI / 2.0 - phi - asin((l / R) * (cos(phi)));
+	    theta += M_PI / 2.0 - phi - asin(l / R * cos(phi));
 	} else {		/* Origin still at center of this block */
 	    double phi = atan2(ND_pos(neighbor)[1], ND_pos(neighbor)[0]);
 	    theta += M_PI - phi - PSI(neighbor);
@@ -133,9 +112,7 @@ getRotation(block_t * sn, Agraph_t * g, double x, double y, double theta)
     return theta;
 }
 
-
-/* applyDelta:
- * Recursively apply rotation rotate followed by translation (x,y)
+/* Recursively apply rotation rotate followed by translation (x,y)
  * to block sn and its children.
  */
 static void applyDelta(block_t * sn, double x, double y, double rotate)
@@ -206,9 +183,7 @@ typedef struct {
     int childCount;      /* no. of child blocks attached at n */
 } posinfo_t;
 
-/* getInfo:
- * get size info for blocks attached to the given node.
- */
+/// get size info for blocks attached to the given node.
 static double
 getInfo (posinfo_t* pi, posstate * stp, double min_dist)
 {
@@ -234,29 +209,21 @@ getInfo (posinfo_t* pi, posstate * stp, double min_dist)
     return maxRadius;
 }
 
-/* setInfo:
- */
 static void
 setInfo (posinfo_t* p0, posinfo_t* p1, double delta)
 {
-    double t = (p0->diameter*p1->minRadius) + (p1->diameter*p0->minRadius);
+    double t = p0->diameter * p1->minRadius + p1->diameter * p0->minRadius;
 
     t /= 2*delta*p0->minRadius*p1->minRadius;
 
-    if (t < 1)
-	t = 1;
+    t = fmax(t, 1);
 
-    if (t > p0->scale)
-	p0->scale = t;
-    if (t > p1->scale)
-	p1->scale = t;
+    p0->scale = fmax(p0->scale, t);
+    p1->scale = fmax(p1->scale, t);
 }
 
-/* positionChildren:
- */
-static void
-positionChildren (Agraph_t* g, posinfo_t* pi, posstate * stp, int length, double min_dist)
-{
+static void positionChildren(posinfo_t *info, posstate *stp, size_t length,
+                             double min_dist) {
     block_t *child;
     double childAngle, childRadius, incidentAngle;
     double mindistAngle, rotateAngle, midAngle = 0.0;
@@ -266,34 +233,34 @@ positionChildren (Agraph_t* g, posinfo_t* pi, posstate * stp, int length, double
     double lastAngle = stp->lastAngle;
     double d, deltaX, deltaY;
 
-    childRadius = pi->scale * pi->minRadius;
+    childRadius = info->scale * info->minRadius;
     if (length == 1) {
 	childAngle = 0;
-	d = pi->diameter/(2*M_PI);
-	childRadius = MAX(childRadius, d);
-	d = 2*M_PI*childRadius - pi->diameter;
+	d = info->diameter / (2 * M_PI);
+	childRadius = fmax(childRadius, d);
+	d = 2 * M_PI * childRadius - info->diameter;
 	if (d > 0)
-	    min_dist += d/pi->childCount;
+	    min_dist += d / info->childCount;
     }
     else
-	childAngle = pi->theta - pi->diameter/(2 * childRadius);
+	childAngle = info->theta - info->diameter / (2 * childRadius);
 
-    if ((childRadius + pi->maxRadius) > snRadius)
-	snRadius = childRadius + pi->maxRadius;
+    if ((childRadius + info->maxRadius) > snRadius)
+	snRadius = childRadius + info->maxRadius;
 
     mindistAngle = min_dist / childRadius;
 
-    midChild = (pi->childCount + 1) / 2;
+    midChild = (info->childCount + 1) / 2;
     for (child = stp->cp; child; child = child->next) {
-	if (BLK_PARENT(child) != pi->n)
+	if (BLK_PARENT(child) != info->n)
 	    continue;
-	if (sizeNodelist(child->circle_list) <= 0)
+	if (nodelist_is_empty(&child->circle_list))
 	    continue;
 
 	incidentAngle = child->radius / childRadius;
 	if (length == 1) {
 	    if (childAngle != 0) {
-		if (pi->childCount == 2)
+		if (info->childCount == 2)
 		    childAngle = M_PI;
 		else
 		    childAngle += incidentAngle;
@@ -304,8 +271,8 @@ positionChildren (Agraph_t* g, posinfo_t* pi, posstate * stp, int length, double
 
 	    lastAngle = childAngle;
 	} else {
-	    if (pi->childCount == 1) {
-		childAngle = pi->theta;
+	    if (info->childCount == 1) {
+		childAngle = info->theta;
 	    } else {
 		childAngle += incidentAngle + mindistAngle / 2;
 	    }
@@ -319,7 +286,7 @@ positionChildren (Agraph_t* g, posinfo_t* pi, posstate * stp, int length, double
 	 * should return the theta value if there was a rotation else zero
 	 */
 
-	rotateAngle = getRotation(child, g, deltaX, deltaY, childAngle);
+	rotateAngle = getRotation(child, deltaX, deltaY, childAngle);
 	applyDelta(child, deltaX, deltaY, rotateAngle);
 
 	if (length == 1) {
@@ -332,8 +299,8 @@ positionChildren (Agraph_t* g, posinfo_t* pi, posstate * stp, int length, double
 	    midAngle = childAngle;
     }
 
-    if ((length > 1) && (pi->n == stp->neighbor)) {
-	PSI(pi->n) = midAngle;
+    if (length > 1 && info->n == stp->neighbor) {
+	PSI(info->n) = midAngle;
     }
 
     stp->subtreeR = snRadius;
@@ -341,8 +308,7 @@ positionChildren (Agraph_t* g, posinfo_t* pi, posstate * stp, int length, double
     stp->lastAngle = lastAngle;
 }
 
-/* position:
- * Assume childCount > 0
+/* Assume childCount > 0
  * For each node in the block with children, getInfo is called, with the
  * information stored in the parents array.
  * This information is used by setInfo to compute the amount of space allocated
@@ -350,18 +316,15 @@ positionChildren (Agraph_t* g, posinfo_t* pi, posstate * stp, int length, double
  * Finally, positionChildren is called to do the actual positioning.
  * If length is 1, keeps track of minimum and maximum child angle.
  */
-static double
-position(Agraph_t * g, int childCount, int length, nodelist_t * path,
+static double position(size_t childCount, size_t length, nodelist_t *nodepath,
 	 block_t * sn, double min_dist)
 {
-    nodelistitem_t *item;
-    Agnode_t *n;
     posstate state;
     int i, counter = 0;
     double maxRadius = 0.0;
     double angle;
     double theta = 0.0;
-    posinfo_t* parents = N_NEW(childCount, posinfo_t);
+    posinfo_t* parents = gv_calloc(childCount, sizeof(posinfo_t));
     int num_parents = 0;
     posinfo_t* next;
     posinfo_t* curr;
@@ -371,12 +334,12 @@ position(Agraph_t * g, int childCount, int length, nodelist_t * path,
     state.subtreeR = sn->radius;
     state.radius = sn->radius;
     state.neighbor = CHILD(sn);
-    state.nodeAngle = 2 * M_PI / length;
+    state.nodeAngle = 2 * M_PI / (double)length;
     state.firstAngle = -1;
     state.lastAngle = -1;
 
-    for (item = path->first; item; item = item->next) {
-	n = item->curr;
+    for (size_t item = 0; item < nodelist_size(nodepath); ++item) {
+	Agnode_t *n = nodelist_get(nodepath, item);
 
 	theta = counter * state.nodeAngle;
 	counter++;
@@ -416,7 +379,7 @@ position(Agraph_t * g, int childCount, int length, nodelist_t * path,
     }
 
     for (i = 0; i < num_parents; i++) {
-	positionChildren (g, parents + i, &state, length, min_dist);
+	positionChildren(parents + i, &state, length, min_dist);
     }
 
     free (parents);
@@ -438,34 +401,29 @@ position(Agraph_t * g, int childCount, int length, nodelist_t * path,
     return angle;
 }
 
-/* doBlock:
- * Set positions of block sn and its child blocks.
- */
+/// Set positions of block sn and its child blocks.
 static void doBlock(Agraph_t * g, block_t * sn, double min_dist)
 {
     block_t *child;
-    nodelist_t *longest_path;
-    int childCount, length;
     double centerAngle = M_PI;
 
     /* layout child subtrees */
-    childCount = 0;
+    size_t childCount = 0;
     for (child = sn->children.first; child; child = child->next) {
 	doBlock(g, child, min_dist);
 	childCount++;
     }
 
     /* layout this block */
-    longest_path = layout_block(g, sn, min_dist);
+    nodelist_t longest_path = layout_block(g, sn, min_dist);
     sn->circle_list = longest_path;
-    length = sizeNodelist(longest_path);	/* path contains everything in block */
+    size_t length = nodelist_size(&longest_path); // path contains everything in block
 
     /* attach children */
     if (childCount > 0)
-	centerAngle =
-	    position(g, childCount, length, longest_path, sn, min_dist);
+	centerAngle = position(childCount, length, &longest_path, sn, min_dist);
 
-    if ((length == 1) && (BLK_PARENT(sn))) {
+    if (length == 1 && BLK_PARENT(sn)) {
 	sn->parent_pos = centerAngle;
 	if (sn->parent_pos < 0)
 	    sn->parent_pos += 2 * M_PI;

@@ -1,14 +1,11 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -25,25 +22,34 @@
 #include "config.h"
 
 #define DEBUG
+#include <assert.h>
+#include <stdbool.h>
 #include <stddef.h>
-#include <setjmp.h>
-#include <maze.h>
-#include "fPQ.h"
-#include "memory.h"
-#include "geomprocs.h"
-#include "globals.h"
-#include "render.h"
-#include "pointset.h"
+#include <ortho/maze.h>
+#include <ortho/fPQ.h>
+#include <ortho/ortho.h>
+#include <cgraph/alloc.h>
+#include <cgraph/exit.h>
+#include <cgraph/unused.h>
+#include <common/geomprocs.h>
+#include <common/globals.h>
+#include <common/render.h>
+#include <common/pointset.h>
 typedef struct {
     int d;
     Agedge_t* e;
 } epair_t;
 
-static jmp_buf jbuf;
-
 #ifdef DEBUG
-static void emitSearchGraph (FILE* fp, sgraph* sg);
-static void emitGraph (FILE* fp, maze* mp, int n_edges, route* route_list, epair_t[]);
+#define DEBUG_FN /* nothing */
+#else
+#define DEBUG_FN UNUSED
+#endif
+
+static DEBUG_FN void emitSearchGraph(FILE *fp, sgraph *sg);
+static DEBUG_FN void emitGraph(FILE *fp, maze *mp, size_t n_edges,
+                               route *route_list, epair_t[]);
+#ifdef DEBUG
 int odb_flags;
 #endif
 
@@ -58,7 +64,7 @@ static cell*
 cellOf (snode* p, snode* q)
 {
     cell* cp = p->cells[0];
-    if ((cp == q->cells[0]) || (cp == q->cells[1])) return cp; 
+    if (cp == q->cells[0] || cp == q->cells[1]) return cp;
     else return p->cells[1];
 }
 
@@ -108,7 +114,7 @@ sidePt (snode* ptr, cell* cp)
  * Assume b1 != b2
  */
 static void
-setSeg (segment* sp, int dir, double fix, double b1, double b2, int l1, int l2)
+setSeg (segment* sp, bool dir, double fix, double b1, double b2, int l1, int l2)
 {
     sp->isVert = dir;
     sp->comm_coord = fix;
@@ -117,14 +123,12 @@ setSeg (segment* sp, int dir, double fix, double b1, double b2, int l1, int l2)
 	sp->p.p2 = b2;
 	sp->l1 = l1;
 	sp->l2 = l2;
-	sp->flipped = 0;
     }
     else {
 	sp->p.p2 = b1;
 	sp->p.p1 = b2;
 	sp->l2 = l1;
 	sp->l1 = l2;
-	sp->flipped = 1;
     }
 }
 
@@ -135,8 +139,6 @@ setSeg (segment* sp, int dir, double fix, double b1, double b2, int l1, int l2)
  * the two dummy nodes representing the center of the two real nodes,
  * and the two nodes on the boundary of the two real nodes.
  */
-#define PUSH(rte,P) (rte.p[rte.n++] = P)
-
 static route
 convertSPtoRoute (sgraph* g, snode* fst, snode* lst)
 {
@@ -144,7 +146,7 @@ convertSPtoRoute (sgraph* g, snode* fst, snode* lst)
     snode* ptr;
     snode* next;
     snode* prev;  /* node in shortest path just previous to next */
-    int i, sz = 0;
+    size_t sz = 0;
     cell* cp;
     cell* ncp;
     segment seg;
@@ -155,7 +157,8 @@ convertSPtoRoute (sgraph* g, snode* fst, snode* lst)
 	/* count no. of nodes in shortest path */
     for (ptr = fst; ptr; ptr = N_DAD(ptr)) sz++;
     rte.n = 0;
-    rte.segs = N_NEW(sz-2, segment);  /* at most sz-2 segments */
+    assert(sz >= 2);
+    rte.segs = gv_calloc(sz - 2, sizeof(segment));  /* at most sz-2 segments */
 
     seg.prev = seg.next = 0;
     ptr = prev = N_DAD(fst);
@@ -170,7 +173,7 @@ convertSPtoRoute (sgraph* g, snode* fst, snode* lst)
 	updateWts (g, ncp, N_EDGE(ptr));
 
         /* add seg if path bends or at end */
-	if ((ptr->isVert != next->isVert) || (N_DAD(next) == lst)) {
+	if (ptr->isVert != next->isVert || N_DAD(next) == lst) {
 	    if (ptr->isVert != next->isVert)
 		bp2 = midPt (ncp);
 	    else
@@ -206,7 +209,7 @@ convertSPtoRoute (sgraph* g, snode* fst, snode* lst)
 	    cp = ncp;
 	    prevbp = bp1;
 	    bp1 = bp2;
-	    if ((ptr->isVert != next->isVert) && (N_DAD(next) == lst)) {
+	    if (ptr->isVert != next->isVert && N_DAD(next) == lst) {
 		bp2 = sidePt(next, ncp);
 		l2 = B_NODE;
 		if (next->isVert) {   /* horizontal segment */
@@ -232,8 +235,8 @@ convertSPtoRoute (sgraph* g, snode* fst, snode* lst)
 	next = N_DAD(next);
     }
 
-    rte.segs = realloc (rte.segs, rte.n*sizeof(segment));
-    for (i=0; i<rte.n; i++) {
+    rte.segs = gv_recalloc(rte.segs, sz - 2, rte.n, sizeof(segment));
+    for (size_t i=0; i<rte.n; i++) {
 	if (i > 0)
 	    rte.segs[i].prev = rte.segs + (i-1);
 	if (i < rte.n-1)
@@ -249,17 +252,17 @@ typedef struct {
     Dt_t*     chans;
 } chanItem;
 
-static void
-freeChannel (Dt_t* d, channel* cp, Dtdisc_t* disc)
-{
+static void freeChannel(channel *cp, Dtdisc_t *disc) {
+    (void)disc;
+
     free_graph (cp->G);
-    free (cp->seg_list);
+    seg_list_free(&cp->seg_list);
     free (cp);
 }
 
-static void
-freeChanItem (Dt_t* d, chanItem* cp, Dtdisc_t* disc)
-{
+static void freeChanItem(chanItem *cp, Dtdisc_t *disc) {
+    (void)disc;
+
     dtclose (cp->chans);
     free (cp);
 }
@@ -276,6 +279,9 @@ freeChanItem (Dt_t* d, chanItem* cp, Dtdisc_t* disc)
 static int
 chancmpid(Dt_t* d, paird* key1, paird* key2, Dtdisc_t* disc)
 {
+  (void)d;
+  (void)disc;
+
   if (key1->p1 > key2->p1) {
     if (key1->p2 <= key2->p2) return 0;
     else return 1;
@@ -290,6 +296,9 @@ chancmpid(Dt_t* d, paird* key1, paird* key2, Dtdisc_t* disc)
 static int
 dcmpid(Dt_t* d, double* key1, double* key2, Dtdisc_t* disc)
 {
+  (void)d;
+  (void)disc;
+
   if (*key1 > *key2) return 1;
   else if (*key1 < *key2) return -1;
   else return 0;
@@ -302,9 +311,6 @@ static Dtdisc_t chanDisc = {
     0,
     (Dtfree_f)freeChannel,
     (Dtcompar_f)chancmpid,
-    0,
-    0,
-    0
 };
 
 static Dtdisc_t chanItemDisc = {
@@ -314,9 +320,6 @@ static Dtdisc_t chanItemDisc = {
     0,
     (Dtfree_f)freeChanItem,
     (Dtcompar_f)dcmpid,
-    0,
-    0,
-    0
 };
 
 static void
@@ -325,7 +328,7 @@ addChan (Dt_t* chdict, channel* cp, double j)
     chanItem* subd = dtmatch (chdict, &j);
 
     if (!subd) {
-	subd = NEW (chanItem);
+	subd = gv_alloc(sizeof(chanItem));
 	subd->v = j;
 	subd->chans = dtopen (&chanDisc, Dtoset);
 	dtinsert (chdict, subd);
@@ -352,7 +355,7 @@ extractHChans (maze* mp)
 	    cp = nextcp;
 	}
 
-	chp = NEW(channel);
+	chp = gv_alloc(sizeof(channel));
 	chp->cp = cp;
 	chp->p.p1 = cp->bb.LL.x;
 
@@ -389,7 +392,7 @@ extractVChans (maze* mp)
 	    cp = nextcp;
 	}
 
-	chp = NEW(channel);
+	chp = gv_alloc(sizeof(channel));
 	chp->cp = cp;
 	chp->p.p1 = cp->bb.LL.y;
 
@@ -410,9 +413,8 @@ extractVChans (maze* mp)
 static void
 insertChan (channel* chan, segment* seg)
 {
-    seg->ind_no = chan->cnt++;
-    chan->seg_list = ALLOC(chan->cnt, chan->seg_list, segment*);
-    chan->seg_list[chan->cnt-1] = seg;
+    seg->ind_no = seg_list_size(&chan->seg_list);
+    seg_list_append(&chan->seg_list, seg);
 }
 
 static channel*
@@ -427,14 +429,13 @@ chanSearch (Dt_t* chans, segment* seg)
 }
 
 static void
-assignSegs (int nrtes, route* route_list, maze* mp)
+assignSegs (size_t nrtes, route* route_list, maze* mp)
 {
     channel* chan;
-    int i, j;
 
-    for (i=0;i<nrtes;i++) {
+    for (size_t i=0;i<nrtes;i++) {
 	route rte = route_list[i];
-	for (j=0;j<rte.n;j++) {
+	for (size_t j=0;j<rte.n;j++) {
 	    segment* seg = rte.segs+j;
 	    if (seg->isVert)
 		chan = chanSearch(mp->vchans, seg);
@@ -454,25 +455,17 @@ addLoop (sgraph* sg, cell* cp, snode* dp, snode* sp)
 {
     int i;
     int onTop;
-    pointf midp = midPt (cp);
 
     for (i = 0; i < cp->nsides; i++) {
-	cell* ocp;
-	pointf p;
-	double wt;
 	snode* onp = cp->sides[i];
 
 	if (onp->isVert) continue;
 	if (onp->cells[0] == cp) {
 	    onTop = 1;
-	    ocp = onp->cells[1];
 	}
 	else {
 	    onTop = 0;
-	    ocp = onp->cells[0];
 	}
-	p = sidePt (onp, ocp);
-	wt = fabs(p.x - midp.x) +  fabs(p.y - midp.y);
 	if (onTop)
 	    createSEdge (sg, sp, onp, 0);  /* FIX weight */
 	else
@@ -489,20 +482,10 @@ static void
 addNodeEdges (sgraph* sg, cell* cp, snode* np)
 {
     int i;
-    pointf midp = midPt (cp);
 
     for (i = 0; i < cp->nsides; i++) {
 	snode* onp = cp->sides[i];
-	cell* ocp;
-	pointf p;
-	double wt;
 
-	if (onp->cells[0] == cp)
-	    ocp = onp->cells[1];
-	else
-	    ocp = onp->cells[0];
-	p = sidePt (onp, ocp);
-	wt = fabs(p.x - midp.x) +  fabs(p.y - midp.y);
 	createSEdge (sg, np, onp, 0);  /* FIX weight */
     }
     sg->nnodes++;
@@ -511,9 +494,7 @@ addNodeEdges (sgraph* sg, cell* cp, snode* np)
 #endif
 }
 
-#ifdef DEBUG
-
-#include <intset.h>
+#include <common/intset.h>
 static char* bendToStr (bend b)
 {
   char* s = NULL;
@@ -530,7 +511,8 @@ static char* bendToStr (bend b)
   case B_DOWN :
     s = "B_DOWN";
     break;
-  case B_RIGHT :
+  default:
+    assert(b == B_RIGHT);
     s = "B_RIGHT";
     break;
   }
@@ -547,28 +529,24 @@ static void putSeg (FILE* fp, segment* seg)
       seg->p.p2, seg->comm_coord, bendToStr (seg->l1), bendToStr (seg->l2));
 }
 
-static void
-dumpChanG (channel* cp, int v)
-{
-  int k;
+static DEBUG_FN void dumpChanG(channel *cp, int v) {
   intitem* ip;
   Dt_t* adj;
 
-  if (cp->cnt < 2) return;
+  if (seg_list_size(&cp->seg_list) < 2) return;
   fprintf (stderr, "channel %d (%f,%f)\n", v, cp->p.p1, cp->p.p2);
-  for (k=0;k<cp->cnt;k++) {
+  for (size_t k = 0; k < seg_list_size(&cp->seg_list); ++k) {
     adj = cp->G->vertices[k].adj_list;
     if (dtsize(adj) == 0) continue;
-    putSeg (stderr, cp->seg_list[k]);
+    putSeg(stderr, seg_list_get(&cp->seg_list, k));
     fputs (" ->\n", stderr);
-    for (ip = (intitem*)dtfirst(adj); ip; ip = (intitem*)dtnext(adj, ip)) {
+    for (ip = dtfirst(adj); ip; ip = dtnext(adj, ip)) {
       fputs ("     ", stderr);
-      putSeg (stderr, cp->seg_list[ip->id]);
+      putSeg(stderr, seg_list_get(&cp->seg_list, ip->id));
       fputs ("\n", stderr);
     }
   }
 }
-#endif
 
 static void
 assignTrackNo (Dt_t* chans)
@@ -577,19 +555,18 @@ assignTrackNo (Dt_t* chans)
     Dtlink_t* l1;
     Dtlink_t* l2;
     channel* cp;
-    int k;
 
     for (l1 = dtflatten (chans); l1; l1 = dtlink(chans,l1)) {
 	lp = ((chanItem*)l1)->chans;
 	for (l2 = dtflatten (lp); l2; l2 = dtlink(lp,l2)) {
 	    cp = (channel*)l2;
-	    if (cp->cnt) {
+	    if (!seg_list_is_empty(&cp->seg_list)) {
 #ifdef DEBUG
     if (odb_flags & ODB_CHANG) dumpChanG (cp, ((chanItem*)l1)->v);
 #endif
 		top_sort (cp->G);
-		for (k=0;k<cp->cnt;k++)
-		    cp->seg_list[k]->track_no = cp->G->vertices[k].topsort_order+1;
+		for (size_t k = 0; k < seg_list_size(&cp->seg_list); ++k)
+		    seg_list_get(&cp->seg_list, k)->track_no = cp->G->vertices[k].topsort_order+1;
 	    }
    	}
     }
@@ -607,7 +584,7 @@ create_graphs(Dt_t* chans)
 	lp = ((chanItem*)l1)->chans;
 	for (l2 = dtflatten (lp); l2; l2 = dtlink(lp,l2)) {
 	    cp = (channel*)l2;
-	    cp->G = make_graph (cp->cnt);
+	    cp->G = make_graph(seg_list_size(&cp->seg_list));
    	}
     }
 }
@@ -615,11 +592,10 @@ create_graphs(Dt_t* chans)
 static int
 eqEndSeg (bend S1l2, bend S2l2, bend T1, bend T2)
 {
-    if (((S1l2==T2)&&(S2l2=!T2))
-     || ((S1l2==B_NODE)&&(S2l2==T1)))
-	return(0);
+    if ((S1l2==T2 && S2l2!=T2) || (S1l2==B_NODE && S2l2==T1))
+	return 0;
     else
-	return(-1);
+	return -1;
 }
 
 static int
@@ -630,15 +606,13 @@ overlapSeg (segment* S1, segment* S2, bend T1, bend T2)
 		else if(S1->l2==T2&&S2->l1==T1) return(1);
 		else return(0);
 	}
-	else if(S1->p.p2==S2->p.p2) {
-		if(S2->l1==T2) return eqEndSeg (S1->l2, S2->l2, T1, T2);
-		else return -1*eqEndSeg (S2->l2, S1->l2, T1, T2);
-	}
-	else { /* S1->p.p2>S2->p.p2 */
+	if (S1->p.p2 > S2->p.p2) {
 		if(S2->l1==T2&&S2->l2==T2) return(-1);
 		else if (S2->l1==T1&&S2->l2==T1) return(1);
 		else return(0);
 	}
+	if (S2->l1 == T2) return eqEndSeg (S1->l2, S2->l2, T1, T2);
+	return -1 * eqEndSeg(S2->l2, S1->l2, T1, T2);
 }
 
 static int
@@ -655,72 +629,65 @@ static int
 segCmp (segment* S1, segment* S2, bend T1, bend T2)
 {
 	/* no overlap */
-    if((S1->p.p2<S2->p.p1)||(S1->p.p1>S2->p.p2)) return(0);
+    if (S1->p.p2 < S2->p.p1 || S1->p.p1 > S2->p.p2) return 0;
 	/* left endpoint of S2 inside S1 */
     if(S1->p.p1<S2->p.p1&&S2->p.p1<S1->p.p2)
 	return overlapSeg (S1, S2, T1, T2);
 	/* left endpoint of S1 inside S2 */
-    else if(S2->p.p1<S1->p.p1&&S1->p.p1<S2->p.p2)
+    if (S2->p.p1 < S1->p.p1 && S1->p.p1 < S2->p.p2)
 	return -1*overlapSeg (S2, S1, T1, T2);
-    else if(S1->p.p1==S2->p.p1) {
+    if (S1->p.p1 == S2->p.p1) {
 	if(S1->p.p2==S2->p.p2) {
-	    if((S1->l1==S2->l1)&&(S1->l2==S2->l2))
-		return(0);
-	    else if (S2->l1==S2->l2) {
-		if(S2->l1==T1) return(1);
-		else if(S2->l1==T2) return(-1);
-		else if ((S1->l1!=T1)&&(S1->l2!=T1)) return (1);
-		else if ((S1->l1!=T2)&&(S1->l2!=T2)) return (-1);
-		else return 0;
+	    if (S1->l1 == S2->l1 && S1->l2 == S2->l2)
+		return 0;
+	    if (S2->l1 == S2->l2) {
+		if (S2->l1 == T1) return 1;
+		if (S2->l1 == T2) return -1;
+		if (S1->l1 != T1 && S1->l2 != T1) return 1;
+		if (S1->l1 != T2 && S1->l2 != T2) return -1;
+		return 0;
 	    }
-	    else if ((S2->l1==T1)&&(S2->l2==T2)) {
-		if ((S1->l1!=T1)&&(S1->l2==T2)) return 1;
-		else if ((S1->l1==T1)&&(S1->l2!=T2)) return -1;
-		else return 0;
+	    if (S2->l1 == T1 && S2->l2 == T2) {
+		if (S1->l1 != T1 && S1->l2 == T2) return 1;
+		if (S1->l1 == T1 && S1->l2 != T2) return -1;
+		return 0;
 	    }
-	    else if ((S2->l2==T1)&&(S2->l1==T2)) {
-		if ((S1->l2!=T1)&&(S1->l1==T2)) return 1;
-		else if ((S1->l2==T1)&&(S1->l1!=T2)) return -1;
-		else return 0;
+	    if (S2->l2 == T1 && S2->l1 == T2) {
+		if (S1->l2 != T1 && S1->l1 == T2) return 1;
+		if (S1->l2 == T1 && S1->l1 != T2) return -1;
+		return 0;
 	    }
-	    else if ((S2->l1==B_NODE)&&(S2->l2==T1)) {
+	    if (S2->l1 == B_NODE && S2->l2 == T1) {
 		return ellSeg (S1->l1, S1->l2, T1);
 	    }
-	    else if ((S2->l1==B_NODE)&&(S2->l2==T2)) {
+	    if (S2->l1 == B_NODE && S2->l2 == T2) {
 		return -1*ellSeg (S1->l1, S1->l2, T2);
 	    }
-	    else if ((S2->l1==T1)&&(S2->l2==B_NODE)) {
+	    if (S2->l1 == T1 && S2->l2 == B_NODE) {
 		return ellSeg (S1->l2, S1->l1, T1);
 	    }
-	    else { /* ((S2->l1==T2)&&(S2->l2==B_NODE)) */
-		return -1*ellSeg (S1->l2, S1->l1, T2);
-	    }
+	    /* ((S2->l1==T2)&&(S2->l2==B_NODE)) */
+	    return -1 * ellSeg(S1->l2, S1->l1, T2);
 	}
-	else if(S1->p.p2<S2->p.p2) {
+	if (S1->p.p2 < S2->p.p2) {
 	    if(S1->l2==T1)
 		return eqEndSeg (S2->l1, S1->l1, T1, T2);
-	    else
-		return -1*eqEndSeg (S2->l1, S1->l1, T1, T2);
+	    return -1 * eqEndSeg(S2->l1, S1->l1, T1, T2);
 	}
-	else { /* S1->p.p2>S2->p.p2 */
-	    if(S2->l2==T2)
-		return eqEndSeg (S1->l1, S2->l1, T1, T2);
-	    else
-		return -1*eqEndSeg (S1->l1, S2->l1, T1, T2);
-	}
+	/* S1->p.p2>S2->p.p2 */
+	if (S2->l2 == T2)
+	    return eqEndSeg(S1->l1, S2->l1, T1, T2);
+	return -1 * eqEndSeg(S1->l1, S2->l1, T1, T2);
     }
-    else if(S1->p.p2==S2->p.p1) {
-	if(S1->l2==S2->l1) return(0);
-	else if(S1->l2==T2) return(1);
-	else return(-1);
+    if (S1->p.p2 == S2->p.p1) {
+	if (S1->l2 == S2->l1) return 0;
+	if (S1->l2 == T2) return 1;
+	return -1;
     }
-    else { /* S1->p.p1==S2->p.p2 */
-	if(S1->l1==S2->l2) return(0);
-	else if(S1->l1==T2) return(1);
-	else return(-1);
-    }
-    assert(0);
-    return 0;
+    /* S1->p.p1==S2->p.p2 */
+    if (S1->l1 == S2->l2) return 0;
+    if (S1->l1 == T2) return 1;
+    return -1;
 }
 
 /* Function seg_cmp returns
@@ -728,6 +695,7 @@ segCmp (segment* S1, segment* S2, bend T1, bend T2)
  *   0 if a crossing is unavoidable or there is no crossing at all or 
  *     the segments are parallel,
  *   1 if S1 HAS TO BE to the left/above S2 to avoid a crossing
+ *  -2 if S1 and S2 are incomparable
  *
  * Note: This definition means horizontal segments have track numbers
  * increasing as y decreases, while vertical segments have track numbers
@@ -741,8 +709,8 @@ static int
 seg_cmp(segment* S1, segment* S2)		
 {
     if(S1->isVert!=S2->isVert||S1->comm_coord!=S2->comm_coord) {
-	agerr (AGERR, "incomparable segments !! -- Aborting\n");
-	longjmp(jbuf, 1);
+	agerrorf("incomparable segments !! -- Aborting\n");
+	return -2;
     }
     if(S1->isVert)
 	return segCmp (S1, S2, B_RIGHT, B_LEFT);
@@ -750,31 +718,31 @@ seg_cmp(segment* S1, segment* S2)
 	return segCmp (S1, S2, B_DOWN, B_UP);
 }
 
-static void 
+static int
 add_edges_in_G(channel* cp)
 {
-    int x,y;
-    segment** seg_list = cp->seg_list;
-    int size = cp->cnt;
+    seg_list_t *seg_list = &cp->seg_list;
+    const size_t size = seg_list_size(&cp->seg_list);
     rawgraph* G = cp->G;
 
-    for(x=0;x+1<size;x++) {
-	for(y=x+1;y<size;y++) {
-	    switch (seg_cmp(seg_list[x],seg_list[y])) {
-	    case 1:
+    for (size_t x = 0; x + 1 < size; ++x) {
+	for (size_t y = x + 1; y < size; ++y) {
+	    const int cmp = seg_cmp(seg_list_get(seg_list, x),
+	                            seg_list_get(seg_list, y));
+	    if (cmp == -2) {
+		return -1;
+	    } else if (cmp > 0) {
 		insert_edge(G,x,y);
-		break;
-	    case 0:
-		break;
-	    case -1:
+	    } else if (cmp == -1) {
 		insert_edge(G,y,x);
-		break;
 	    }
 	}
     }
+
+    return 0;
 }
 
-static void
+static int
 add_np_edges (Dt_t* chans)
 {
     Dt_t* lp;
@@ -786,10 +754,14 @@ add_np_edges (Dt_t* chans)
 	lp = ((chanItem*)l1)->chans;
 	for (l2 = dtflatten (lp); l2; l2 = dtlink(lp,l2)) {
 	    cp = (channel*)l2;
-	    if (cp->cnt)
-		add_edges_in_G(cp);
+	    if (!seg_list_is_empty(&cp->seg_list))
+		if (add_edges_in_G(cp)) {
+		  return -1;
+		}
    	}
     }
+
+    return 0;
 }
 
 static segment*
@@ -797,9 +769,9 @@ next_seg(segment* seg, int dir)
 {
     assert(seg);
     if (!dir)
-        return(seg->prev);
+        return seg->prev;
     else
-        return(seg->next);
+        return seg->next;
 }
 
 /* propagate_prec propagates the precedence relationship along 
@@ -834,30 +806,30 @@ propagate_prec(segment* seg, int prec, int hops, int dir)
 	}
 	current = next;
     }
-    return(ans);
+    return ans;
 }
 
-static int
+static bool
 is_parallel(segment* s1, segment* s2)
 {
     assert (s1->comm_coord==s2->comm_coord);
-    return ((s1->p.p1==s2->p.p1)&&
-            (s1->p.p2==s2->p.p2)&&
-            (s1->l1==s2->l1)&&
-            (s1->l2==s2->l2));
+    return s1->p.p1 == s2->p.p1 &&
+           s1->p.p2 == s2->p.p2 &&
+           s1->l1 == s2->l1 &&
+           s1->l2 == s2->l2;
 }
 
-/* decide_point returns the number of hops needed in the given directions 
- * along the 2 edges to get to a deciding point (or NODES) and also puts 
- * into prec the appropriate dependency (follows same convention as seg_cmp)
+/* decide_point returns (through ret) the number of hops needed in the given
+ * directions along the 2 edges to get to a deciding point (or NODES) and also
+ * puts into prec the appropriate dependency (follows same convention as
+ * seg_cmp)
  */
-static pair 
-decide_point(segment* si, segment* sj, int dir1, int dir2)
+static int
+decide_point(pair *ret, segment* si, segment* sj, int dir1, int dir2)
 {
-    int prec, ans = 0, temp;
-    pair ret;
+    int prec = 0, ans = 0, temp;
     segment* np1;
-    segment* np2;
+    segment *np2 = NULL;
     
     while ((np1 = next_seg(si,dir1)) && (np2 = next_seg(sj,dir2)) &&
 	is_parallel(np1, np2)) {
@@ -871,12 +843,15 @@ decide_point(segment* si, segment* sj, int dir1, int dir2)
 	assert(0); /* FIXME */
     else {
 	temp = seg_cmp(np1, np2);
+	if (temp == -2) {
+	    return -1;
+	}
 	prec = propagate_prec(np1, temp, ans+1, 1-dir1);
     }
 		
-    ret.a = ans;
-    ret.b = prec;
-    return(ret);
+    ret->a = ans;
+    ret->b = prec;
+    return 0;
 }
 
 /* sets the edges for a series of parallel segments along two edges starting 
@@ -992,10 +967,9 @@ removeEdge(segment* seg1, segment* seg2, int dir, maze* mp)
     remove_redge (chan->G, ptr1->ind_no, ptr2->ind_no);
 }
 
-static void
+static int
 addPEdges (channel* cp, maze* mp)
 {
-    int i,j;
     /* dir[1,2] are used to figure out whether we should use prev 
      * pointers or next pointers -- 0 : decrease, 1 : increase
      */
@@ -1008,73 +982,84 @@ addPEdges (channel* cp, maze* mp)
     int prec1, prec2;
     pair p;
     rawgraph* G = cp->G;
-    segment** segs = cp->seg_list;
+    seg_list_t *segs = &cp->seg_list;
 
-    for(i=0;i+1<cp->cnt;i++) {
-	for(j=i+1;j<cp->cnt;j++) {
+    for(size_t i = 0; i + 1 < seg_list_size(&cp->seg_list); ++i) {
+	for(size_t j = i + 1; j < seg_list_size(&cp->seg_list); ++j) {
 	    if (!edge_exists(G,i,j) && !edge_exists(G,j,i)) {
-		if (is_parallel(segs[i], segs[j])) {
+		if (is_parallel(seg_list_get(segs, i), seg_list_get(segs, j))) {
 		/* get_directions */
-		    if(segs[i]->prev==0) {
-			if(segs[j]->prev==0)
+		    if (seg_list_get(segs, i)->prev == 0) {
+			if (seg_list_get(segs, j)->prev == 0)
 			    dir = 0;
 			else
 			    dir = 1;
 		    }
-		    else if(segs[j]->prev==0) {
+		    else if (seg_list_get(segs, j)->prev == 0) {
 			dir = 1;
 		    }
 		    else {
-			if(segs[i]->prev->comm_coord==segs[j]->prev->comm_coord)
+			if (seg_list_get(segs, i)->prev->comm_coord ==
+			    seg_list_get(segs, j)->prev->comm_coord)
 			    dir = 0;
 			else
 			    dir = 1;
 		    }
 
-		    p = decide_point(segs[i], segs[j], 0, dir);
+		    if (decide_point(&p, seg_list_get(segs, i), seg_list_get(segs, j), 0, dir)
+		        != 0) {
+			return -1;
+		    }
 		    hops.a = p.a;
 		    prec1 = p.b;
-		    p = decide_point(segs[i], segs[j], 1, 1-dir);
+		    if (decide_point(&p, seg_list_get(segs, i), seg_list_get(segs, j), 1,
+		                     1 - dir) != 0) {
+			return -1;
+		    }
 		    hops.b = p.a;
 		    prec2 = p.b;
 
-		    switch(prec1) {
-		    case -1 :
-			set_parallel_edges (segs[j], segs[i], dir, 0, hops.a, mp);
-			set_parallel_edges (segs[j], segs[i], 1-dir, 1, hops.b, mp);
+		    if (prec1 == -1) {
+			set_parallel_edges(seg_list_get(segs, j), seg_list_get(segs, i), dir, 0,
+			                   hops.a, mp);
+			set_parallel_edges(seg_list_get(segs, j), seg_list_get(segs, i), 1 - dir, 1,
+			                   hops.b, mp);
 			if(prec2==1)
-			    removeEdge (segs[i], segs[j], 1-dir, mp);
-			break;
-		    case 0 :
-			switch(prec2) {
-			case -1:
-			    set_parallel_edges (segs[j], segs[i], dir, 0, hops.a, mp);
-			    set_parallel_edges (segs[j], segs[i], 1-dir, 1, hops.b, mp);
-			    break;
-			case 0 :
-			    set_parallel_edges (segs[i], segs[j], 0, dir, hops.a, mp);
-			    set_parallel_edges (segs[i], segs[j], 1, 1-dir, hops.b, mp);
-			    break;
-			case 1:
-			    set_parallel_edges (segs[i], segs[j], 0, dir, hops.a, mp);
-			    set_parallel_edges (segs[i], segs[j], 1, 1-dir, hops.b, mp);
-			    break;
+			    removeEdge(seg_list_get(segs, i), seg_list_get(segs, j), 1 - dir, mp);
+		    } else if (prec1 == 0) {
+			if (prec2 == -1) {
+			    set_parallel_edges(seg_list_get(segs, j), seg_list_get(segs, i), dir, 0,
+			                       hops.a, mp);
+			    set_parallel_edges(seg_list_get(segs, j), seg_list_get(segs, i), 1 - dir,
+			                       1, hops.b, mp);
+			} else if (prec2 == 0) {
+			    set_parallel_edges(seg_list_get(segs, i), seg_list_get(segs, j), 0, dir,
+			                       hops.a, mp);
+			    set_parallel_edges(seg_list_get(segs, i), seg_list_get(segs, j), 1,
+			                       1 - dir, hops.b, mp);
+			} else if (prec2 == 1) {
+			    set_parallel_edges(seg_list_get(segs, i), seg_list_get(segs, j), 0, dir,
+			                       hops.a, mp);
+			    set_parallel_edges(seg_list_get(segs, i), seg_list_get(segs, j), 1,
+			                       1 - dir, hops.b, mp);
 			}
-			break;
-		    case 1 :
-			set_parallel_edges (segs[i], segs[j], 0, dir, hops.a, mp);
-			set_parallel_edges (segs[i], segs[j], 1, 1-dir, hops.b, mp);
+		    } else if (prec1 == 1) {
+			set_parallel_edges(seg_list_get(segs, i), seg_list_get(segs, j), 0, dir,
+			                   hops.a, mp);
+			set_parallel_edges(seg_list_get(segs, i), seg_list_get(segs, j), 1, 1 - dir,
+			                   hops.b, mp);
 			if(prec2==-1)
-			    removeEdge (segs[i], segs[j], 1-dir, mp);
-			break;
+			    removeEdge(seg_list_get(segs, i), seg_list_get(segs, j), 1 - dir, mp);
 		    }
 		}
 	    }
 	}
     }
+
+    return 0;
 }
 
-static void 
+static int
 add_p_edges (Dt_t* chans, maze* mp)
 {
     Dt_t* lp;
@@ -1084,36 +1069,50 @@ add_p_edges (Dt_t* chans, maze* mp)
     for (l1 = dtflatten (chans); l1; l1 = dtlink(chans,l1)) {
 	lp = ((chanItem*)l1)->chans;
 	for (l2 = dtflatten (lp); l2; l2 = dtlink(lp,l2)) {
-	    addPEdges ((channel*)l2, mp);
+	    if (addPEdges((channel*)l2, mp) != 0) {
+	        return -1;
+	    }
    	}
     }
+
+    return 0;
 }
 
-static void
-assignTracks (int nrtes, route* route_list, maze* mp)
+static int
+assignTracks (maze* mp)
 {
     /* Create the graphs for each channel */
     create_graphs(mp->hchans);
     create_graphs(mp->vchans);
 
     /* add edges between non-parallel segments */
-    add_np_edges(mp->hchans);
-    add_np_edges(mp->vchans);
+    if (add_np_edges(mp->hchans) != 0) {
+	return -1;
+    }
+    if (add_np_edges(mp->vchans) != 0) {
+	return -1;
+    }
 
     /* add edges between parallel segments + remove appropriate edges */
-    add_p_edges(mp->hchans, mp);
-    add_p_edges(mp->vchans, mp);
+    if (add_p_edges(mp->hchans, mp) != 0) {
+	return -1;
+    }
+    if (add_p_edges(mp->vchans, mp) != 0) {
+	return -1;
+    }
 
     /* Assign the tracks after a top sort */
     assignTrackNo (mp->hchans);
     assignTrackNo (mp->vchans);
+
+    return 0;
 }
 
 static double
 vtrack (segment* seg, maze* m)
 {
   channel* chp = chanSearch(m->vchans, seg);
-  double f = ((double)seg->track_no)/(chp->cnt+1); 
+  const double f = (double)seg->track_no / ((double)seg_list_size(&chp->seg_list) + 1);
   double left = chp->cp->bb.LL.x;
   double right = chp->cp->bb.UR.x;
   return left + f*(right-left);
@@ -1123,7 +1122,7 @@ static int
 htrack (segment* seg, maze* m)
 {
   channel* chp = chanSearch(m->hchans, seg);
-  double f = 1.0 - ((double)seg->track_no)/(chp->cnt+1); 
+  double f = 1.0 - (double)seg->track_no / ((double)seg_list_size(&chp->seg_list) + 1);
   double lo = chp->cp->bb.LL.y;
   double hi = chp->cp->bb.UR.y;
   return lo + f*(hi-lo);
@@ -1137,29 +1136,27 @@ addPoints(pointf p0, pointf p1)
     return p0;
 }
 
-static void
-attachOrthoEdges (Agraph_t* g, maze* mp, int n_edges, route* route_list, splineInfo *sinfo, epair_t es[], int doLbls)
-{
-    int irte = 0;
-    int i, ipt, npts;
+static void attachOrthoEdges(maze *mp, size_t n_edges, route* route_list,
+                             splineInfo *sinfo, epair_t es[], bool doLbls) {
+    int ipt;
     pointf* ispline = 0;
-    int splsz = 0;
+    size_t splsz = 0;
     pointf p, p1, q1;
     route rte;
     segment* seg;
     Agedge_t* e;
     textlabel_t* lbl;
 
-    for (; irte < n_edges; irte++) {
+    for (size_t irte = 0; irte < n_edges; irte++) {
 	e = es[irte].e;
 	p1 = addPoints(ND_coord(agtail(e)), ED_tail_port(e).p);
 	q1 = addPoints(ND_coord(aghead(e)), ED_head_port(e).p);
 
 	rte = route_list[irte];
-	npts = 1 + 3*rte.n;
+	size_t npts = 1 + 3*rte.n;
 	if (npts > splsz) {
-		if (ispline) free (ispline);
-		ispline = N_GNEW(npts, pointf);
+		free (ispline);
+		ispline = gv_calloc(npts, sizeof(pointf));
 		splsz = npts;
 	}
 	    
@@ -1175,7 +1172,7 @@ attachOrthoEdges (Agraph_t* g, maze* mp, int n_edges, route* route_list, splineI
 	ispline[0] = ispline[1] = p;
 	ipt = 2;
 
-	for (i = 1;i<rte.n;i++) {
+	for (size_t i = 1;i<rte.n;i++) {
 		seg = rte.segs+i;
 		if (seg->isVert)
 		    p.x = vtrack(seg, mp);
@@ -1198,7 +1195,7 @@ attachOrthoEdges (Agraph_t* g, maze* mp, int n_edges, route* route_list, splineI
 	    fprintf(stderr, "ortho %s %s\n", agnameof(agtail(e)),agnameof(aghead(e)));
 	clip_and_install(e, aghead(e), ispline, npts, sinfo);
 	if (doLbls && (lbl = ED_label(e)) && !lbl->set)
-	    addEdgeLabels(g, e, p1, q1);
+	    addEdgeLabels(e);
     }
     free(ispline);
 }
@@ -1211,44 +1208,50 @@ edgeLen (Agedge_t* e)
     return (int)DIST2(p,q);
 }
 
-static int edgecmp(epair_t* e0, epair_t* e1)
-{
-    return (e0->d - e1->d);
+static int edgecmp(const void *x, const void *y) {
+  const epair_t *e0 = x;
+  const epair_t *e1 = y;
+  if (e0->d > e1->d) {
+    return 1;
+  }
+  if (e0->d < e1->d) {
+    return -1;
+  }
+  return 0;
 }
 
-static boolean spline_merge(node_t * n)
+static bool spline_merge(node_t * n)
 {
-    return FALSE;
+    (void)n;
+    return false;
 }
 
-static boolean swap_ends_p(edge_t * e)
+static bool swap_ends_p(edge_t * e)
 {
-    return FALSE;
+    (void)e;
+    return false;
 }
 
-static splineInfo sinfo = { swap_ends_p, spline_merge, 1, 1 };
+static splineInfo sinfo = { swap_ends_p, spline_merge, true, true };
 
 /* orthoEdges:
  * For edges without position information, construct an orthogonal routing.
- * If doLbls is true, use edge label info when available to guide routing, 
+ * If useLbls is true, use edge label info when available to guide routing, 
  * and set label pos for those edges for which this info is not available.
  */
-void
-orthoEdges (Agraph_t* g, int doLbls)
-{
+void orthoEdges(Agraph_t *g, bool useLbls) {
     sgraph* sg;
     maze* mp;
-    int n_edges;
     route* route_list;
-    int i, gstart;
+    int gstart;
     Agnode_t* n;
     Agedge_t* e;
     snode* sn;
     snode* dn;
-    epair_t* es = N_GNEW(agnedges(g), epair_t);
+    epair_t* es = gv_calloc(agnedges(g), sizeof(epair_t));
     cell* start;
     cell* dest;
-    PointSet* ps;
+    PointSet* ps = NULL;
     textlabel_t* lbl;
 
     if (Concentrate) 
@@ -1259,7 +1262,7 @@ orthoEdges (Agraph_t* g, int doLbls)
 	char* s = agget(g, "odb");
         char c;
 	odb_flags = 0;
-	if (s && (*s != '\0')) {
+	if (s && *s != '\0') {
 	    while ((c = *s++)) {
 		switch (c) {
 		case 'c' :
@@ -1277,26 +1280,28 @@ orthoEdges (Agraph_t* g, int doLbls)
 		case 's' :
 		    odb_flags |= ODB_SGRAPH;    // emit search graph 
 		    break;
+		default:
+		    break;
 		}
 	    }
 	}
     }
 #endif
-    if (doLbls) {
-	agerr(AGWARN, "Orthogonal edges do not currently handle edge labels. Try using xlabels.\n");
-	doLbls = 0;
+    if (useLbls) {
+	agwarningf("Orthogonal edges do not currently handle edge labels. Try using xlabels.\n");
+	useLbls = false;
     }
-    mp = mkMaze (g, doLbls);
+    mp = mkMaze(g);
     sg = mp->sg;
 #ifdef DEBUG
     if (odb_flags & ODB_SGRAPH) emitSearchGraph (stderr, sg);
 #endif
 
     /* store edges to be routed in es, along with their lengths */
-    n_edges = 0;
+    size_t n_edges = 0;
     for (n = agfstnode (g); n; n = agnxtnode(g, n)) {
         for (e = agfstout(g, n); e; e = agnxtout(g,e)) {
-	    if ((Nop == 2) && ED_spl(e)) continue;
+	    if (Nop == 2 && ED_spl(e)) continue;
 	    if (Concentrate) {
 		int ti = AGSEQ(agtail(e));
 		int hi = AGSEQ(aghead(e));
@@ -1315,23 +1320,23 @@ orthoEdges (Agraph_t* g, int doLbls)
 	}
     }
 
-    route_list = N_NEW (n_edges, route);
+    route_list = gv_calloc(n_edges, sizeof(route));
 
-    qsort((char *)es, n_edges, sizeof(epair_t), (qsort_cmpf) edgecmp);
+    qsort(es, n_edges, sizeof(epair_t), edgecmp);
 
     gstart = sg->nnodes;
     PQgen (sg->nnodes+2);
     sn = &sg->nodes[gstart];
     dn = &sg->nodes[gstart+1];
-    for (i = 0; i < n_edges; i++) {
+    for (size_t i = 0; i < n_edges; i++) {
 #ifdef DEBUG
-	if ((i > 0) && (odb_flags & ODB_IGRAPH)) emitSearchGraph (stderr, sg);
+	if (i > 0 && (odb_flags & ODB_IGRAPH)) emitSearchGraph (stderr, sg);
 #endif
 	e = es[i].e;
         start = CELL(agtail(e));
         dest = CELL(aghead(e));
 
-	if (doLbls && (lbl = ED_label(e)) && lbl->set) {
+	if (useLbls && (lbl = ED_label(e)) && lbl->set) {
 	}
 	else {
 	    if (start == dest)
@@ -1351,28 +1356,25 @@ orthoEdges (Agraph_t* g, int doLbls)
     mp->hchans = extractHChans (mp);
     mp->vchans = extractVChans (mp);
     assignSegs (n_edges, route_list, mp);
-    if (setjmp(jbuf))
+    if (assignTracks(mp) != 0)
 	goto orthofinish;
-    assignTracks (n_edges, route_list, mp);
 #ifdef DEBUG
     if (odb_flags & ODB_ROUTE) emitGraph (stderr, mp, n_edges, route_list, es);
 #endif
-    attachOrthoEdges (g, mp, n_edges, route_list, &sinfo, es, doLbls);
+    attachOrthoEdges(mp, n_edges, route_list, &sinfo, es, useLbls);
 
 orthofinish:
     if (Concentrate)
 	freePS (ps);
 
-    for (i=0; i < n_edges; i++)
+    for (size_t i=0; i < n_edges; i++)
 	free (route_list[i].segs);
     free (route_list);
     freeMaze (mp);
     free (es);
 }
 
-#ifdef DEBUG
-#include <arith.h>
-/* #include <values.h> */
+#include <common/arith.h>
 #define TRANS 10
 
 static char* prolog2 =
@@ -1410,7 +1412,7 @@ static char* prolog2 =
 static char* epilog2 =
 "showpage\n\
 %%%%Trailer\n\
-%%%%BoundingBox: %d %d %d %d\n";
+%%%%BoundingBox: %.f %.f %.f %.f\n";
 
 static point
 coordOf (cell* cp, snode* np)
@@ -1432,13 +1434,17 @@ coordOf (cell* cp, snode* np)
 	p.y = (cp->bb.LL.y + cp->bb.UR.y)/2;
 	p.x = cp->bb.UR.x;
     }
+    else {
+	agerrorf("Node not adjacent to cell -- Aborting\n");
+	graphviz_exit(EXIT_FAILURE);
+    }
     return p;
 }
 
 static boxf
-emitEdge (FILE* fp, Agedge_t* e, route rte, maze* m, int ix, boxf bb)
+emitEdge (FILE* fp, Agedge_t* e, route rte, maze* m, boxf bb)
 {
-    int i, x, y;
+    int x, y;
     boxf n = CELL(agtail(e))->bb;
     segment* seg = rte.segs;
     if (seg->isVert) {
@@ -1455,7 +1461,7 @@ emitEdge (FILE* fp, Agedge_t* e, route rte, maze* m, int ix, boxf bb)
     bb.UR.y = MAX(bb.UR.y, SC*y);
     fprintf (fp, "newpath %d %d moveto\n", SC*x, SC*y);
 
-    for (i = 1;i<rte.n;i++) {
+    for (size_t i = 1;i<rte.n;i++) {
 	seg = rte.segs+i;
 	if (seg->isVert) {
 	    x = vtrack(seg, m);
@@ -1488,9 +1494,17 @@ emitEdge (FILE* fp, Agedge_t* e, route rte, maze* m, int ix, boxf bb)
     return bb;
 }
 
-static void
-emitSearchGraph (FILE* fp, sgraph* sg)
-{
+/**
+ * @brief dumps in dot format @ref snode::cells and @ref edges of
+ * @ref sgraph for debugging
+ *
+ * The routine uses coordinates of @ref cells calculated
+ * from @ref gcells.
+ * Coordinates of @ref gcellg are calculated by original
+ * specified graph layout engine.
+ */
+
+static DEBUG_FN void emitSearchGraph(FILE *fp, sgraph *sg) {
     cell* cp;
     snode* np;
     sedge* ep;
@@ -1498,6 +1512,7 @@ emitSearchGraph (FILE* fp, sgraph* sg)
     int i;
     fputs ("graph G {\n", fp);
     fputs (" node[shape=point]\n", fp);
+    fputs (" layout=neato\n", fp);
     for (i = 0; i < sg->nnodes; i++) {
 	np = sg->nodes+i;
 	cp = np->cells[0];
@@ -1510,41 +1525,36 @@ emitSearchGraph (FILE* fp, sgraph* sg)
 	    if (IsNode(cp)) cp = np->cells[1];
 	    p = coordOf (cp, np);
 	}
-	fprintf (fp, "  %d [pos=\"%d,%d\"]\n", i, p.x, p.y);
+	fprintf (fp, "  %d [pos=\"%d,%d!\"]\n", i, p.x, p.y);
     }
     for (i = 0; i < sg->nedges; i++) {
 	ep = sg->edges+i;
-	fprintf (fp, "  %d -- %d[len=\"%f\"]\n", ep->v1, ep->v2, ep->weight);
+	fprintf (fp, "  %d -- %d[label=\"%f\"]\n", ep->v1, ep->v2, ep->weight);
     }
     fputs ("}\n", fp);
 }
 
-static void
-emitGraph (FILE* fp, maze* mp, int n_edges, route* route_list, epair_t es[])
-{
-    int i;
-    boxf bb, absbb;
-    box bbox;
-
-    absbb.LL.x = absbb.LL.y = MAXDOUBLE;
-    absbb.UR.x = absbb.UR.y = -MAXDOUBLE;
+static DEBUG_FN void emitGraph(FILE *fp, maze *mp, size_t n_edges,
+                               route *route_list, epair_t es[]) {
+    boxf absbb = {.LL = {.x = MAXDOUBLE, .y = MAXDOUBLE},
+                  .UR = {.x = -MAXDOUBLE, .y = -MAXDOUBLE}};
 
     fprintf (fp, "%s", prolog2);
     fprintf (fp, "%d %d translate\n", TRANS, TRANS);
 
     fputs ("0 0 1 setrgbcolor\n", fp);
-    for (i = 0; i < mp->ngcells; i++) {
-      bb = mp->gcells[i].bb;
+    for (int i = 0; i < mp->ngcells; i++) {
+      const boxf bb = mp->gcells[i].bb;
       fprintf (fp, "%f %f %f %f node\n", bb.LL.x, bb.LL.y, bb.UR.x, bb.UR.y);
     }
 
-    for (i = 0; i < n_edges; i++) {
-	absbb = emitEdge (fp, es[i].e, route_list[i], mp, i, absbb);
+    for (size_t i = 0; i < n_edges; i++) {
+	absbb = emitEdge (fp, es[i].e, route_list[i], mp, absbb);
     }
     
     fputs ("0.8 0.8 0.8 setrgbcolor\n", fp);
-    for (i = 0; i < mp->ncells; i++) {
-      bb = mp->cells[i].bb;
+    for (int i = 0; i < mp->ncells; i++) {
+      const boxf bb = mp->cells[i].bb;
       fprintf (fp, "%f %f %f %f cell\n", bb.LL.x, bb.LL.y, bb.UR.x, bb.UR.y);
       absbb.LL.x = MIN(absbb.LL.x, bb.LL.x);
       absbb.LL.y = MIN(absbb.LL.y, bb.LL.y);
@@ -1552,10 +1562,10 @@ emitGraph (FILE* fp, maze* mp, int n_edges, route* route_list, epair_t es[])
       absbb.UR.y = MAX(absbb.UR.y, bb.UR.y);
     }
 
-    bbox.LL.x = absbb.LL.x + TRANS;
-    bbox.LL.y = absbb.LL.y + TRANS;
-    bbox.UR.x = absbb.UR.x + TRANS;
-    bbox.UR.y = absbb.UR.y + TRANS;
+    const boxf bbox = {
+      .LL = {.x = absbb.LL.x + TRANS,
+             .y = absbb.LL.y + TRANS},
+      .UR = {.x = absbb.UR.x + TRANS,
+             .y = absbb.UR.y + TRANS}};
     fprintf (fp, epilog2, bbox.LL.x, bbox.LL.y,  bbox.UR.x, bbox.UR.y);
 }
-#endif

@@ -1,50 +1,49 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include "cgraph.h"     /* for agerr() and friends */
-#include "delaunay.h"
-#include "memory.h"
-#include "logic.h"
+#include <cgraph/alloc.h>
+#include <cgraph/cgraph.h>     /* for agerr() and friends */
+#include <cgraph/sort.h>
+#include <neatogen/delaunay.h>
 
-#if HAVE_GTS
+#ifdef HAVE_GTS
 #include <gts.h>
 
-static gboolean triangle_is_hole(GtsTriangle * t)
+static gint triangle_is_hole(void *triangle, void *ignored)
 {
+    GtsTriangle *t = triangle;
+    (void)ignored;
+
     GtsEdge *e1, *e2, *e3;
     GtsVertex *v1, *v2, *v3;
-    gboolean ret;
 
     gts_triangle_vertices_edges(t, NULL, &v1, &v2, &v3, &e1, &e2, &e3);
 
     if ((GTS_IS_CONSTRAINT(e1) && GTS_SEGMENT(e1)->v1 != v1) ||
 	(GTS_IS_CONSTRAINT(e2) && GTS_SEGMENT(e2)->v1 != v2) ||
 	(GTS_IS_CONSTRAINT(e3) && GTS_SEGMENT(e3)->v1 != v3))
-	ret = TRUE;
-    else ret = FALSE;
-    return ret;
+	return TRUE;
+
+    return FALSE;
 }
 
 static guint delaunay_remove_holes(GtsSurface * surface)
 {
-    return gts_surface_foreach_face_remove(surface,
-				    (GtsFunc) triangle_is_hole, NULL);
+    return gts_surface_foreach_face_remove(surface, triangle_is_hole, NULL);
 }
 
 /* Derived classes for vertices and faces so we can assign integer ids
@@ -146,8 +145,8 @@ tri(double *x, double *y, int npt, int *segs, int nsegs, int sepArr)
 {
     int i;
     GtsSurface *surface;
-    GVertex **vertices = N_GNEW(npt, GVertex *);
-    GtsEdge **edges = N_GNEW(nsegs, GtsEdge*);
+    GVertex **vertices = gv_calloc(npt, sizeof(GVertex *));
+    GtsEdge **edges = gv_calloc(nsegs, sizeof(GtsEdge *));
     GSList *list = NULL;
     GtsVertex *v1, *v2, *v3;
     GtsTriangle *t;
@@ -175,8 +174,8 @@ tri(double *x, double *y, int npt, int *segs, int nsegs, int sepArr)
      */
     for (i = 0; i < nsegs; i++) {
 	edges[i] = gts_edge_new(ecl,
-		 (GtsVertex *) (vertices[ segs[ 2 * i]]),
-		 (GtsVertex *) (vertices[ segs[ 2 * i + 1]]));
+		 (GtsVertex *)vertices[segs[2 * i]],
+		 (GtsVertex *)vertices[segs[2 * i + 1]]);
     }
 
     for (i = 0; i < npt; i++)
@@ -194,15 +193,14 @@ tri(double *x, double *y, int npt, int *segs, int nsegs, int sepArr)
 					       t->e1, t->e2, t->e3));
 
     for (i = 0; i < npt; i++) {
-	GtsVertex *v1 = (GtsVertex *) vertices[i];
-	GtsVertex *v = gts_delaunay_add_vertex(surface, v1, NULL);
+	GtsVertex *v4 = (GtsVertex *)vertices[i];
+	GtsVertex *v = gts_delaunay_add_vertex(surface, v4, NULL);
 
 	/* if v != NULL, it is a previously added pt with the same
-	 * coordinates as v1, in which case we replace v1 with v
+	 * coordinates as v4, in which case we replace v4 with v
 	 */
 	if (v) {
-	    /* agerr (AGWARN, "Duplicate point %d %d\n", i, ((GVertex*)v)->idx); */
-	    gts_vertex_replace (v1, v);
+	    gts_vertex_replace(v4, v);
 	}
     }
 
@@ -213,11 +211,6 @@ tri(double *x, double *y, int npt, int *segs, int nsegs, int sepArr)
     /* destroy enclosing triangle */
     gts_allow_floating_vertices = TRUE;
     gts_allow_floating_edges = TRUE;
-/*
-    gts_object_destroy(GTS_OBJECT(v1));
-    gts_object_destroy(GTS_OBJECT(v2));
-    gts_object_destroy(GTS_OBJECT(v3));
-*/
     destroy(v1);
     destroy(v2);
     destroy(v3);
@@ -237,41 +230,46 @@ typedef struct {
     v_data *delaunay;
 } estats;
     
-static void cnt_edge (GtsSegment * e, estats* sp)
-{
+static gint cnt_edge(void *edge, void *stats) {
+    GtsSegment *e = edge;
+    estats *sp = stats;
+
     sp->n++;
     if (sp->delaunay) {
-	sp->delaunay[((GVertex*)(e->v1))->idx].nedges++;
-	sp->delaunay[((GVertex*)(e->v2))->idx].nedges++;
+	sp->delaunay[((GVertex*)e->v1)->idx].nedges++;
+	sp->delaunay[((GVertex*)e->v2)->idx].nedges++;
     }
+
+    return 0;
 }
 
 static void
 edgeStats (GtsSurface* s, estats* sp)
 {
-    gts_surface_foreach_edge (s, (GtsFunc) cnt_edge, sp);
+    gts_surface_foreach_edge(s, cnt_edge, sp);
 }
 
-static void add_edge (GtsSegment * e, v_data* delaunay)
-{
-    int source = ((GVertex*)(e->v1))->idx;
-    int dest = ((GVertex*)(e->v2))->idx;
+static gint add_edge(void *edge, void *data) {
+    GtsSegment *e = edge;
+    v_data *delaunay = data;
+
+    int source = ((GVertex*)e->v1)->idx;
+    int dest = ((GVertex*)e->v2)->idx;
 
     delaunay[source].edges[delaunay[source].nedges++] = dest;
     delaunay[dest].edges[delaunay[dest].nedges++] = source;
+
+    return 0;
 }
 
-v_data *delaunay_triangulation(double *x, double *y, int n)
-{
-    v_data *delaunay;
+static v_data *delaunay_triangulation(double *x, double *y, int n) {
     GtsSurface* s = tri(x, y, n, NULL, 0, 1);
     int i, nedges;
-    int* edges;
     estats stats;
 
     if (!s) return NULL;
 
-    delaunay = N_GNEW(n, v_data);
+    v_data *delaunay = gv_calloc(n, sizeof(v_data));
 
     for (i = 0; i < n; i++) {
 	delaunay[i].ewgts = NULL;
@@ -282,7 +280,7 @@ v_data *delaunay_triangulation(double *x, double *y, int n)
     stats.delaunay = delaunay;
     edgeStats (s, &stats);
     nedges = stats.n;
-    edges = N_GNEW(2 * nedges + n, int);
+    int *edges = gv_calloc(2 * nedges + n, sizeof(int));
 
     for (i = 0; i < n; i++) {
 	delaunay[i].edges = edges;
@@ -290,7 +288,7 @@ v_data *delaunay_triangulation(double *x, double *y, int n)
 	delaunay[i].edges[0] = i;
 	delaunay[i].nedges = 1;
     }
-    gts_surface_foreach_edge (s, (GtsFunc) add_edge, delaunay);
+    gts_surface_foreach_edge(s, add_edge, delaunay);
 
     gts_object_destroy (GTS_OBJECT (s));
 
@@ -302,25 +300,24 @@ typedef struct {
     int* edges;
 } estate;
 
-static void addEdge (GtsSegment * e, estate* es)
-{
-    int source = ((GVertex*)(e->v1))->idx;
-    int dest = ((GVertex*)(e->v2))->idx;
+static gint addEdge(void *edge, void *state) {
+    GtsSegment *e = edge;
+    estate *es = state;
 
-    es->edges[2*(es->n)] = source;
-    es->edges[2*(es->n)+1] = dest;
+    int source = ((GVertex*)e->v1)->idx;
+    int dest = ((GVertex*)e->v2)->idx;
+
+    es->edges[2 * es->n] = source;
+    es->edges[2 * es->n + 1] = dest;
     es->n += 1;
+
+    return 0;
 }
 
-/* If qsort_r ever becomes standardized, this should be used
- * instead of having a global variable.
- */
-static double* _vals;
-typedef int (*qsort_cmpf) (const void *, const void *);
-
-static int 
-vcmp (int* a, int* b)
-{
+static int vcmp(const void *x, const void *y, void *values) {
+    const int *a = x;
+    const int *b = y;
+    const double *_vals = values;
     double va = _vals[*a];
     double vb = _vals[*b];
 
@@ -357,27 +354,23 @@ int *delaunay_tri(double *x, double *y, int n, int* pnedges)
     *pnedges = nedges = stats.n;
 
     if (nedges) {
-	edges = N_GNEW(2 * nedges, int);
+	edges = gv_calloc(2 * nedges, sizeof(int));
 	state.n = 0;
 	state.edges = edges;
-	gts_surface_foreach_edge (s, (GtsFunc) addEdge, &state);
+	gts_surface_foreach_edge(s, addEdge, &state);
     }
     else {
-	int* vs = N_GNEW(n, int);
+	int* vs = gv_calloc(n, sizeof(int));
 	int* ip;
 	int i, hd, tl;
 
 	*pnedges = nedges = n-1;
-	ip = edges = N_GNEW(2 * nedges, int);
+	ip = edges = gv_calloc(2 * nedges, sizeof(int));
 
 	for (i = 0; i < n; i++)
 	    vs[i] = i;
 
-	if (x[0] == x[1])  /* vertical line */ 
-	    _vals = y;
-	else              
-	    _vals = x;
-	qsort (vs, n, sizeof(int), (qsort_cmpf)vcmp);
+	gv_sort(vs, n, sizeof(int), vcmp, x[0] == x[1] /* vertical line? */ ? y : x);
 
 	tl = vs[0];
 	for (i = 1; i < n; i++) {
@@ -395,10 +388,14 @@ int *delaunay_tri(double *x, double *y, int n, int* pnedges)
     return edges;
 }
 
-static void cntFace (GFace* fp, int* ip)
-{
+static gint cntFace(void *face, void *data) {
+    GFace *fp = face;
+    int *ip = data;
+
     fp->idx = *ip;
     *ip += 1;
+
+    return 0;
 }
 
 typedef struct {
@@ -412,14 +409,20 @@ typedef struct {
     int* neigh;
 } ninfo;
 
-static void addNeighbor (GFace* f, ninfo* es)
-{
+static gint addNeighbor(void *face, void *ni) {
+    GFace *f = face;
+    ninfo *es = ni;
+
     es->neigh[es->nneigh] = f->idx;
     es->nneigh++;
+
+    return 0;
 }
 
-static void addFace (GFace* f, fstate* es)
-{
+static gint addFace(void *face, void *state) {
+    GFace *f = face;
+    fstate *es = state;
+
     int i, myid = f->idx;
     int* ip = es->faces + 3*myid;
     int* neigh = es->neigh + 3*myid;
@@ -427,27 +430,33 @@ static void addFace (GFace* f, fstate* es)
     GtsVertex *v1, *v2, *v3;
 
     gts_triangle_vertices (&f->v.triangle, &v1, &v2, &v3);
-    *ip++ = ((GVertex*)(v1))->idx;
-    *ip++ = ((GVertex*)(v2))->idx;
-    *ip++ = ((GVertex*)(v3))->idx;
+    *ip++ = ((GVertex*)v1)->idx;
+    *ip++ = ((GVertex*)v2)->idx;
+    *ip++ = ((GVertex*)v3)->idx;
 
     ni.nneigh = 0;
     ni.neigh = neigh;
-    gts_face_foreach_neighbor ((GtsFace*)f, 0, (GtsFunc) addNeighbor, &ni);
+    gts_face_foreach_neighbor((GtsFace*)f, 0, addNeighbor, &ni);
     for (i = ni.nneigh; i < 3; i++)
 	neigh[i] = -1;
+
+    return 0;
 }
 
-static void addTri (GFace* f, fstate* es)
-{
+static gint addTri(void *face, void *state) {
+    GFace *f = face;
+    fstate *es = state;
+
     int myid = f->idx;
     int* ip = es->faces + 3*myid;
     GtsVertex *v1, *v2, *v3;
 
     gts_triangle_vertices (&f->v.triangle, &v1, &v2, &v3);
-    *ip++ = ((GVertex*)(v1))->idx;
-    *ip++ = ((GVertex*)(v2))->idx;
-    *ip++ = ((GVertex*)(v3))->idx;
+    *ip++ = ((GVertex*)v1)->idx;
+    *ip++ = ((GVertex*)v2)->idx;
+    *ip++ = ((GVertex*)v3)->idx;
+
+    return 0;
 }
 
 /* mkSurface:
@@ -464,32 +473,29 @@ mkSurface (double *x, double *y, int n, int* segs, int nsegs)
     estats stats;
     estate state;
     fstate statf;
-    surface_t* sf;
     int nfaces = 0;
-    int* faces; 
-    int* neigh; 
 
     if (!s) return NULL;
 
-    sf = GNEW(surface_t);
+    surface_t *sf = gv_alloc(sizeof(surface_t));
     stats.n = 0;
     stats.delaunay = NULL;
     edgeStats (s, &stats);
     nsegs = stats.n;
-    segs = N_GNEW(2 * nsegs, int);
+    segs = gv_calloc(2 * nsegs, sizeof(int));
 
     state.n = 0;
     state.edges = segs;
-    gts_surface_foreach_edge (s, (GtsFunc) addEdge, &state);
+    gts_surface_foreach_edge(s, addEdge, &state);
 
-    gts_surface_foreach_face (s, (GtsFunc) cntFace, &nfaces);
+    gts_surface_foreach_face(s, cntFace, &nfaces);
 
-    faces = N_GNEW(3 * nfaces, int);
-    neigh = N_GNEW(3 * nfaces, int);
+    int *faces = gv_calloc(3 * nfaces, sizeof(int));
+    int *neigh = gv_calloc(3 * nfaces, sizeof(int));
 
     statf.faces = faces;
     statf.neigh = neigh;
-    gts_surface_foreach_face (s, (GtsFunc) addFace, &statf);
+    gts_surface_foreach_face(s, addFace, &statf);
 
     sf->nedges = nsegs;
     sf->edges = segs;
@@ -521,9 +527,9 @@ get_triangles (double *x, int n, int* tris)
     s = tri(x, NULL, n, NULL, 0, 0);
     if (!s) return NULL;
 
-    gts_surface_foreach_face (s, (GtsFunc) cntFace, &nfaces);
-    statf.faces = N_GNEW(3 * nfaces, int);
-    gts_surface_foreach_face (s, (GtsFunc) addTri, &statf);
+    gts_surface_foreach_face(s, cntFace, &nfaces);
+    statf.faces = gv_calloc(3 * nfaces, sizeof(int));
+    gts_surface_foreach_face(s, addTri, &statf);
 
     gts_object_destroy (GTS_OBJECT (s));
 
@@ -538,11 +544,11 @@ freeSurface (surface_t* s)
     free (s->faces);
     free (s->neigh);
 }
-#elif HAVE_TRIANGLE
+#elif defined(HAVE_TRIANGLE)
 #define TRILIBRARY
-#include "triangle.c"
-#include "assert.h"
-#include "general.h"
+#include <triangle.c>
+#include <assert.h>
+#include <sparse/general.h>
 
 int*
 get_triangles (double *x, int n, int* tris)
@@ -554,7 +560,7 @@ get_triangles (double *x, int n, int* tris)
 
     in.numberofpoints = n;
     in.numberofpointattributes = 0;
-    in.pointlist = (REAL *) N_GNEW(in.numberofpoints * 2, REAL);
+    in.pointlist = gv_calloc(in.numberofpoints * 2, sizeof(REAL));
 
     for (i = 0; i < n; i++){
 	in.pointlist[i*2] = x[i*2];
@@ -566,20 +572,20 @@ get_triangles (double *x, int n, int* tris)
     in.numberofholes = 0;
     in.numberofregions = 0;
     in.regionlist = NULL;
-    mid.pointlist = (REAL *) NULL;            /* Not needed if -N switch used. */
-    mid.pointattributelist = (REAL *) NULL;
-    mid.pointmarkerlist = (int *) NULL; /* Not needed if -N or -B switch used. */
-    mid.trianglelist = (int *) NULL;          /* Not needed if -E switch used. */
-    mid.triangleattributelist = (REAL *) NULL;
-    mid.neighborlist = (int *) NULL;         /* Needed only if -n switch used. */
-    mid.segmentlist = (int *) NULL;
-    mid.segmentmarkerlist = (int *) NULL;
-    mid.edgelist = (int *) NULL;             /* Needed only if -e switch used. */
-    mid.edgemarkerlist = (int *) NULL;   /* Needed if -e used and -B not used. */
-    vorout.pointlist = (REAL *) NULL;        /* Needed only if -v switch used. */
-    vorout.pointattributelist = (REAL *) NULL;
-    vorout.edgelist = (int *) NULL;          /* Needed only if -v switch used. */
-    vorout.normlist = (REAL *) NULL;         /* Needed only if -v switch used. */
+    mid.pointlist = NULL; // Not needed if -N switch used.
+    mid.pointattributelist = NULL;
+    mid.pointmarkerlist = NULL; /* Not needed if -N or -B switch used. */
+    mid.trianglelist = NULL; // Not needed if -E switch used.
+    mid.triangleattributelist = NULL;
+    mid.neighborlist = NULL; // Needed only if -n switch used.
+    mid.segmentlist = NULL;
+    mid.segmentmarkerlist = NULL;
+    mid.edgelist = NULL; // Needed only if -e switch used.
+    mid.edgemarkerlist = NULL; // Needed if -e used and -B not used.
+    vorout.pointlist = NULL; // Needed only if -v switch used.
+    vorout.pointattributelist = NULL;
+    vorout.edgelist = NULL; // Needed only if -v switch used.
+    vorout.normlist = NULL; // Needed only if -v switch used.
 
     /* Triangulate the points.  Switches are chosen to read and write a  */
     /*   PSLG (p), preserve the convex hull (c), number everything from  */
@@ -592,23 +598,23 @@ get_triangles (double *x, int n, int* tris)
 
     *tris = mid.numberoftriangles;
     
-    FREE(in.pointlist);
-    FREE(in.pointattributelist);
-    FREE(in.pointmarkerlist);
-    FREE(in.regionlist);
-    FREE(mid.pointlist);
-    FREE(mid.pointattributelist);
-    FREE(mid.pointmarkerlist);
-    FREE(mid.triangleattributelist);
-    FREE(mid.neighborlist);
-    FREE(mid.segmentlist);
-    FREE(mid.segmentmarkerlist);
-    FREE(mid.edgelist);
-    FREE(mid.edgemarkerlist);
-    FREE(vorout.pointlist);
-    FREE(vorout.pointattributelist);
-    FREE(vorout.edgelist);
-    FREE(vorout.normlist);
+    free(in.pointlist);
+    free(in.pointattributelist);
+    free(in.pointmarkerlist);
+    free(in.regionlist);
+    free(mid.pointlist);
+    free(mid.pointattributelist);
+    free(mid.pointmarkerlist);
+    free(mid.triangleattributelist);
+    free(mid.neighborlist);
+    free(mid.segmentlist);
+    free(mid.segmentmarkerlist);
+    free(mid.edgelist);
+    free(mid.edgemarkerlist);
+    free(vorout.pointlist);
+    free(vorout.pointattributelist);
+    free(vorout.edgelist);
+    free(vorout.normlist);
 
     return mid.trianglelist;
 }
@@ -620,7 +626,7 @@ delaunay_tri (double *x, double *y, int n, int* nedges)
     struct triangulateio in, out;
     int i;
 
-    in.pointlist = N_GNEW(2 * n, REAL);
+    in.pointlist = gv_calloc(2 * n, sizeof(REAL));
     for (i = 0; i < n; i++) {
 	in.pointlist[2 * i] = x[i];
 	in.pointlist[2 * i + 1] = y[i];
@@ -689,17 +695,14 @@ delaunay_tri (double *x, double *y, int n, int* nedges)
     return out.edgelist;
 }
 
-v_data *delaunay_triangulation(double *x, double *y, int n)
-{
-    v_data *delaunay;
+static v_data *delaunay_triangulation(double *x, double *y, int n) {
     int nedges;
-    int *edges;
     int source, dest;
     int* edgelist = delaunay_tri (x, y, n, &nedges);
     int i;
 
-    delaunay = N_GNEW(n, v_data);
-    edges = N_GNEW(2 * nedges + n, int);
+    v_data *delaunay = gv_calloc(n, sizeof(v_data));
+    int *edges = gv_calloc(2 * nedges + n, sizeof(int));
 
     for (i = 0; i < n; i++) {
 	delaunay[i].ewgts = NULL;
@@ -729,43 +732,42 @@ v_data *delaunay_triangulation(double *x, double *y, int n)
 surface_t* 
 mkSurface (double *x, double *y, int n, int* segs, int nsegs)
 {
-    agerr (AGERR, "mkSurface not yet implemented using Triangle library\n");
+    agerrorf("mkSurface not yet implemented using Triangle library\n");
     assert (0);
     return 0;
 }
 void 
 freeSurface (surface_t* s)
 {
-    agerr (AGERR, "freeSurface not yet implemented using Triangle library\n");
+    agerrorf("freeSurface not yet implemented using Triangle library\n");
     assert (0);
 }
 #else
 static char* err = "Graphviz built without any triangulation library\n";
 int* get_triangles (double *x, int n, int* tris)
 {
-    agerr(AGERR, "get_triangles: %s\n", err);
+    agerrorf("get_triangles: %s\n", err);
     return 0;
 }
-v_data *delaunay_triangulation(double *x, double *y, int n)
-{
-    agerr(AGERR, "delaunay_triangulation: %s\n", err);
+static v_data *delaunay_triangulation(double *x, double *y, int n) {
+    agerrorf("delaunay_triangulation: %s\n", err);
     return 0;
 }
 int *delaunay_tri(double *x, double *y, int n, int* nedges)
 {
-    agerr(AGERR, "delaunay_tri: %s\n", err);
+    agerrorf("delaunay_tri: %s\n", err);
     return 0;
 }
 surface_t* 
 mkSurface (double *x, double *y, int n, int* segs, int nsegs)
 {
-    agerr(AGERR, "mkSurface: %s\n", err);
+    agerrorf("mkSurface: %s\n", err);
     return 0;
 }
 void 
 freeSurface (surface_t* s)
 {
-    agerr (AGERR, "freeSurface: %s\n", err);
+    agerrorf("freeSurface: %s\n", err);
 }
 #endif
 
@@ -774,24 +776,21 @@ static void remove_edge(v_data * graph, int source, int dest)
     int i;
     for (i = 1; i < graph[source].nedges; i++) {
 	if (graph[source].edges[i] == dest) {
-	    graph[source].edges[i] =
-		graph[source].edges[--graph[source].nedges];
+	    graph[source].edges[i] = graph[source].edges[--graph[source].nedges];
 	    break;
 	}
     }
 }
 
-v_data *UG_graph(double *x, double *y, int n, int accurate_computation)
-{
+v_data *UG_graph(double *x, double *y, int n) {
     v_data *delaunay;
     int i;
     double dist_ij, dist_ik, dist_jk, x_i, y_i, x_j, y_j;
     int j, k, neighbor_j, neighbor_k;
-    int removed;
 
     if (n == 2) {
-	int *edges = N_GNEW(4, int);
-	delaunay = N_GNEW(n, v_data);
+	int *edges = gv_calloc(4, sizeof(int));
+	delaunay = gv_calloc(n, sizeof(v_data));
 	delaunay[0].ewgts = NULL;
 	delaunay[0].edges = edges;
 	delaunay[0].nedges = 2;
@@ -804,8 +803,8 @@ v_data *UG_graph(double *x, double *y, int n, int accurate_computation)
 	delaunay[1].edges[1] = 0;
 	return delaunay;
     } else if (n == 1) {
-	int *edges = N_GNEW(1, int);
-	delaunay = N_GNEW(n, v_data);
+	int *edges = gv_calloc(1, sizeof(int));
+	delaunay = gv_calloc(n, sizeof(v_data));
 	delaunay[0].ewgts = NULL;
 	delaunay[0].edges = edges;
 	delaunay[0].nedges = 1;
@@ -815,81 +814,37 @@ v_data *UG_graph(double *x, double *y, int n, int accurate_computation)
 
     delaunay = delaunay_triangulation(x, y, n);
 
-    if (accurate_computation) {
-	for (i = 0; i < n; i++) {
-	    x_i = x[i];
-	    y_i = y[i];
-	    for (j = 1; j < delaunay[i].nedges;) {
-		neighbor_j = delaunay[i].edges[j];
-		if (neighbor_j < i) {
-		    j++;
-		    continue;
-		}
-		x_j = x[neighbor_j];
-		y_j = y[neighbor_j];
-		dist_ij =
-		    (x_j - x_i) * (x_j - x_i) + (y_j - y_i) * (y_j - y_i);
-		removed = FALSE;
-		for (k = 0; k < n && !removed; k++) {
-		    dist_ik =
-			(x[k] - x_i) * (x[k] - x_i) + (y[k] -
-						       y_i) * (y[k] - y_i);
-		    if (dist_ik < dist_ij) {
-			dist_jk =
-			    (x[k] - x_j) * (x[k] - x_j) + (y[k] -
-							   y_j) * (y[k] -
-								   y_j);
-			if (dist_jk < dist_ij) {
-			    // remove the edge beteween i and neighbor j
-			    delaunay[i].edges[j] =
-				delaunay[i].edges[--delaunay[i].nedges];
-			    remove_edge(delaunay, neighbor_j, i);
-			    removed = TRUE;
-			}
-		    }
-		}
-		if (!removed) {
-		    j++;
-		}
-	    }
-	}
-    } else {
-	// remove all edges v-u if there is w, neighbor of u or v, that is closer to both u and v than dist(u,v)
-	for (i = 0; i < n; i++) {
-	    x_i = x[i];
-	    y_i = y[i];
-	    for (j = 1; j < delaunay[i].nedges;) {
-		neighbor_j = delaunay[i].edges[j];
-		x_j = x[neighbor_j];
-		y_j = y[neighbor_j];
-		dist_ij =
-		    (x_j - x_i) * (x_j - x_i) + (y_j - y_i) * (y_j - y_i);
-		// now look at i'th neighbors to see whether there is a node in the "forbidden region"
-		// we will also go through neighbor_j's neighbors when we traverse the edge from its other side
-		removed = FALSE;
-		for (k = 1; k < delaunay[i].nedges && !removed; k++) {
-		    neighbor_k = delaunay[i].edges[k];
-		    dist_ik =
-			(x[neighbor_k] - x_i) * (x[neighbor_k] - x_i) +
-			(y[neighbor_k] - y_i) * (y[neighbor_k] - y_i);
-		    if (dist_ik < dist_ij) {
-			dist_jk =
-			    (x[neighbor_k] - x_j) * (x[neighbor_k] - x_j) +
-			    (y[neighbor_k] - y_j) * (y[neighbor_k] - y_j);
-			if (dist_jk < dist_ij) {
-			    // remove the edge beteween i and neighbor j
-			    delaunay[i].edges[j] =
-				delaunay[i].edges[--delaunay[i].nedges];
-			    remove_edge(delaunay, neighbor_j, i);
-			    removed = TRUE;
-			}
-		    }
-		}
-		if (!removed) {
-		    j++;
-		}
-	    }
-	}
+    // remove all edges v-u if there is w, neighbor of u or v, that is closer to both u and v than dist(u,v)
+    for (i = 0; i < n; i++) {
+        x_i = x[i];
+        y_i = y[i];
+        for (j = 1; j < delaunay[i].nedges;) {
+            neighbor_j = delaunay[i].edges[j];
+            x_j = x[neighbor_j];
+            y_j = y[neighbor_j];
+            dist_ij = (x_j - x_i) * (x_j - x_i) + (y_j - y_i) * (y_j - y_i);
+            // now look at i'th neighbors to see whether there is a node in the "forbidden region"
+            // we will also go through neighbor_j's neighbors when we traverse the edge from its other side
+            bool removed = false;
+            for (k = 1; k < delaunay[i].nedges && !removed; k++) {
+                neighbor_k = delaunay[i].edges[k];
+                dist_ik = (x[neighbor_k] - x_i) * (x[neighbor_k] - x_i) +
+                    (y[neighbor_k] - y_i) * (y[neighbor_k] - y_i);
+                if (dist_ik < dist_ij) {
+                    dist_jk = (x[neighbor_k] - x_j) * (x[neighbor_k] - x_j) +
+                        (y[neighbor_k] - y_j) * (y[neighbor_k] - y_j);
+                    if (dist_jk < dist_ij) {
+                        // remove the edge beteween i and neighbor j
+                        delaunay[i].edges[j] = delaunay[i].edges[--delaunay[i].nedges];
+                        remove_edge(delaunay, neighbor_j, i);
+                        removed = true;
+                    }
+                }
+            }
+            if (!removed) {
+                j++;
+            }
+        }
     }
     return delaunay;
 }
@@ -897,10 +852,8 @@ v_data *UG_graph(double *x, double *y, int n, int accurate_computation)
 void freeGraph (v_data * graph)
 {
     if (graph != NULL) {
-	if (graph[0].edges != NULL)
-	    free(graph[0].edges);
-	if (graph[0].ewgts != NULL)
-	    free(graph[0].ewgts);
+	free(graph[0].edges);
+	free(graph[0].ewgts);
 	free(graph);
     }
 }
@@ -908,17 +861,10 @@ void freeGraph (v_data * graph)
 void freeGraphData(vtx_data * graph)
 {
     if (graph != NULL) {
-	if (graph[0].edges != NULL)
-	    free(graph[0].edges);
-	if (graph[0].ewgts != NULL)
-	    free(graph[0].ewgts);
-#ifdef USE_STYLES
-	if (graph[0].styles != NULL)
-	    free(graph[0].styles);
-#endif
+	free(graph[0].edges);
+	free(graph[0].ewgts);
 #ifdef DIGCOLA
-	if (graph[0].edists != NULL)
-	    free(graph[0].edists);
+	free(graph[0].edists);
 #endif
 	free(graph);
     }

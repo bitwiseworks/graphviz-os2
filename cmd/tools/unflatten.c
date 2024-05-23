@@ -1,14 +1,16 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief adjust directed graphs to improve layout aspect ratio
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -16,122 +18,22 @@
  * Written by Stephen North
  * Updated by Emden Gansner
  */
-#include "config.h"
 
+#include    <stdbool.h>
 #include    <stdio.h>
 #include    <stdlib.h>
-#include    <string.h>
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
-#include    "cgraph.h"
-#include    "ingraphs.h"
+#include    <cgraph/cgraph.h>
+#include    <cgraph/exit.h>
+#include    <cgraph/ingraphs.h>
+#include    <cgraph/unreachable.h>
 
 #include <getopt.h>
+#include "openFile.h"
 
-static int Do_fans = 0;
-static int MaxMinlen = 0;
-static int ChainLimit = 0;
-static int ChainSize = 0;
-static Agnode_t *ChainNode;
+typedef graphviz_unflatten_options_t opts_t;
+
 static FILE *outFile;
 static char *cmd;
-
-static int myindegree(Agnode_t *n)
-{
-	return agdegree(n->root, n, TRUE, FALSE);
-}
-
-/* need outdegree without selfarcs */
-static int myoutdegree(Agnode_t *n)
-{
-	Agedge_t 	*e;
-	int rv = 0;
-
-	for (e = agfstout(n->root, n); e; e = agnxtout(n->root, e)) {
-		if (agtail(e) != aghead(e)) rv++;
-	}
-	return rv;
-}
-
-static int isleaf(Agnode_t * n)
-{
-    return ((myindegree(n) + myoutdegree(n)) == 1);
-}
-
-static int ischainnode(Agnode_t * n)
-{
-    return ((myindegree(n) == 1) && myoutdegree(n) == 1);
-}
-
-static void adjustlen(Agedge_t * e, Agsym_t * sym, int newlen)
-{
-    char buf[10];
-
-    sprintf(buf, "%d", newlen);
-    agxset(e, sym, buf);
-}
-
-static Agsym_t *bindedgeattr(Agraph_t * g, char *str)
-{
-    return agattr(g, AGEDGE, str, "");
-}
-
-static void transform(Agraph_t * g)
-{
-    Agnode_t *n;
-    Agedge_t *e;
-    char *str;
-    Agsym_t *m_ix, *s_ix;
-    int cnt, d;
-
-    m_ix = bindedgeattr(g, "minlen");
-    s_ix = bindedgeattr(g, "style");
-
-    for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-	d = myindegree(n) + myoutdegree(n);
-	if (d == 0) {
-	    if (ChainLimit < 1)
-		continue;
-	    if (ChainNode) {
-		e = agedge(g, ChainNode, n, "", TRUE);
-		agxset(e, s_ix, "invis");
-		ChainSize++;
-		if (ChainSize < ChainLimit)
-		    ChainNode = n;
-		else {
-		    ChainNode = NULL;
-		    ChainSize = 0;
-		}
-	    } else
-		ChainNode = n;
-	} else if (d > 1) {
-	    if (MaxMinlen < 1)
-		continue;
-	    cnt = 0;
-	    for (e = agfstin(g, n); e; e = agnxtin(g, e)) {
-		if (isleaf(agtail(e))) {
-		    str = agxget(e, m_ix);
-		    if (str[0] == 0) {
-			adjustlen(e, m_ix, (cnt % MaxMinlen) + 1);
-			cnt++;
-		    }
-		}
-	    }
-
-	    cnt = 0;
-	    for (e = agfstout(g, n); e; e = agnxtout(g, e)) {
-		if (isleaf(e->node) || (Do_fans && ischainnode(e->node))) {
-		    str = agxget(e, m_ix);
-		    if (str[0] == 0)
-			adjustlen(e, m_ix, (cnt % MaxMinlen) + 1);
-		    cnt++;
-		}
-	    }
-	}
-    }
-}
-
 
 static char *useString =
     "Usage: %s [-f?] [-l l] [-c l] [-o outfile] <files>\n\
@@ -144,29 +46,10 @@ static char *useString =
 static void usage(int v)
 {
     fprintf(stderr, useString, cmd);
-    exit(v);
+    graphviz_exit(v);
 }
 
-static FILE *openFile(char *name, char *mode)
-{
-    FILE *fp;
-    char *modestr;
-
-    fp = fopen(name, mode);
-    if (!fp) {
-	if (*mode == 'r')
-	    modestr = "reading";
-	else
-	    modestr = "writing";
-	fprintf(stderr, "%s: could not open file %s for %s\n",
-		cmd, name, modestr);
-	exit(-1);
-    }
-    return (fp);
-}
-
-static char **scanargs(int argc, char **argv)
-{
+static char **scanargs(opts_t *opts, int argc, char **argv) {
     int c, ival;
 
     cmd = argv[0];
@@ -174,20 +57,22 @@ static char **scanargs(int argc, char **argv)
     while ((c = getopt(argc, argv, ":fl:c:o:")) != -1) {
 	switch (c) {
 	case 'f':
-	    Do_fans = 1;
+	    opts->Do_fans = true;
 	    break;
 	case 'l':
 	    ival = atoi(optarg);
 	    if (ival > 0)
-		MaxMinlen = ival;
+		opts->MaxMinlen = ival;
 	    break;
 	case 'c':
 	    ival = atoi(optarg);
 	    if (ival > 0)
-		ChainLimit = ival;
+		opts->ChainLimit = ival;
 	    break;
 	case 'o':
-	    outFile = openFile(optarg, "w");
+	    if (outFile != NULL)
+		fclose(outFile);
+	    outFile = openFile(cmd, optarg, "w");
 	    break;
 	case '?':
 	    if (optopt == '?')
@@ -203,9 +88,11 @@ static char **scanargs(int argc, char **argv)
 		    cmd, optopt);
 	    usage(-1);
 	    break;
+	default:
+	    UNREACHABLE();
 	}
     }
-    if (Do_fans && (MaxMinlen < 1))
+    if (opts->Do_fans && opts->MaxMinlen < 1)
 	fprintf(stderr, "%s: Warning: -f requires -l flag\n", cmd);
     argv += optind;
     argc -= optind;
@@ -218,22 +105,18 @@ static char **scanargs(int argc, char **argv)
 	return 0;
 }
 
-static Agraph_t *gread(FILE * fp)
-{
-    return agread(fp, (Agdisc_t *) 0);
-}
-
 int main(int argc, char **argv)
 {
     Agraph_t *g;
     ingraph_state ig;
     char **files;
+    opts_t opts = {0};
 
-    files = scanargs(argc, argv);
-    newIngraph(&ig, files, gread);
+    files = scanargs(&opts, argc, argv);
+    newIngraph(&ig, files);
     while ((g = nextGraph(&ig))) {
-	transform(g);
+	graphviz_unflatten(g, &opts);
 	agwrite(g, outFile);
     }
-    return 0;
+    graphviz_exit(0);
 }

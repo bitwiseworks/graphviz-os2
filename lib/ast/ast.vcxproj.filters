@@ -18,16 +18,7 @@
     <ClInclude Include="ast.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="compat_unistd.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="error.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="hashkey.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="sfstr.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -50,37 +41,19 @@
     <ClCompile Include="pathaccess.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="pathbin.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="pathcanon.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="pathcat.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="pathexists.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="pathfind.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="pathgetlink.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="pathpath.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="strcopy.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="stresc.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="strmatch.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="strton.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -1,13 +1,11 @@
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -16,11 +14,17 @@
  * Written by Emden R. Gansner
  */
 
-#include    "osage.h"
-#include    "neatoprocs.h"
-#include    "pack.h"
+#include    <assert.h>
+#include    <cgraph/alloc.h>
+#include    <cgraph/list.h>
+#include    <cgraph/startswith.h>
+#include    <limits.h>
+#include    <osage/osage.h>
+#include    <neatogen/neatoprocs.h>
+#include    <pack/pack.h>
+#include    <stdbool.h>
+#include    <stddef.h>
 
-#define CL_CHUNK 10
 #define DFLT_SZ  18
 #define PARENT(n) ((Agraph_t*)ND_alg(n))
 
@@ -31,41 +35,14 @@ indent (int i)
 	fputs ("  ", stderr);
 }
 
-typedef struct {
-    Agraph_t** cl;
-    int sz;
-    int cnt;
-} clist_t;
-
-static void initCList(clist_t * clist)
-{
-    clist->cl = 0;
-    clist->sz = 0;
-    clist->cnt = 0;
-}
-
-/* addCluster:
- * Append a new cluster to the list.
- * NOTE: cl[0] is empty. The clusters are in cl[1..cnt].
- * Normally, we increase the array when cnt == sz.
- * The test for cnt > sz is necessary for the first time.
- */
-static void addCluster(clist_t * clist, graph_t * subg)
-{
-    clist->cnt++;
-    if (clist->cnt >= clist->sz) {
-        clist->sz += CL_CHUNK;
-        clist->cl = RALLOC(clist->sz, clist->cl, graph_t *);
-    }
-    clist->cl[clist->cnt] = subg;
-}
+DEFINE_LIST(clist, Agraph_t*)
 
 static void cluster_init_graph(graph_t * g)
 {
     Agnode_t *n;
     Agedge_t *e;
 
-    setEdgeType (g, ET_LINE);
+    setEdgeType (g, EDGETYPE_LINE);
     Ndim = GD_ndim(g)=2;	/* The algorithm only makes sense in 2D */
 
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
@@ -73,7 +50,7 @@ static void cluster_init_graph(graph_t * g)
     }
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	for (e = agfstout(g, n); e; e = agnxtout(g, e)) {
-	    agbindrec(e, "Agedgeinfo_t", sizeof(Agedgeinfo_t), TRUE);	//edge custom data
+	    agbindrec(e, "Agedgeinfo_t", sizeof(Agedgeinfo_t), true);	//edge custom data
 	    common_init_edge(e);
 	}
     }
@@ -88,14 +65,12 @@ layout (Agraph_t* g, int depth)
     int nvs = 0;       /* no. of nodes in subclusters */
     Agnode_t*  n;
     Agraph_t*  subg;
-    boxf* gs;
     point* pts;
     boxf bb, rootbb;
     pointf p;
     pack_info pinfo;
     pack_mode pmode;
     double margin;
-    void** children;
     Agsym_t* cattr = NULL;
     Agsym_t* vattr = NULL;
     Agraph_t* root = g->root;
@@ -129,14 +104,14 @@ layout (Agraph_t* g, int depth)
 	cattr = agattr(root, AGRAPH, "sortv", 0);
 	vattr = agattr(root, AGNODE, "sortv", 0);
 	if (cattr || vattr)
-	    pinfo.vals = N_NEW(total, packval_t);
+	    pinfo.vals = gv_calloc(total, sizeof(packval_t));
 	else
-	    agerr (AGWARN, "Graph %s has array packing with user values but no \"sortv\" attributes are defined.",
+	    agwarningf("Graph %s has array packing with user values but no \"sortv\" attributes are defined.",
 		agnameof(g));
     }
 
-    gs = N_NEW(total, boxf);
-    children = N_NEW(total, void*);
+    boxf *gs = gv_calloc(total, sizeof(boxf));
+    void **children = gv_calloc(total, sizeof(void*));
     j = 0;
     for (i = 1; i <= GD_n_cluster(g); i++) {
 	subg = GD_clust(g)[i];
@@ -163,13 +138,12 @@ layout (Agraph_t* g, int depth)
     }
 
 	/* pack rectangles */
-    pts = putRects (total, gs, &pinfo);
-    if (pinfo.vals) {
-	free (pinfo.vals);
-    }
+    assert(total >= 0);
+    pts = putRects((size_t)total, gs, &pinfo);
+    free (pinfo.vals);
 
-    rootbb.LL = pointfof(INT_MAX, INT_MAX);
-    rootbb.UR = pointfof(-INT_MAX, -INT_MAX);
+    rootbb.LL = (pointf){INT_MAX, INT_MAX};
+    rootbb.UR = (pointf){-INT_MAX, -INT_MAX};
 
     /* reposition children relative to GD_bb(g) */
     for (j = 0; j < total; j++) {
@@ -181,7 +155,7 @@ layout (Agraph_t* g, int depth)
 	bb.UR.y += p.y;
 	EXPANDBB(rootbb, bb);
 	if (j < GD_n_cluster(g)) {
-	    subg = (Agraph_t*)children[j];
+	    subg = children[j];
 	    GD_bb(subg) = bb;
 	    if (Verbose > 1) {
 		indent (depth);
@@ -189,7 +163,7 @@ layout (Agraph_t* g, int depth)
 	    }
 	}
 	else {
-	    n = (Agnode_t*)children[j];
+	    n = children[j];
 	    ND_coord(n) = mid_pointf (bb.LL, bb.UR);
 	    if (Verbose > 1) {
 		indent (depth);
@@ -199,18 +173,17 @@ layout (Agraph_t* g, int depth)
     }
 
     if (GD_label(g)) {
-        pointf p;
         double d;
 
-        p = GD_label(g)->dimen;
+        pointf pt = GD_label(g)->dimen;
 	if (total == 0) {
             rootbb.LL.x = 0;
             rootbb.LL.y = 0;
-            rootbb.UR.x = p.x;
-            rootbb.UR.y = p.y;
+            rootbb.UR.x = pt.x;
+            rootbb.UR.y = pt.y;
 
 	}
-        d = p.x - (rootbb.UR.x - rootbb.LL.x);
+        d = pt.x - (rootbb.UR.x - rootbb.LL.x);
         if (d > 0) {            /* height of label is added below */
             d /= 2;
             rootbb.LL.x -= d;
@@ -238,7 +211,7 @@ layout (Agraph_t* g, int depth)
      */
     for (j = 0; j < total; j++) {
 	if (j < GD_n_cluster(g)) {
-	    subg = (Agraph_t*)children[j];
+	    subg = children[j];
 	    bb = GD_bb(subg);
 	    bb.LL = sub_pointf(bb.LL, rootbb.LL);
 	    bb.UR = sub_pointf(bb.UR, rootbb.LL);
@@ -249,7 +222,7 @@ layout (Agraph_t* g, int depth)
 	    }
 	}
 	else {
-	    n = (Agnode_t*)children[j];
+	    n = children[j];
 	    ND_coord(n) = sub_pointf (ND_coord(n), rootbb.LL);
 	    if (Verbose > 1) {
 		indent (depth);
@@ -323,21 +296,22 @@ static void
 mkClusters (Agraph_t* g, clist_t* pclist, Agraph_t* parent)
 {
     graph_t* subg;
-    clist_t  list;
+    clist_t  list = {0};
     clist_t* clist;
 
     if (pclist == NULL) {
+        // [0] is empty. The clusters are in [1..cnt].
+        clist_append(&list, NULL);
         clist = &list;
-        initCList(clist);
     }
     else
         clist = pclist;
 
     for (subg = agfstsubg(g); subg; subg = agnxtsubg(subg)) {
-        if (!strncmp(agnameof(subg), "cluster", 7)) {
-	    agbindrec(subg, "Agraphinfo_t", sizeof(Agraphinfo_t), TRUE);
+        if (startswith(agnameof(subg), "cluster")) {
+	    agbindrec(subg, "Agraphinfo_t", sizeof(Agraphinfo_t), true);
 	    do_graph_label (subg);
-            addCluster(clist, subg);
+            clist_append(clist, subg);
             mkClusters(subg, NULL, subg);
         }
         else {
@@ -345,9 +319,14 @@ mkClusters (Agraph_t* g, clist_t* pclist, Agraph_t* parent)
         }
     }
     if (pclist == NULL) {
-        GD_n_cluster(g) = list.cnt;
-        if (list.cnt)
-            GD_clust(g) = RALLOC(list.cnt + 1, list.cl, graph_t*);
+        assert(clist_size(&list) - 1 <= INT_MAX);
+        GD_n_cluster(g) = (int)(clist_size(&list) - 1);
+        if (clist_size(&list) > 1) {
+            clist_shrink_to_fit(&list);
+            GD_clust(g) = clist_detach(&list);
+        } else {
+            clist_free(&list);
+        }
     }
 }
 
@@ -364,11 +343,11 @@ void osage_layout(Agraph_t *g)
 	    ND_pos(n)[0] = PS2INCH(ND_coord(n).x);
 	    ND_pos(n)[1] = PS2INCH(ND_coord(n).y);
 	}
-	spline_edges0(g, TRUE);
+	spline_edges0(g, true);
     }
     else {
 	int et = EDGE_TYPE (g);
-	if (et != ET_NONE) spline_edges1(g, et);
+	if (et != EDGETYPE_NONE) spline_edges1(g, et);
     }
     dotneato_postprocess(g);
 }
@@ -391,7 +370,20 @@ void osage_cleanup(Agraph_t *g)
     node_t *n;
 
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
+        for (edge_t *e = agfstout(g, n); e; e = agnxtout(g, e)) {
+            gv_cleanup_edge(e);
+        }
         gv_cleanup_node(n);
     }
     cleanup_graphs(g);
 }
+
+/**
+ * @dir lib/osage
+ * @brief clustered layout engine, API osage/osage.h
+ * @ingroup engines
+ *
+ * [Osage layout user manual](https://graphviz.org/docs/layouts/osage/)
+ *
+ * Other @ref engines
+ */

@@ -1,50 +1,52 @@
-# $Id$Revision: 
 ## Process this file with automake to produce Makefile.in
 
-pdfdir = $(pkgdatadir)/doc/pdf
-pkgconfigdir = $(libdir)/pkgconfig
-HOSTCC ?= $(CC)
-GVPR_VERSION="2:0:0"
+GVPR_VERSION = "2:0:0"
+
+if WITH_MINGW
+# Add an extra forward slash in front of $(pkgdatadir) to avoid the
+# path being translated to use backslashes under MSYS2/MinGW. This
+# trick is needed since DFLT_GVPRPATH is a string which is compiled
+# and backslashes in strings are interpreted as escape sequences. See
+# https://stackoverflow.com/a/14189687
+DFLT_GVPRPATH = .$(PATH_SEPARATOR)/$(pkgdatadir)/gvpr
+else
+DFLT_GVPRPATH = .$(PATH_SEPARATOR)$(pkgdatadir)/gvpr
+endif
 
 AM_CPPFLAGS = \
-	-I$(top_srcdir) \
-	-I$(top_srcdir)/lib/expr \
-	-I$(top_builddir)/lib/expr \
-	-I$(top_srcdir)/lib/vmalloc \
-	-I$(top_srcdir)/lib/sfio \
-	-I$(top_srcdir)/lib/ast \
-	-I$(top_srcdir)/lib/ingraphs \
+	-I$(top_srcdir)/lib \
+	-I$(top_builddir)/lib \
 	-I$(top_srcdir)/lib/common \
 	-I$(top_builddir)/lib/common \
 	-I$(top_srcdir)/lib/cgraph \
 	-I$(top_srcdir)/lib/cdt \
-	-DDFLT_GVPRPATH="\".$(PATH_SEPARATOR)$(pkgdatadir)/gvpr\""
+	-DDFLT_GVPRPATH='"$(DFLT_GVPRPATH)"'
 
 pkginclude_HEADERS = gvpr.h
-noinst_HEADERS = actions.h compile.h gprstate.h parse.h queue.h trieFA.h trie.c
+noinst_HEADERS = actions.h compile.h gdefs.h gprdata.inc gprstate.h parse.h \
+	trieFA.h trie.c
 noinst_LTLIBRARIES = libgvpr_C.la
 lib_LTLIBRARIES = libgvpr.la
 pkgconfig_DATA = libgvpr.pc
-man_MANS = gvpr.3
+dist_man_MANS = gvpr.3
+if ENABLE_MAN_PDFS
 pdf_DATA = gvpr.3.pdf
+endif
 
-libgvpr_C_la_SOURCES = actions.c compile.c gvpr.c gprstate.c parse.c queue.c 
-$(libgvpr_C_la_OBJECTS): gdefs.h
+libgvpr_C_la_SOURCES = actions.c compile.c gvpr.c gprstate.c parse.c
 libgvpr_C_la_DEPENDENCIES = \
 	$(top_builddir)/lib/expr/libexpr_C.la \
-	$(top_builddir)/lib/common/libcommon_C.la \
-	$(top_builddir)/lib/ingraphs/libingraphs_C.la
+	$(top_builddir)/lib/common/libcommon_C.la
 
-gvpr.3.pdf: gvpr.3.ps
-	@PS2PDF@ $< $@
-
-gvpr.3.ps: $(srcdir)/gvpr.3
-	@GROFF@ -Tps -man $< >$@
+.3.3.pdf:
+	rm -f $@; pdffile=$@; psfile=$${pdffile%pdf}ps; \
+	$(GROFF) -Tps -man $< > $$psfile || { rm -f $$psfile; exit 1; }; \
+	$(PS2PDF) $$psfile && rm -f $$psfile || { rm -f $$psfile; exit 1; }
+SUFFIXES = .3 .3.pdf
 
 libgvpr_la_LDFLAGS = -version-info $(GVPR_VERSION) -no-undefined
 libgvpr_la_SOURCES = $(libgvpr_C_la_SOURCES)
 libgvpr_la_LIBADD = $(libgvpr_C_la_LIBADD) \
-	$(top_builddir)/lib/ingraphs/libingraphs_C.la \
 	$(top_builddir)/lib/expr/libexpr_C.la \
 	$(top_builddir)/lib/cdt/libcdt.la \
 	$(top_builddir)/lib/cgraph/libcgraph.la \
@@ -55,12 +57,6 @@ if WITH_WIN32
 libgvpr_la_LDFLAGS += -export-symbols-regex gvpr
 endif
 
-mkdefs$(EXEEXT):
-	$(HOSTCC) $(srcdir)/mkdefs.c -o mkdefs$(EXEEXT)
+EXTRA_DIST = trie.c gvprlib.vcxproj*
 
-gdefs.h: $(top_srcdir)/lib/gvpr/gprdata mkdefs$(EXEEXT)
-	./mkdefs$(EXEEXT) gdefs.h < $(top_srcdir)/lib/gvpr/gprdata
-
-EXTRA_DIST = $(man_MANS) $(pdf_DATA) gprdata mkdefs.c gdefs.h trie.c gvprlib.vcxproj*
-
-DISTCLEANFILES = $(pdf_DATA) gdefs.h mkdefs$(EXEEXT) gvpr.3.ps
+DISTCLEANFILES = $(pdf_DATA)

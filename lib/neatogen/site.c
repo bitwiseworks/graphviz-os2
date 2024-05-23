@@ -1,18 +1,15 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "mem.h"
-#include "site.h"
+#include <neatogen/mem.h>
+#include <neatogen/site.h>
 #include <math.h>
 
 
@@ -20,22 +17,18 @@ int siteidx;
 Site *bottomsite;
 
 static Freelist sfl;
-static int nvertices;
+static size_t nvertices;
 
-void siteinit()
+void siteinit(void)
 {
-    /* double sn; */
-
     freeinit(&sfl, sizeof(Site));
     nvertices = 0;
-    /* sn = nsites+4; */
-    /* sqrt_nsites = sqrt(sn); */
 }
 
 
-Site *getsite()
+Site *getsite(void)
 {
-    return ((Site *) getfree(&sfl));
+    return getfree(&sfl);
 }
 
 double dist(Site * s, Site * t)
@@ -45,7 +38,7 @@ double dist(Site * s, Site * t)
 
     dx = s->coord.x - t->coord.x;
     dy = s->coord.y - t->coord.y;
-    ans = sqrt(dx * dx + dy * dy);
+    ans = hypot(dx, dy);
     return ans;
 }
 
@@ -53,21 +46,17 @@ double dist(Site * s, Site * t)
 void makevertex(Site * v)
 {
     v->sitenbr = nvertices;
-    nvertices += 1;
-#ifdef STANDALONE
-    out_vertex(v);
-#endif
+    ++nvertices;
 }
-
 
 void deref(Site * v)
 {
-    v->refcnt -= 1;
+    --v->refcnt;
     if (v->refcnt == 0)
 	makefree(v, &sfl);
 }
 
 void ref(Site * v)
 {
-    v->refcnt += 1;
+    ++v->refcnt;
 }

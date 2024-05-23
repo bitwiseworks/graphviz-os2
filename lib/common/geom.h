@@ -1,21 +1,22 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief geometric types and macros (e.g. points and boxes)
+ * @ingroup public_apis
+ * @ingroup common_utils
+ *
+ * with application to, but no specific dependence on graphs
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
-
-/* geometric types and macros (e.g. points and boxes) with application to, but
- * no specific dependence on graphs */
-
-#ifndef GV_GEOM_H
-#define GV_GEOM_H
+#pragma once
 
 #include "arith.h"
 
@@ -26,6 +27,11 @@ extern "C" {
 typedef struct { int x, y; } point;
 
 typedef struct pointf_s { double x, y; } pointf;
+
+typedef struct {
+  pointf p; // arbitrary point on the line
+  double m; // slope of the line
+} linef;
 
 /* tell pathplan/pathgeom.h */
 #define HAVE_POINTF_S
@@ -57,7 +63,6 @@ typedef struct { pointf LL, UR; } boxf;
 #define DIST(p,q)		(sqrt(DIST2((p),(q))))
 
 #define POINTS_PER_INCH	72
-#define POINTS_PER_PC		((double)POINTS_PER_INCH / 6)
 #define POINTS_PER_CM		((double)POINTS_PER_INCH * 0.393700787)
 #define POINTS_PER_MM		((double)POINTS_PER_INCH * 0.0393700787)
 
@@ -78,6 +83,4 @@ typedef struct { pointf LL, UR; } boxf;
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif

@@ -1,18 +1,20 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @ingroup common_utils
+ * @brief @ref point containers @ref PointSet and @ref PointMap
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef _POINTSET_H
-#define _POINTSET_H 1
+#pragma once
 
 #include <cdt.h>
 #include <geom.h>
@@ -21,41 +23,38 @@
 extern "C" {
 #endif
 
-    typedef Dict_t PointSet;
-    typedef Dict_t PointMap;
+    typedef Dict_t PointSet; ///< set of @ref point. Created by @ref newPS
+    typedef Dict_t PointMap; ///< map of @ref point. Created by @ref newPM
+
 #ifdef GVDLL
-#define extern __declspec(dllexport)
+#ifdef GVC_EXPORTS
+#define POINTSET_API __declspec(dllexport)
 #else
-#define extern
-#endif
-
-/*visual studio*/
-#ifdef _WIN32
-#ifndef GVC_EXPORTS
-#undef extern
-#define extern __declspec(dllimport)
+#define POINTSET_API __declspec(dllimport)
 #endif
 #endif
-/*end visual studio*/
 
-	extern PointSet *newPS(void);
-    extern void freePS(PointSet *);
-    extern void insertPS(PointSet *, point);
-    extern void addPS(PointSet *, int, int);
-    extern int inPS(PointSet *, point);
-    extern int isInPS(PointSet *, int, int);
-    extern int sizeOf(PointSet *);
-    extern point *pointsOf(PointSet *);
+/// @cond
+#ifndef POINTSET_API
+#define POINTSET_API /* nothing */
+#endif
+/// @endcond
 
-    extern PointMap *newPM(void);
-    extern void clearPM(PointMap *);
-    extern void freePM(PointMap *);
-    extern int insertPM(PointMap *, int, int, int);
-    extern int updatePM(PointMap * pm, int x, int y, int v);
+	POINTSET_API PointSet *newPS(void);
+    POINTSET_API void freePS(PointSet *);
+    POINTSET_API void insertPS(PointSet *, point);
+    POINTSET_API void addPS(PointSet *, int x, int y);
+    POINTSET_API int inPS(PointSet *, point);
+    POINTSET_API int isInPS(PointSet *, int x, int y);
+    POINTSET_API int sizeOf(PointSet *);
+    POINTSET_API point *pointsOf(PointSet *);
 
-#undef extern
+    POINTSET_API PointMap *newPM(void);
+    POINTSET_API void clearPM(PointMap *);
+    POINTSET_API void freePM(PointMap *);
+    POINTSET_API int insertPM(PointMap *, int x, int y, int value);
+
+#undef POINTSET_API
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* _POINTSET_H */

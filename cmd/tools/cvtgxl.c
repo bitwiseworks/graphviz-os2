@@ -1,14 +1,16 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief  <a href=https://en.wikipedia.org/wiki/GXL>GXL</a> converting program
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -18,11 +20,15 @@
 
 #include "config.h"
 
-#include <ctype.h>
 #include <getopt.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "convert.h"
-#include "ingraphs.h"
+#include "openFile.h"
+#include <cgraph/exit.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/ingraphs.h>
 
 typedef enum { Unset, ToGV, ToGXL } mode;
 
@@ -57,25 +63,6 @@ static FILE *getFile(void)
 }
 #endif
 
-static FILE *openFile(char *name, char *mode)
-{
-    FILE *fp;
-    char *modestr;
-
-    fp = fopen(name, mode);
-    if (!fp) {
-	if (*mode == 'r')
-	    modestr = "reading";
-	else
-	    modestr = "writing";
-	fprintf(stderr, "%s: could not open file %s for %s\n",
-		CmdName, name, modestr);
-	perror(name);
-	exit(1);
-    }
-    return fp;
-}
-
 static const char *use = "Usage: %s [-gd?] [-o<file>] [<graphs>]\n\
  -g        : convert to GXL\n\
  -d        : convert to GV\n\
@@ -85,7 +72,7 @@ static const char *use = "Usage: %s [-gd?] [-o<file>] [<graphs>]\n\
 static void usage(int v)
 {
     fprintf(stderr, use, CmdName);
-    exit(v);
+    graphviz_exit(v);
 }
 
 static char *cmdName(char *path)
@@ -97,6 +84,11 @@ static char *cmdName(char *path)
 	sp++;
     else
 	sp = path;
+#ifdef _WIN32
+    char *sp2 = strrchr(sp, '\\');
+    if (sp2 != NULL)
+	sp = sp2 + 1;
+#endif
     return sp;
 }
 
@@ -118,10 +110,10 @@ static void checkInput(void)
 
 static void setAction(void)
 {
-    if (tolower(CmdName[0]) == 'd') 
+    if (gv_tolower(CmdName[0]) == 'd') 
 	act = ToGXL;
-    else if (tolower(CmdName[0]) == 'g') {
-	if (tolower(CmdName[1]) == 'v')
+    else if (gv_tolower(CmdName[0]) == 'g') {
+	if (gv_tolower(CmdName[1]) == 'v')
 	    act = ToGXL;
 	else
 	    act = ToGV;
@@ -150,7 +142,9 @@ static void initargs(int argc, char **argv)
 	    act = ToGXL;
 	    break;
 	case 'o':
-	    outFile = openFile(optarg, "w");
+	    if (outFile != NULL)
+		fclose(outFile);
+	    outFile = openFile(CmdName, optarg, "w");
 	    break;
 	case ':':
 	    fprintf(stderr, "%s: option -%c missing argument\n", CmdName, optopt);
@@ -161,8 +155,12 @@ static void initargs(int argc, char **argv)
 	    else {
 		fprintf(stderr, "%s: option -%c unrecognized\n", CmdName,
 			optopt);
-		exit(1);
+		graphviz_exit(1);
 	    }
+	    break;
+	default:
+	    fprintf(stderr, "cvtgxl: unexpected error\n");
+	    graphviz_exit(EXIT_FAILURE);
 	}
     }
 
@@ -177,11 +175,6 @@ static void initargs(int argc, char **argv)
 	setAction();
 }
 
-static Agraph_t *gread(FILE * fp)
-{
-    return agread(fp, (Agdisc_t *) 0);
-}
-
 int main(int argc, char **argv)
 {
     Agraph_t *G;
@@ -190,7 +183,7 @@ int main(int argc, char **argv)
     initargs(argc, argv);
     if (act == ToGXL) {
 	ingraph_state ig;
-	newIngraph(&ig, Files, gread);
+	newIngraph(&ig, Files);
 
 	while ((G = nextGraph(&ig))) {
 	    if (prev)
@@ -214,9 +207,9 @@ int main(int argc, char **argv)
 #else
 	fputs("cvtgxl: not configured for conversion from GXL to GV\n",
 	      stderr);
-	exit(1);
+	graphviz_exit(1);
 
 #endif
     }
-    exit(0);
+    graphviz_exit(0);
 }

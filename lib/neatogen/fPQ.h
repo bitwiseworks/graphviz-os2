@@ -1,17 +1,14 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include <memory.h>
+#include <cgraph/alloc.h>
 #include <stdio.h>
 
 /* Priority queue:
@@ -39,7 +36,7 @@ typedef struct {
 static void
 PQgen(PQ* pq, int sz, PQTYPE guard)
 {
-    pq->pq = N_NEW(sz+1,PQTYPE);
+    pq->pq = gv_calloc(sz + 1, sizeof(PQTYPE));
     pq->pq[0] = guard;
     pq->PQsize = sz;
     pq->PQcnt = 0;
@@ -96,7 +93,7 @@ static int
 PQinsert(PQ* pq, PQTYPE np)
 {
     if (pq->PQcnt == pq->PQsize) {
-	agerr (AGERR, "Heap overflow\n");
+	agerrorf("Heap overflow\n");
 	return (1);
     }
     pq->PQcnt++;
@@ -164,7 +161,7 @@ PQupdate (PQ* pq, PQTYPE n, PQVTYPE d)
 #endif
 }
 
-#if DEBUG > 1
+#if defined(DEBUG) && DEBUG > 1
 
 static void
 PQprint (PQ* pq)

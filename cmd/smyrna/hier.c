@@ -1,84 +1,33 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
+#include <cgraph/alloc.h>
 #include "smyrnadefs.h"
 #include "hier.h"
-#include "delaunay.h"
-#include "memory.h"
-
-/* scale_coords:
- */
-static void
-scale_coords(double *x_coords, double *y_coords, int n,
-	     double w, double h, double margin)
-{
-    int i;
-    double minX, maxX, minY, maxY;
-    double scale_ratioX;
-    double scale_ratioY;
-    double scale_ratio;
-
-    w -= 2 * margin;
-    h -= 2 * margin;
-
-    minX = maxX = x_coords[0];
-    minY = maxY = y_coords[0];
-    for (i = 1; i < n; i++) {
-	if (x_coords[i] < minX)
-	    minX = x_coords[i];
-	if (y_coords[i] < minY)
-	    minY = y_coords[i];
-	if (x_coords[i] > maxX)
-	    maxX = x_coords[i];
-	if (y_coords[i] > maxY)
-	    maxY = y_coords[i];
-    }
-    for (i = 0; i < n; i++) {
-	x_coords[i] -= minX;
-	y_coords[i] -= minY;
-    }
-
-    // scale the layout to fill canvas:
-
-    scale_ratioX = w / (maxX - minX);
-    scale_ratioY = h / (maxY - minY);
-    scale_ratio = MIN(scale_ratioX, scale_ratioY);
-    for (i = 0; i < n; i++) {
-	x_coords[i] *= scale_ratio;
-	y_coords[i] *= scale_ratio;
-    }
-
-    for (i = 0; i < n; i++) {
-	x_coords[i] += margin;
-	y_coords[i] += margin;
-    }
-}
+#include <math.h>
+#include <neatogen/delaunay.h>
+#include <stddef.h>
 
 void positionAllItems(Hierarchy * hp, focus_t * fs, reposition_t * parms)
 {
-    int i;
     int interval = 20;
-    int counter = 0;		/* no. of active nodes */
-    double *x_coords = N_NEW(hp->nvtxs[0], double);
-    double *y_coords = N_NEW(hp->nvtxs[0], double);
+    size_t counter = 0; // no. of active nodes
+    double *x_coords = gv_calloc(hp->nvtxs[0], sizeof(double));
+    double *y_coords = gv_calloc(hp->nvtxs[0], sizeof(double));
     int max_level = hp->nlevels - 1;	// coarsest level
     double width = parms->width;
     double height = parms->height;
-    double margin = parms->margin;
     double distortion = parms->distortion;
 
     /* get all logical coordinates of active nodes */
-    for (i = 0; i < hp->nvtxs[max_level]; i++) {
+    for (int i = 0; i < hp->nvtxs[max_level]; i++) {
 	counter =
 	    extract_active_logical_coords(hp, i, max_level, x_coords,
 					  y_coords, counter);
@@ -87,37 +36,17 @@ void positionAllItems(Hierarchy * hp, focus_t * fs, reposition_t * parms)
     /* distort logical coordinates in order to get uniform density
      * (equivalent to concentrating on the focus area)
      */
-    width *= parms->graphSize / 100.0;
-    height *= parms->graphSize / 100.0;
-    if (fs->num_foci == 0) {
-	if (parms->rescale == Scale)
-	    scale_coords(x_coords, y_coords, counter, width, height,
-			 margin);
-    } else
-	switch (parms->rescale) {
-	case Polar:
-	    rescale_layout_polar(x_coords, y_coords, fs->x_foci,
+    if (fs->num_foci != 0) {
+	rescale_layout_polar(x_coords, y_coords, fs->x_foci,
 				 fs->y_foci, fs->num_foci, counter,
-				 interval, width, height, margin,
-				 distortion);
-	    break;
-	case Rectilinear:
-	    rescale_layout(x_coords, y_coords, counter, interval,
-			   width, height, margin, distortion);
-	    break;
-	case Scale:
-	    scale_coords(x_coords, y_coords, counter, width, height,
-			 margin);
-	    break;
-	case NoRescale:
-	    break;
-	}
+				 interval, width, height, distortion);
+    }
 
     /* Update the final physical coordinates of the active nodes */
-    for (counter = 0, i = 0; i < hp->nvtxs[max_level]; i++) {
-	counter =
+    for (int count = 0, i = 0; i < hp->nvtxs[max_level]; i++) {
+	count =
 	    set_active_physical_coords(hp, i, max_level, x_coords,
-				       y_coords, counter);
+				       y_coords, count);
     }
 
     free(x_coords);
@@ -176,7 +105,7 @@ Hierarchy *makeHier(int nn, int ne, v_data * graph, double *x_coords,
     Hierarchy *hp;
     int i;
 
-    delaunay = UG_graph(x_coords, y_coords, nn, 0);
+    delaunay = UG_graph(x_coords, y_coords, nn);
 
     ngeom_edges =
 	init_ex_graph(delaunay, graph, nn, x_coords, y_coords,
@@ -195,26 +124,15 @@ Hierarchy *makeHier(int nn, int ne, v_data * graph, double *x_coords,
 	geom_graph[i].physical_y_coord = (float) y_coords[i];
     }
 
-/* dumpHier (hp); */
     return hp;
 }
 
 focus_t *initFocus(int ncnt)
 {
-    focus_t *fs = NEW(focus_t);
+    focus_t *fs = gv_alloc(sizeof(focus_t));
     fs->num_foci = 0;
-    fs->foci_nodes = N_NEW(ncnt, int);
-    fs->x_foci = N_NEW(ncnt, double);
-    fs->y_foci = N_NEW(ncnt, double);
+    fs->foci_nodes = gv_calloc(ncnt, sizeof(int));
+    fs->x_foci = gv_calloc(ncnt, sizeof(double));
+    fs->y_foci = gv_calloc(ncnt, sizeof(double));
     return fs;
 }
-
-#ifdef UNUSED
-void freeFocus(focus_t * fs)
-{
-    free(fs->foci_nodes);
-    free(fs->x_foci);
-    free(fs->y_foci);
-    free(fs);
-}
-#endif

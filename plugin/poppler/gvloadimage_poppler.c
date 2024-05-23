@@ -1,33 +1,25 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 
-#include "gvplugin_loadimage.h"
+#include <gvc/gvplugin_loadimage.h>
 
 #ifdef HAVE_PANGOCAIRO
 #ifdef HAVE_POPPLER
 #include <poppler.h>
 #include <cairo.h>
-
-#ifdef _WIN32
-#define NUL_FILE "nul"
-#else
-#define NUL_FILE "/dev/null"
-#endif
 
 typedef enum {
     FORMAT_PDF_CAIRO,
@@ -36,7 +28,7 @@ typedef enum {
 
 static void gvloadimage_poppler_free(usershape_t *us)
 {
-    g_object_unref((PopplerDocument*)us->data);
+    g_object_unref(us->data);
 }
 
 static PopplerDocument* gvloadimage_poppler_load(GVJ_t * job, usershape_t *us)
@@ -52,7 +44,7 @@ static PopplerDocument* gvloadimage_poppler_load(GVJ_t * job, usershape_t *us)
 
     if (us->data) {
         if (us->datafree == gvloadimage_poppler_free)
-             document = (PopplerDocument*)(us->data); /* use cached data */
+             document = us->data; /* use cached data */
         else {
              us->datafree(us);        /* free incompatible cache data */
              us->data = NULL;
@@ -71,13 +63,13 @@ static PopplerDocument* gvloadimage_poppler_load(GVJ_t * job, usershape_t *us)
 		    absolute = g_strdup (us->name);
 		} else {
 		    gchar *dir = g_get_current_dir ();
-		    absolute = g_build_filename (dir, us->name, (gchar *) 0);
+		    absolute = g_build_filename(dir, us->name, NULL);
 		    free (dir);
 		}
 
 		uri = g_filename_to_uri (absolute, NULL, &error);
 
-		free (absolute);
+		g_free(absolute);
 		if (uri == NULL) {
 		    printf("%s\n", error->message);
 		    return NULL;
@@ -103,7 +95,7 @@ static PopplerDocument* gvloadimage_poppler_load(GVJ_t * job, usershape_t *us)
         }
 
         if (document) {
-            us->data = (void*)document;
+            us->data = document;
             us->datafree = gvloadimage_poppler_free;
         }
 
@@ -113,12 +105,14 @@ static PopplerDocument* gvloadimage_poppler_load(GVJ_t * job, usershape_t *us)
     return document;
 }
 
-static void gvloadimage_poppler_cairo(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void gvloadimage_poppler_cairo(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
+    (void)filled;
+
     PopplerDocument* document = gvloadimage_poppler_load(job, us);
     PopplerPage* page;
 
-    cairo_t *cr = (cairo_t *) job->context; /* target context */
+    cairo_t *cr = job->context; /* target context */
     cairo_surface_t *surface;	 /* source surface */
 
     if (document) {

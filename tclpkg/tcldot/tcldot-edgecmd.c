@@ -1,16 +1,14 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
+#include <string.h>
 #include "tcldot.h"
 
 int edgecmd(ClientData clientData, Tcl_Interp * interp,
@@ -21,8 +19,8 @@ int edgecmd(ClientData clientData, Tcl_Interp * interp,
 #endif				/* TCLOBJ */
     )
 {
-    char c, *s, **argv2;
-    int i, j, length, argc2;
+    char *s, **argv2;
+    int i, j, argc2;
     Agraph_t *g;
     Agedge_t *e;
     Agsym_t *a;
@@ -39,23 +37,20 @@ int edgecmd(ClientData clientData, Tcl_Interp * interp,
     }
     g = agraphof(agtail(e));
 
-    c = argv[1][0];
-    length = strlen(argv[1]);
-
-    if (MATCHES_OPTION("delete", argv[1], c, length)) {
+    if (strcmp("delete", argv[1]) == 0) {
 	deleteEdge(gctx, g, e);
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("listattributes", argv[1], c, length)) {
+    } else if (strcmp("listattributes", argv[1]) == 0) {
 	listEdgeAttrs (interp, g);
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("listnodes", argv[1], c, length)) {
+    } else if (strcmp("listnodes", argv[1]) == 0) {
 	Tcl_AppendElement(interp, obj2cmd(agtail(e)));
 	Tcl_AppendElement(interp, obj2cmd(aghead(e)));
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("queryattributes", argv[1], c, length)) {
+    } else if (strcmp("queryattributes", argv[1]) == 0) {
 	for (i = 2; i < argc; i++) {
 	    if (Tcl_SplitList
 		(interp, argv[i], &argc2,
@@ -73,7 +68,7 @@ int edgecmd(ClientData clientData, Tcl_Interp * interp,
 	}
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("queryattributevalues", argv[1], c, length)) {
+    } else if (strcmp("queryattributevalues", argv[1]) == 0) {
 	for (i = 2; i < argc; i++) {
 	    if (Tcl_SplitList
 		(interp, argv[i], &argc2,
@@ -92,7 +87,7 @@ int edgecmd(ClientData clientData, Tcl_Interp * interp,
 	}
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("setattributes", argv[1], c, length)) {
+    } else if (strcmp("setattributes", argv[1]) == 0) {
 	if (argc == 3) {
 	    if (Tcl_SplitList
 		(interp, argv[2], &argc2,
@@ -118,7 +113,7 @@ int edgecmd(ClientData clientData, Tcl_Interp * interp,
 	}
 	return TCL_OK;
 
-    } else if (MATCHES_OPTION("showname", argv[1], c, length)) {
+    } else if (strcmp("showname", argv[1]) == 0) {
 	if (agisdirected(g))
 	    s = "->";
 	else

@@ -52,35 +52,34 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;$(SolutionDir)lib\gvc;$(SolutionDir)lib\pack;$(SolutionDir)lib\pathplan;$(SolutionDir)lib\ortho;$(SolutionDir)lib\rbtree;$(SolutionDir)lib\sfdpgen;$(SolutionDir)lib\sparse;$(SolutionDir)lib\vpsc</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_DEBUG;_LIB;WIN32_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <MinimalRebuild>true</MinimalRebuild>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;$(SolutionDir)lib\gvc;$(SolutionDir)lib\pack;$(SolutionDir)lib\pathplan</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_DEBUG;GVDLL;NEATOGEN_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
     </ClCompile>
     <Lib />
     <Lib>
-      <AdditionalDependencies>gvortho.lib</AdditionalDependencies>
+      <AdditionalDependencies>gvc.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;$(SolutionDir)lib\gvc;$(SolutionDir)lib\pack;$(SolutionDir)lib\pathplan;$(SolutionDir)lib\ortho;$(SolutionDir)lib\rbtree;$(SolutionDir)lib\sfdpgen;$(SolutionDir)lib\sparse;$(SolutionDir)lib\vpsc</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>NDEBUG;_LIB;WIN32_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)lib;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;$(SolutionDir)lib\gvc;$(SolutionDir)lib\pack;$(SolutionDir)lib\pathplan</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;GVDLL;NEATOGEN_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
     </ClCompile>
     <Lib />
     <Lib>
-      <AdditionalDependencies>gvortho.lib</AdditionalDependencies>
+      <AdditionalDependencies>gvc.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(OutDir)</AdditionalLibraryDirectories>
     </Lib>
   </ItemDefinitionGroup>
@@ -104,7 +103,6 @@
     <ClInclude Include="kkutils.h" />
     <ClInclude Include="matrix_ops.h" />
     <ClInclude Include="mem.h" />
-    <ClInclude Include="mosek_quad_solve.h" />
     <ClInclude Include="multispline.h" />
     <ClInclude Include="neato.h" />
     <ClInclude Include="neatoprocs.h" />
@@ -145,7 +143,6 @@
     <ClCompile Include="matinv.c" />
     <ClCompile Include="matrix_ops.c" />
     <ClCompile Include="memory.c" />
-    <ClCompile Include="mosek_quad_solve.c" />
     <ClCompile Include="multispline.c" />
     <ClCompile Include="neatoinit.c" />
     <ClCompile Include="neatosplines.c" />
@@ -153,7 +150,6 @@
     <ClCompile Include="overlap.c" />
     <ClCompile Include="pca.c" />
     <ClCompile Include="poly.c" />
-    <ClCompile Include="printvis.c" />
     <ClCompile Include="quad_prog_solve.c" />
     <ClCompile Include="quad_prog_vpsc.c" />
     <ClCompile Include="randomkit.c" />
@@ -164,6 +160,11 @@
     <ClCompile Include="stress.c" />
     <ClCompile Include="stuff.c" />
     <ClCompile Include="voronoi.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\gvc.vcxproj">
+      <Project>{15229511-9f6c-48a5-9194-660ca6492563}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

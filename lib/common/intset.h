@@ -1,27 +1,25 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup common_utils
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef INTSET_H
-#define INTSET_H
+#pragma once
 
 #include <cdt.h>
+#include <stddef.h>
 
 typedef struct {
-    int       id;
+    size_t       id;
     Dtlink_t  link;
 } intitem;
 
 extern Dt_t* openIntSet (void);
-extern void addIntSet (Dt_t*, int);
-extern int inIntSet (Dt_t*, int);
-#endif
+void addIntSet(Dt_t *, size_t);
+int inIntSet(Dt_t *, size_t);

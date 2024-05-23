@@ -1,6 +1,3 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /**
  * \brief A block is a group of variables that must be moved together to improve
  * the goal function without violating already active constraints.
@@ -14,32 +11,31 @@
  * This version is released under the CPL (Common Public License) with
  * the Graphviz distribution.
  * A version is also available under the LGPL as part of the Adaptagrams
- * project: http://sourceforge.net/projects/adaptagrams.  
+ * project: https://github.com/mjwybrow/adaptagrams.  
  * If you make improvements or bug fixes to this code it would be much
  * appreciated if you could also contribute those changes back to the
  * Adaptagrams repository.
  */
 
-#ifndef SEEN_REMOVEOVERLAP_BLOCK_H
-#define SEEN_REMOVEOVERLAP_BLOCK_H
+#pragma once
 
+#include <memory>
 #include <vector>
 #include <iostream>
-class Variable;
-class Constraint;
-template <class T> class PairingHeap;
-class StupidPriorityQueue;
+#include <vpsc/pairingheap/PairingHeap.h>
+struct Variable;
+struct Constraint;
 
 class Block
 {
 	friend std::ostream& operator <<(std::ostream &os,const Block &b);
 public:
-	std::vector<Variable*> *vars;
+	std::vector<Variable*> vars;
 	double posn;
 	double weight;
 	double wposn;
-	Block(Variable *v=NULL);
-	~Block(void);
+	Block(Variable *v=nullptr);
+	Block(const Block &) = delete;
 	Constraint* findMinLM();
 	Constraint* findMinLMBetween(Variable* lv, Variable* rv);
 	Constraint* findMinInConstraint();
@@ -58,8 +54,8 @@ public:
 	double cost();
 	bool deleted;
 	long timeStamp;
-	PairingHeap<Constraint*> *in;
-	PairingHeap<Constraint*> *out;
+	std::unique_ptr<PairingHeap<Constraint*>> in;
+	std::unique_ptr<PairingHeap<Constraint*>> out;
 private:
 	typedef enum {NONE, LEFT, RIGHT} Direction;
 	typedef std::pair<double, Constraint*> Pair;
@@ -67,11 +63,9 @@ private:
 	double compute_dfdv(Variable *v, Variable *u, Constraint *&min_lm);
 	Pair compute_dfdv_between(
 			Variable*, Variable*, Variable*, Direction, bool);
-	bool canFollowLeft(Constraint *c, Variable *last);
-	bool canFollowRight(Constraint *c, Variable *last);
+	bool canFollowLeft(const Constraint *c, const Variable *last);
+	bool canFollowRight(const Constraint *c, const Variable *last);
 	void populateSplitBlock(Block *b, Variable *v, Variable *u);
 	void addVariable(Variable *v);
-	void setUpConstraintHeap(PairingHeap<Constraint*>* &h,bool in);
+	void setUpConstraintHeap(std::unique_ptr<PairingHeap<Constraint*>> &h, bool use_in);
 };
-
-#endif // SEEN_REMOVEOVERLAP_BLOCK_H

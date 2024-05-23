@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /* tlayout.c:
@@ -33,25 +30,23 @@
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
+#include <math.h>
 #include <stdlib.h>
 #include <time.h>
 #ifndef _WIN32
 #include <unistd.h>
 #endif
 #include <ctype.h>
-#include <dbg.h>
-#include <grid.h>
-#include <neato.h>
+#include <fdpgen/dbg.h>
+#include <fdpgen/grid.h>
+#include <neatogen/neato.h>
 
 #ifndef HAVE_SRAND48
 #define srand48 srand
 #endif
-#ifndef HAVE_DRAND48
-extern double drand48(void);
-#endif
 
-#include "tlayout.h"
-#include "globals.h"
+#include <fdpgen/tlayout.h>
+#include <common/globals.h>
 
 #define D_useGrid   (fdp_parms->useGrid)
 #define D_useNew    (fdp_parms->useNew)
@@ -78,12 +73,8 @@ typedef struct {
     double T0;          /* initial temperature */
     int smode;          /* seed mode */
     double Cell;	/* grid cell size */
-    double Cell2;	/* Cell*Cell */
-    double K2;		/* K*K */
     double Wd;		/* half-width of boundary */
     double Ht;		/* half-height of boundary */
-    double Wd2;		/* Wd*Wd */
-    double Ht2;		/* Ht*Ht */
     int pass1;		/* iterations used in pass 1 */
     int loopcnt;        /* actual iterations in this pass */
 } parms_t;
@@ -102,12 +93,8 @@ static parms_t parms;
 #define T_T0        (parms.T0)
 #define T_smode     (parms.smode)
 #define T_Cell      (parms.Cell)
-#define T_Cell2     (parms.Cell2)
-#define T_K2        (parms.K2)
 #define T_Wd        (parms.Wd)
 #define T_Ht        (parms.Ht)
-#define T_Wd2       (parms.Wd2)
-#define T_Ht2       (parms.Ht2)
 #define T_pass1     (parms.pass1)
 #define T_loopcnt   (parms.loopcnt)
 
@@ -118,9 +105,9 @@ static parms_t parms;
 #define DFLT_seed  1
 #define DFLT_smode INIT_RANDOM
 
-static double cool(double temp, int t)
+static double cool(int t)
 {
-    return (T_T0 * (T_maxIters - t)) / T_maxIters;
+    return T_T0 * (T_maxIters - t) / T_maxIters;
 }
 
 /* reset_params:
@@ -155,7 +142,7 @@ static int init_params(graph_t * g, xparams * xpms)
 	ret = 1;
     }
 
-    xpms->T0 = cool(T_T0, T_pass1);
+    xpms->T0 = cool(T_pass1);
     xpms->K = T_K;
     xpms->C = T_C;
     xpms->numIters = T_maxIters - T_pass1;
@@ -196,17 +183,15 @@ void fdp_initParams(graph_t * g)
     T_seed = DFLT_seed;
     T_smode = setSeed (g, DFLT_smode, &T_seed);
     if (T_smode == INIT_SELF) {
-	agerr(AGWARN, "fdp does not support start=self - ignoring\n");
+	agwarningf("fdp does not support start=self - ignoring\n");
 	T_seed = DFLT_smode;
     }
 
-    T_pass1 = (T_unscaled * T_maxIters) / 100;
-    T_K2 = T_K * T_K;
+    T_pass1 = T_unscaled * T_maxIters / 100;
 
     if (T_useGrid) {
 	if (T_Cell <= 0.0)
 	    T_Cell = 3 * T_K;
-	T_Cell2 = T_Cell * T_Cell;
     }
 #ifdef DEBUG
     if (Verbose) {
@@ -232,9 +217,9 @@ doRep(node_t * p, node_t * q, double xdelta, double ydelta, double dist2)
     }
     if (T_useNew) {
 	dist = sqrt(dist2);
-	force = T_K2 / (dist * dist2);
+	force = T_K * T_K / (dist * dist2);
     } else
-	force = T_K2 / dist2;
+	force = T_K * T_K / dist2;
     if (IS_PORT(p) && IS_PORT(q))
 	force *= 10.0;
     DISP(q)[0] += xdelta * force;
@@ -280,22 +265,20 @@ static void doNeighbor(Grid * grid, int i, int j, node_list * nodes)
 		xdelta = (ND_pos(q))[0] - (ND_pos(p))[0];
 		ydelta = (ND_pos(q))[1] - (ND_pos(p))[1];
 		dist2 = xdelta * xdelta + ydelta * ydelta;
-		if (dist2 < T_Cell2)
+		if (dist2 < T_Cell * T_Cell)
 		    doRep(p, q, xdelta, ydelta, dist2);
 	    }
 	}
     }
 }
 
-static int gridRepulse(Dt_t * dt, cell * cellp, Grid * grid)
-{
+static int gridRepulse(cell *cellp, Grid *grid) {
     node_list *nodes = cellp->nodes;
     int i = cellp->p.i;
     int j = cellp->p.j;
     node_list *p;
     node_list *q;
 
-    NOTUSED(dt);
 #ifdef DEBUG
     if (Verbose >= 3) {
 	prIndent();
@@ -342,9 +325,9 @@ static void applyAttr(Agnode_t * p, Agnode_t * q, Agedge_t * e)
     }
     dist = sqrt(dist2);
     if (T_useNew)
-	force = (ED_factor(e) * (dist - ED_dist(e))) / dist;
+	force = ED_factor(e) * (dist - ED_dist(e)) / dist;
     else
-	force = (ED_factor(e) * dist) / ED_dist(e);
+	force = ED_factor(e) * dist / ED_dist(e);
     DISP(q)[0] -= xdelta * force;
     DISP(q)[1] -= ydelta * force;
     DISP(p)[0] += xdelta * force;
@@ -372,14 +355,14 @@ static void updatePos(Agraph_t * g, double temp, bport_t * pp)
 	    x = ND_pos(n)[0] + dx;
 	    y = ND_pos(n)[1] + dy;
 	} else {
-	    double fact = temp / (sqrt(len2));
+	    double fact = temp / sqrt(len2);
 	    x = ND_pos(n)[0] + dx * fact;
 	    y = ND_pos(n)[1] + dy * fact;
 	}
 
 	/* if ports, limit by boundary */
 	if (pp) {
-	    d = sqrt((x * x) / T_Wd2 + (y * y) / T_Ht2);
+	    d = sqrt(x * x / (T_Wd * T_Wd) + y * y / (T_Ht * T_Ht));
 	    if (IS_PORT(n)) {
 		ND_pos(n)[0] = x / d;
 		ND_pos(n)[1] = y / d;
@@ -500,7 +483,7 @@ static pointf initPositions(graph_t * g, bport_t * pp)
 	width = EXPFACTOR * (bb.UR.x - bb.LL.x);
 	height = EXPFACTOR * (bb.UR.y - bb.LL.y);
 	area = 4.0 * T_Wd * T_Ht;
-	quot = (width * height) / area;
+	quot = width * height / area;
 	if (quot >= 1.0) {	/* If bbox has large enough area, use it */
 	    T_Wd = width / 2.0;
 	    T_Ht = height / 2.0;
@@ -530,8 +513,6 @@ static pointf initPositions(graph_t * g, bport_t * pp)
     } else {
 	ctr.x = ctr.y = 0;
     }
-    T_Wd2 = T_Wd * T_Wd;
-    T_Ht2 = T_Ht * T_Ht;
 
     /* Set seed value */
     if (T_smode == INIT_RANDOM)
@@ -578,7 +559,7 @@ static pointf initPositions(graph_t * g, bport_t * pp)
 		for (ep = agfstedge(g, np); ep; ep = agnxtedge(g, ep, np)) {
 		    if (aghead(ep) == agtail(ep))
 			continue;
-		    op = (aghead(ep) == np ? agtail(ep) : aghead(ep));
+		    op = aghead(ep) == np ? agtail(ep) : aghead(ep);
 		    if (!hasPos(op))
 			continue;
 		    if (cnt) {
@@ -630,32 +611,6 @@ static pointf initPositions(graph_t * g, bport_t * pp)
     return ctr;
 }
 
-void dumpstat(graph_t * g)
-{
-    double dx, dy;
-    double l, max2 = 0.0;
-    node_t *np;
-    edge_t *ep;
-    for (np = agfstnode(g); np; np = agnxtnode(g, np)) {
-	dx = DISP(np)[0];
-	dy = DISP(np)[1];
-	l = dx * dx + dy * dy;
-	if (l > max2)
-	    max2 = l;
-	fprintf(stderr, "%s: (%f,%f) (%f,%f)\n", agnameof(np),
-		ND_pos(np)[0], ND_pos(np)[1], DISP(np)[0], DISP(np)[1]);
-    }
-    fprintf(stderr, "max delta = %f\n", sqrt(max2));
-    for (np = agfstnode(g); np; np = agnxtnode(g, np)) {
-	for (ep = agfstout(g, np); ep; ep = agnxtout(g, ep)) {
-	    dx = ND_pos(np)[0] - ND_pos(aghead(ep))[0];
-	    dy = ND_pos(np)[1] - ND_pos(aghead(ep))[1];
-	    fprintf(stderr, "  %s --  %s  (%f)\n", agnameof(np),
-		    agnameof(aghead(ep)), sqrt(dx * dx + dy * dy));
-	}
-    }
-}
-
 /* fdp_tLayout:
  * Given graph g with ports nodes, layout g respecting ports.
  * If some node have position information, it may be useful to
@@ -680,24 +635,23 @@ void fdp_tLayout(graph_t * g, xparams * xpms)
 	grid = mkGrid(agnnodes(g));
 	adjustGrid(grid, agnnodes(g));
 	for (i = 0; i < T_loopcnt; i++) {
-	    temp = cool(temp, i);
+	    temp = cool(i);
 	    gAdjust(g, temp, pp, grid);
 	}
 	delGrid(grid);
     } else {
 	for (i = 0; i < T_loopcnt; i++) {
-	    temp = cool(temp, i);
+	    temp = cool(i);
 	    adjust(g, temp, pp);
 	}
     }
 
-    if ((ctr.x != 0.0) || (ctr.y != 0.0)) {
+    if (ctr.x != 0.0 || ctr.y != 0.0) {
 	for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	    ND_pos(n)[0] += ctr.x;
 	    ND_pos(n)[1] += ctr.y;
 	}
     }
-/* dumpstat (g); */
     if (reset)
 	reset_params();
 }

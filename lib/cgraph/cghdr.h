@@ -1,65 +1,44 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/**
+ * @file
+ * @brief cgraph.h additions
+ * @ingroup core
+ */
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef ATT_GRAPHPVT_H
-#define ATT_GRAPHPVT_H 1
-#define _BLD_cgraph 1
-
-#ifndef EXTERN
-#define EXTERN extern
-#endif
-
-#ifdef _WIN32
-#   ifdef EXPORT_CGHDR
-#       define CGHDR_API __declspec(dllexport)
-#   else
-#       define CGHDR_API __declspec(dllimport)
-#   endif
-#elif defined(__OS2__) && defined(EXPORT_CGHDR)
-#   define CGHDR_API __declspec(dllexport)
-#else
-#   define CGHDR_API extern
-#endif
+#pragma once
 
 #include "config.h"
+
+#ifdef GVDLL
+#ifdef EXPORT_CGHDR
+#define CGHDR_API __declspec(dllexport)
+#else
+#define CGHDR_API __declspec(dllimport)
+#endif
+#endif
+
+#ifndef CGHDR_API
+#define CGHDR_API /* nothing */
+#endif
 
 #include <cgraph.h>
 
 #include	 	<ctype.h>
 #include		<sys/types.h>
 #include		<stdarg.h>
+#include		<stdbool.h>
 #include		<stdlib.h>
 #include		<string.h>
-#ifdef HAVE_UNISTD_H
-#include	<unistd.h>
-#endif				/* HAVE_UNISTD_H */
-#ifdef DEBUG
 #include <assert.h>
-#else
-#define assert(x)
-#endif
 #include <stdint.h>
-
-#ifndef streq
-#define streq(s,t)		((*s == *t) && !strcmp((s),(t)))
-#endif
-#define NOTUSED(var)	(void) var
-
-#define NILgraph			NIL(Agraph_t*)
-#define NILnode				NIL(Agnode_t*)
-#define NILedge				NIL(Agedge_t*)
-#define NILsym				NIL(Agsym_t*)
-#define NILstr				NIL(char*)
 
 #define	SUCCESS				0
 #define FAILURE				-1
@@ -69,15 +48,13 @@
 #define AGCLOS(g,d)			((g)->clos->state.d)
 #define AGNEW(g,t)			((t*)(agalloc(g,sizeof(t))))
 
-#define ISALNUM(c) ((isalnum(c)) || ((c) == '_') || (!isascii(c)))
-
 	/* functional definitions */
 typedef Agobj_t *(*agobjsearchfn_t) (Agraph_t * g, Agobj_t * obj);
 CGHDR_API int agapply(Agraph_t * g, Agobj_t * obj, agobjfn_t fn, void *arg,
 	    int preorder);
 
 	/* global variables */
-EXTERN Agraph_t *Ag_G_global;
+extern Agraph_t *Ag_G_global;
 extern char *AgDataRecName;
 
 	/* set ordering disciplines */
@@ -88,7 +65,7 @@ extern Dtdisc_t Ag_subedge_id_disc;
 extern Dtdisc_t Ag_mainedge_seq_disc;
 extern Dtdisc_t Ag_subedge_seq_disc;
 extern Dtdisc_t Ag_subgraph_id_disc;
-extern Agcbdisc_t AgAttrdisc;
+extern Dtdisc_t Ag_subgraph_seq_disc;
 
 	/* internal constructor of graphs and subgraphs */
 Agraph_t *agopen1(Agraph_t * g);
@@ -97,25 +74,25 @@ int agstrclose(Agraph_t * g);
 	/* ref string management */
 void agmarkhtmlstr(char *s);
 
+/// Mask of `Agtag_s.seq` width
+enum { SEQ_MASK = (1 << (sizeof(unsigned) * 8 - 4)) - 1 };
+
 	/* object set management */
 Agnode_t *agfindnode_by_id(Agraph_t * g, IDTYPE id);
-Dtcompar_f agdictorder(Agraph_t *, Dict_t *, Dtcompar_f);
-int agedgecmpf(Dict_t * d, void *arg_e0, void *arg_e1, Dtdisc_t * disc);
-int agnamecmpf(Dict_t * d, void *, void *, Dtdisc_t * disc);
-void agset_node_disc(Agraph_t * g, Dtdisc_t * disc);
 uint64_t agnextseq(Agraph_t * g, int objtype);
 
 /* dict helper functions */
 Dict_t *agdtopen(Agraph_t * g, Dtdisc_t * disc, Dtmethod_t * method);
 void agdtdisc(Agraph_t * g, Dict_t * dict, Dtdisc_t * disc);
-long agdtdelete(Agraph_t * g, Dict_t * dict, void *obj);
+int agdtdelete(Agraph_t * g, Dict_t * dict, void *obj);
 int agdtclose(Agraph_t * g, Dict_t * dict);
-void *agdictobjmem(Dict_t * dict, void * p, size_t size,
-		   Dtdisc_t * disc);
-void agdictobjfree(Dict_t * dict, void * p, Dtdisc_t * disc);
+void agdictobjfree(void *p, Dtdisc_t *disc);
 
+/** @addtogroup cgraph_attr
+ *  @{
+ */
 	/* name-value pair operations */
-CGHDR_API Agdatadict_t *agdatadict(Agraph_t * g, int cflag);
+CGHDR_API Agdatadict_t *agdatadict(Agraph_t *g, bool cflag);
 CGHDR_API Agattr_t *agattrrec(void *obj);
 
 void agraphattr_init(Agraph_t * g);
@@ -124,6 +101,7 @@ void agnodeattr_init(Agraph_t *g, Agnode_t * n);
 void agnodeattr_delete(Agnode_t * n);
 void agedgeattr_init(Agraph_t *g, Agedge_t * e);
 void agedgeattr_delete(Agedge_t * e);
+/// @}
 
 	/* parsing and lexing graph files */
 int aagparse(void);
@@ -133,8 +111,8 @@ void aglexeof(void);
 void aglexbad(void);
 
 	/* ID management */
-int agmapnametoid(Agraph_t * g, int objtype, char *str,
-          IDTYPE *result, int allocflag);
+int agmapnametoid(Agraph_t *g, int objtype, char *str, IDTYPE *result,
+                  bool createflag);
 int agallocid(Agraph_t * g, int objtype, IDTYPE request);
 void agfreeid(Agraph_t * g, int objtype, IDTYPE id);
 char *agprintid(Agobj_t * obj);
@@ -151,23 +129,16 @@ void agregister(Agraph_t * g, int objtype, void *obj);
 void agedgesetop(Agraph_t * g, Agedge_t * e, int insertion);
 void agdelnodeimage(Agraph_t * g, Agnode_t * node, void *ignored);
 void agdeledgeimage(Agraph_t * g, Agedge_t * edge, void *ignored);
-void *agrebind0(Agraph_t * g, void *obj);	/* unsafe */
 CGHDR_API int agrename(Agobj_t * obj, char *newname);
 void agrecclose(Agobj_t * obj);
 
+/// @addtogroup cgraph_callback
+/// @{
 void agmethod_init(Agraph_t * g, void *obj);
 void agmethod_upd(Agraph_t * g, void *obj, Agsym_t * sym);
 void agmethod_delete(Agraph_t * g, void *obj);
 
-#define CB_INITIALIZE	100
-#define CB_UPDATE		101
-#define CB_DELETION		102
-void agsyspushdisc(Agraph_t * g, Agcbdisc_t * cb, void *state, int stack);
-int agsyspopdisc(Agraph_t * g, Agcbdisc_t * cb, int stack);
-void agrecord_callback(Agraph_t * g, Agobj_t * obj, int kind,
-		       Agsym_t * optsym);
 void aginitcb(Agraph_t * g, void *obj, Agcbstack_t * disc);
 void agupdcb(Agraph_t * g, void *obj, Agsym_t * sym, Agcbstack_t * disc);
 void agdelcb(Agraph_t * g, void *obj, Agcbstack_t * disc);
-
-#endif				/* ATT_GRAPHPVT_H */
+/// @}

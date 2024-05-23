@@ -1,22 +1,24 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup common_render
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
+
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#ifndef TABLE_H
-#define TABLE_H
 
 #define FIXED_FLAG 1
 #define HALIGN_RIGHT (1 << 1)
@@ -48,7 +50,7 @@ extern "C" {
     /* line of textspan_t's */
     typedef struct {
 	textspan_t *items;
-	short nitems;
+	size_t nitems;
 	char just;
 	double size;   /* width of span */
 	double lfsize; /* offset from previous baseline to current one */
@@ -56,7 +58,7 @@ extern "C" {
 	
     typedef struct {
 	htextspan_t *spans;
-	short nspans;
+	size_t nspans;
 	char simple;
 	boxf box;
     } htmltxt_t;
@@ -110,13 +112,14 @@ extern "C" {
 		Dt_t *rows;	/* cells */
 	    } p;
 	} u;
-	signed char cb;		/* cell border */
-	int *heights;		/* heights of the rows */
-	int *widths;		/* widths of the columns */
-	int rc;			/* number of rows */
-	int cc;			/* number of columns */
+	int8_t cellborder;
+	double *heights; ///< heights of the rows
+	double *widths; ///< widths of the columns
+	size_t row_count; ///< number of rows
+	size_t column_count; ///< number of columns
 	textfont_t *font;	/* font info */
-	unsigned char flags;
+	bool hrule:1; ///< horizontal rule
+	bool vrule:1; ///< vertical rule
     };
 
     struct htmllabel_t {
@@ -130,10 +133,10 @@ extern "C" {
 
     struct htmlcell_t {
 	htmldata_t data;
-	unsigned short cspan;
-	unsigned short rspan;
-	unsigned short col;
-	unsigned short row;
+	uint16_t colspan;
+	uint16_t rowspan;
+	uint16_t col;
+	uint16_t row;
 	htmllabel_t child;
 	htmltbl_t *parent;
 	unsigned char ruled;
@@ -160,7 +163,7 @@ extern "C" {
         graph_t *g;
         char *imgscale;
         char *objid;
-        boolean objid_set;
+        bool objid_set;
     } htmlenv_t;
 
     extern htmllabel_t *parseHTML(char *, int *, htmlenv_t *);
@@ -172,11 +175,7 @@ extern "C" {
     extern void free_html_data(htmldata_t *);
     extern void free_html_text(htmltxt_t *);
 
-    extern boxf *html_port(node_t * n, char *pname, int* sides);
-    extern int html_path(node_t * n, port* p, int side, boxf * rv, int *k);
-    extern int html_inside(node_t * n, pointf p, edge_t * e);
-
-#endif
+    extern boxf *html_port(node_t *n, char *pname, unsigned char *sides);
 
 #ifdef __cplusplus
 }

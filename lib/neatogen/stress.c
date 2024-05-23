@@ -1,49 +1,30 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include "neato.h"
-#include "dijkstra.h"
-#include "bfs.h"
-#include "pca.h"
-#include "matrix_ops.h"
-#include "conjgrad.h"
-#include "embed_graph.h"
-#include "kkutils.h"
-#include "stress.h"
+#include <cgraph/alloc.h>
+#include <float.h>
+#include <neatogen/neato.h>
+#include <neatogen/dijkstra.h>
+#include <neatogen/bfs.h>
+#include <neatogen/pca.h>
+#include <neatogen/matrix_ops.h>
+#include <neatogen/conjgrad.h>
+#include <neatogen/embed_graph.h>
+#include <neatogen/kkutils.h>
+#include <neatogen/stress.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
 
-
-#ifndef HAVE_DRAND48
-extern double drand48(void);
-#endif
-
-#define Dij2			/* If defined, the terms in the stress energy are normalized 
-				   by d_{ij}^{-2} otherwise, they are normalized by d_{ij}^{-1}
-				 */
-
-#ifdef NONCORE
-/* Set 'max_nodes_in_mem' so that 
- * 4*(max_nodes_in_mem^2) is smaller than the available memory (in bytes)
- * 4 = sizeof(float)
- */
-#define max_nodes_in_mem 18000
-#endif
-
- /* relevant when using sparse distance matrix not within subspace */
-#define smooth_pivots true
+// the terms in the stress energy are normalized by dᵢⱼ¯²
 
 /* dimensionality of subspace; relevant 
  * when optimizing within subspace) 
@@ -52,10 +33,10 @@ extern double drand48(void);
 
  /* a structure used for storing sparse distance matrix */
 typedef struct {
-    int nedges;
+    size_t nedges;
     int *edges;
     DistType *edist;
-    boolean free_mem;
+    bool free_mem;
 } dist_data;
 
 static double compute_stressf(float **coords, float *lap, int dim, int n, int exp)
@@ -78,16 +59,11 @@ static double compute_stressf(float **coords, float *lap, int dim, int n, int ex
 	    }
 	    dist = sqrt(dist);
 	    if (exp == 2) {
-#ifdef Dij2
 		Dij = 1.0 / sqrt(lap[count]);
-		sum += (Dij - dist) * (Dij - dist) * (lap[count]);
-#else
-		Dij = 1.0 / lap[count];
-		sum += (Dij - dist) * (Dij - dist) * (lap[count]);
-#endif
+		sum += (Dij - dist) * (Dij - dist) * lap[count];
 	    } else {
 		Dij = 1.0 / lap[count];
-		sum += (Dij - dist) * (Dij - dist) * (lap[count]);
+		sum += (Dij - dist) * (Dij - dist) * lap[count];
 	    }
 	}
     }
@@ -100,12 +76,12 @@ compute_stress1(double **coords, dist_data * distances, int dim, int n, int exp)
 {
     /* compute the overall stress */
 
-    int i, j, l, node;
+    int i, l, node;
     double sum, dist, Dij;
     sum = 0;
     if (exp == 2) {
 	for (i = 0; i < n; i++) {
-	    for (j = 0; j < distances[i].nedges; j++) {
+	    for (size_t j = 0; j < distances[i].nedges; j++) {
 		node = distances[i].edges[j];
 		if (node <= i) {
 		    continue;
@@ -119,16 +95,12 @@ compute_stress1(double **coords, dist_data * distances, int dim, int n, int exp)
 		}
 		dist = sqrt(dist);
 		Dij = distances[i].edist[j];
-#ifdef Dij2
 		sum += (Dij - dist) * (Dij - dist) / (Dij * Dij);
-#else
-		sum += (Dij - dist) * (Dij - dist) / Dij;
-#endif
 	    }
 	}
     } else {
 	for (i = 0; i < n; i++) {
-	    for (j = 0; j < distances[i].nedges; j++) {
+	    for (size_t j = 0; j < distances[i].nedges; j++) {
 		node = distances[i].edges[j];
 		if (node <= i) {
 		    continue;
@@ -155,10 +127,7 @@ compute_stress1(double **coords, dist_data * distances, int dim, int n, int exp)
  * a position, use it.
  * Return true if some node is fixed.
  */
-int
-initLayout(vtx_data * graph, int n, int dim, double **coords,
-	   node_t ** nodes)
-{
+int initLayout(int n, int dim, double **coords, node_t **nodes) {
     node_t *np;
     double *xp;
     double *yp;
@@ -198,8 +167,8 @@ initLayout(vtx_data * graph, int n, int dim, double **coords,
 
 float *circuitModel(vtx_data * graph, int nG)
 {
-    int i, j, e, rv, count;
-    float *Dij = N_NEW(nG * (nG + 1) / 2, float);
+    int i, j, rv, count;
+    float *Dij = gv_calloc(nG * (nG + 1) / 2, sizeof(float));
     double **Gm;
     double **Gm_inv;
 
@@ -209,7 +178,7 @@ float *circuitModel(vtx_data * graph, int nG)
     /* set non-diagonal entries */
     if (graph->ewgts) {
 	for (i = 0; i < nG; i++) {
-	    for (e = 1; e < graph[i].nedges; e++) {
+	    for (size_t e = 1; e < graph[i].nedges; e++) {
 		j = graph[i].edges[e];
 		/* conductance is 1/resistance */
 		Gm[i][j] = Gm[j][i] = -1.0 / graph[i].ewgts[e];	/* negate */
@@ -217,7 +186,7 @@ float *circuitModel(vtx_data * graph, int nG)
 	}
     } else {
 	for (i = 0; i < nG; i++) {
-	    for (e = 1; e < graph[i].nedges; e++) {
+	    for (size_t e = 1; e < graph[i].nedges; e++) {
 		j = graph[i].edges[e];
 		/* conductance is 1/resistance */
 		Gm[i][j] = Gm[j][i] = -1.0;	/* ewgts are all 1 */
@@ -259,14 +228,12 @@ float *circuitModel(vtx_data * graph, int nG)
  */
 static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input graph in sparse representation */
 						  int n,	/* Number of nodes */
-						  int nedges_graph,	/* Number of edges */
 						  double **coords,	/* coordinates of nodes (output layout)  */
 						  int dim,	/* dimemsionality of layout */
 						  int smart_ini,	/* smart initialization */
 						  int exp,	/* scale exponent */
 						  int reweight_graph,	/* difference model */
 						  int n_iterations,	/* max #iterations */
-						  int dist_bound,	/* neighborhood size in sparse distance matrix    */
 						  int num_centers	/* #pivots in sparse distance matrix  */
     )
 {
@@ -279,7 +246,7 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 	** k-D  stress minimization by majorization                **    
 	*************************************************/
 
-    int i, j, k, node;
+    int i, k, node;
 
 	/*************************************************
 	** First compute the subspace in which we optimize     **
@@ -287,19 +254,16 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 	*************************************************/
 
     int subspace_dim = MIN(stress_pca_dim, n);	/* overall dimensionality of subspace */
-    double **subspace = N_GNEW(subspace_dim, double *);
-    double *d_storage = N_GNEW(subspace_dim * n, double);
+    double **subspace = gv_calloc(subspace_dim, sizeof(double *));
+    double *d_storage = gv_calloc(subspace_dim * n, sizeof(double));
     int num_centers_local;
     DistType **full_coords;
     /* if i is a pivot than CenterIndex[i] is its index, otherwise CenterIndex[i]= -1 */
-    int *CenterIndex;
     int *invCenterIndex;	/* list the pivot nodes  */
-    Queue Q;
     float *old_weights;
     /* this matrix stores the distance between  each node and each "center" */
     DistType **Dij;
     /* this vector stores the distances of each node to the selected "centers" */
-    DistType *dist;
     DistType max_dist;
     DistType *storage;
     int *visited_nodes;
@@ -310,7 +274,6 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
     int num_visited_nodes;
     int num_neighbors;
     int index;
-    int nedges;
     DistType *dist_list;
     vtx_data *lap;
     int *edges;
@@ -324,7 +287,7 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
     double *b_restricted;
     double L_ij;
     double old_stress, new_stress;
-    boolean converged;
+    bool converged;
 
     for (i = 0; i < subspace_dim; i++) {
 	subspace[i] = d_storage + i * n;
@@ -347,13 +310,12 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 	** Compute the sparse-shortest-distances matrix 'distances' **
 	*************************************************/
 
-    CenterIndex = N_GNEW(n, int);
+    int *CenterIndex = gv_calloc(n, sizeof(int));
     for (i = 0; i < n; i++) {
 	CenterIndex[i] = -1;
     }
     invCenterIndex = NULL;
 
-    mkQueue(&Q, n);
     old_weights = graph[0].ewgts;
 
     if (reweight_graph) {
@@ -367,15 +329,15 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
     /* to all other nodes */
 
     Dij = NULL;
-    dist = N_GNEW(n, DistType);
+    DistType *dist = gv_calloc(n, sizeof(DistType));
     if (num_centers == 0) {	/* no pivots, skip pivots-to-nodes distance calculation */
 	goto after_pivots_selection;
     }
 
-    invCenterIndex = N_GNEW(num_centers, int);
+    invCenterIndex = gv_calloc(num_centers, sizeof(int));
 
-    storage = N_GNEW(n * num_centers, DistType);
-    Dij = N_GNEW(num_centers, DistType *);
+    storage = gv_calloc(n * num_centers, sizeof(DistType));
+    Dij = gv_calloc(num_centers, sizeof(DistType *));
     for (i = 0; i < num_centers; i++)
 	Dij[i] = storage + i * n;
 
@@ -389,7 +351,7 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
     if (reweight_graph) {
 	dijkstra(node, graph, n, Dij[0]);
     } else {
-	bfs(node, graph, n, Dij[0], &Q);
+	bfs(node, graph, n, Dij[0]);
     }
 
     /* find the most distant node from first pivot */
@@ -408,10 +370,10 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 	if (reweight_graph) {
 	    dijkstra(node, graph, n, Dij[i]);
 	} else {
-	    bfs(node, graph, n, Dij[i], &Q);
+	    bfs(node, graph, n, Dij[i]);
 	}
 	max_dist = 0;
-	for (j = 0; j < n; j++) {
+	for (int j = 0; j < n; j++) {
 	    dist[j] = MIN(dist[j], Dij[i][j]);
 	    if (dist[j] > max_dist
 		|| (dist[j] == max_dist && rand() % (j + 1) == 0)) {
@@ -430,23 +392,23 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 	dist[i] = -1;
     }
 
-    visited_nodes = N_GNEW(n, int);
-    distances = N_GNEW(n, dist_data);
+    visited_nodes = gv_calloc(n, sizeof(int));
+    distances = gv_calloc(n, sizeof(dist_data));
     available_space = 0;
-    nedges = 0;
+    size_t nedges = 0;
     for (i = 0; i < n; i++) {
 	if (CenterIndex[i] >= 0) {	/* a pivot node */
-	    distances[i].edges = N_GNEW(n - 1, int);
-	    distances[i].edist = N_GNEW(n - 1, DistType);
-	    distances[i].nedges = n - 1;
-	    nedges += n - 1;
-	    distances[i].free_mem = TRUE;
+	    distances[i].edges = gv_calloc(n - 1, sizeof(int));
+	    distances[i].edist = gv_calloc(n - 1, sizeof(DistType));
+	    distances[i].nedges = (size_t)n - 1;
+	    nedges += (size_t)n - 1;
+	    distances[i].free_mem = true;
 	    index = CenterIndex[i];
-	    for (j = 0; j < i; j++) {
+	    for (int j = 0; j < i; j++) {
 		distances[i].edges[j] = j;
 		distances[i].edist[j] = Dij[index][j];
 	    }
-	    for (j = i + 1; j < n; j++) {
+	    for (int j = i + 1; j < n; j++) {
 		distances[i].edges[j - 1] = j;
 		distances[i].edist[j - 1] = Dij[index][j];
 	    }
@@ -455,50 +417,27 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 
 	/* a non pivot node */
 
-	if (dist_bound > 0) {
-	    if (reweight_graph) {
-		num_visited_nodes =
-		    dijkstra_bounded(i, graph, n, dist, dist_bound,
-				     visited_nodes);
-	    } else {
-		num_visited_nodes =
-		    bfs_bounded(i, graph, n, dist, &Q, dist_bound,
-				visited_nodes);
-	    }
-	    /* filter the pivots out of the visited nodes list, and the self loop: */
-	    for (j = 0; j < num_visited_nodes;) {
-		if (CenterIndex[visited_nodes[j]] < 0
-		    && visited_nodes[j] != i) {
-		    /* not a pivot or self loop */
-		    j++;
-		} else {
-		    dist[visited_nodes[j]] = -1;
-		    visited_nodes[j] = visited_nodes[--num_visited_nodes];
-		}
-	    }
-	} else {
-	    num_visited_nodes = 0;
-	}
+	num_visited_nodes = 0;
 	num_neighbors = num_visited_nodes + num_centers;
 	if (num_neighbors > available_space) {
-	    available_space = (dist_bound + 1) * n;
-	    storage1 = N_GNEW(available_space, int);
-	    storage2 = N_GNEW(available_space, DistType);
-	    distances[i].free_mem = TRUE;
+	    available_space = n;
+	    storage1 = gv_calloc(available_space, sizeof(int));
+	    storage2 = gv_calloc(available_space, sizeof(DistType));
+	    distances[i].free_mem = true;
 	} else {
-	    distances[i].free_mem = FALSE;
+	    distances[i].free_mem = false;
 	}
 	distances[i].edges = storage1;
 	distances[i].edist = storage2;
-	distances[i].nedges = num_neighbors;
-	nedges += num_neighbors;
-	for (j = 0; j < num_visited_nodes; j++) {
+	distances[i].nedges = (size_t)num_neighbors;
+	nedges += (size_t)num_neighbors;
+	for (int j = 0; j < num_visited_nodes; j++) {
 	    storage1[j] = visited_nodes[j];
 	    storage2[j] = dist[visited_nodes[j]];
 	    dist[visited_nodes[j]] = -1;
 	}
 	/* add all pivots: */
-	for (j = num_visited_nodes; j < num_neighbors; j++) {
+	for (int j = num_visited_nodes; j < num_neighbors; j++) {
 	    index = j - num_visited_nodes;
 	    storage1[j] = invCenterIndex[index];
 	    storage2[j] = Dij[index][i];
@@ -521,9 +460,9 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 	** Laplacian computation **
 	*************************************************/
 
-    lap = N_GNEW(n, vtx_data);
-    edges = N_GNEW(nedges + n, int);
-    ewgts = N_GNEW(nedges + n, float);
+    lap = gv_calloc(n, sizeof(vtx_data));
+    edges = gv_calloc(nedges + n, sizeof(int));
+    ewgts = gv_calloc(nedges + n, sizeof(float));
     for (i = 0; i < n; i++) {
 	lap[i].edges = edges;
 	lap[i].ewgts = ewgts;
@@ -531,19 +470,15 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 	dist_list = distances[i].edist - 1;	/* '-1' since edist[0] goes for number '1' entry in the lap */
 	degree = 0;
 	if (exp == 2) {
-	    for (j = 1; j < lap[i].nedges; j++) {
+	    for (size_t j = 1; j < lap[i].nedges; j++) {
 		edges[j] = distances[i].edges[j - 1];
-#ifdef Dij2
 		ewgts[j] = (float) -1.0 / ((float) dist_list[j] * (float) dist_list[j]);	/* cast to float to prevent overflow */
-#else
-		ewgts[j] = -1.0 / (float) dist_list[j];
-#endif
 		degree -= ewgts[j];
 	    }
 	} else {
-	    for (j = 1; j < lap[i].nedges; j++) {
+	    for (size_t j = 1; j < lap[i].nedges; j++) {
 		edges[j] = distances[i].edges[j - 1];
-		ewgts[j] = -1.0 / (float) dist_list[j];
+		ewgts[j] = -1.0f / (float) dist_list[j];
 		degree -= ewgts[j];
 	    }
 	}
@@ -559,8 +494,8 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 	*************************************************/
 
     /* the layout is subspace*directions */
-    directions = N_GNEW(dim, double *);
-    directions[0] = N_GNEW(dim * subspace_dim, double);
+    directions = gv_calloc(dim, sizeof(double *));
+    directions[0] = gv_calloc(dim * subspace_dim, sizeof(double));
     for (i = 1; i < dim; i++) {
 	directions[i] = directions[0] + i * subspace_dim;
     }
@@ -596,7 +531,7 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 	/* random initialization */
 	for (k = 0; k < dim; k++) {
 	    for (i = 0; i < subspace_dim; i++) {
-		directions[k][i] = (double) (rand()) / RAND_MAX;
+		directions[k][i] = (double) rand() / RAND_MAX;
 	    }
 	}
     }
@@ -625,10 +560,10 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 	** Layout optimization  **
 	*************************************************/
 
-    b = N_GNEW(n, double);
-    b_restricted = N_GNEW(subspace_dim, double);
+    b = gv_calloc(n, sizeof(double));
+    b_restricted = gv_calloc(subspace_dim, sizeof(double));
     old_stress = compute_stress1(coords, distances, dim, n, exp);
-    for (converged = FALSE, iterations = 0;
+    for (converged = false, iterations = 0;
 	 iterations < n_iterations && !converged; iterations++) {
 
 	/* Axis-by-axis optimization: */
@@ -642,7 +577,7 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 		dist_list = distances[i].edist - 1;
 		edges = lap[i].edges;
 		ewgts = lap[i].ewgts;
-		for (j = 1; j < lap[i].nedges; j++) {
+		for (size_t j = 1; j < lap[i].nedges; j++) {
 		    node = edges[j];
 		    dist_ij = distance_kD(coords, dim, i, node);
 		    if (dist_ij > 1e-30) {	/* skip zero distances */
@@ -657,7 +592,7 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 				     b_restricted);
 	    if (conjugate_gradient_f(matrix, directions[k], b_restricted,
 				 subspace_dim, conj_tol, subspace_dim,
-				 FALSE)) {
+				 false)) {
 		iterations = -1;
 		goto finish0;
 	    }
@@ -665,11 +600,9 @@ static int sparse_stress_subspace_majorization_kD(vtx_data * graph,	/* Input gra
 					     directions[k], coords[k]);
 	}
 
-	if ((converged = (iterations % 2 == 0))) {	/* check for convergence each two iterations */
+	if (iterations % 2 == 0) { // check for convergence each two iterations
 	    new_stress = compute_stress1(coords, distances, dim, n, exp);
-	    converged =
-		fabs(new_stress - old_stress) / (new_stress + 1e-10) <
-		Epsilon;
+	    converged = fabs(new_stress - old_stress) / (new_stress + 1e-10) < Epsilon;
 	    old_stress = new_stress;
 	}
     }
@@ -702,7 +635,6 @@ finish0:
     }
     free(subspace[0]);
     free(subspace);
-    freeQueue(&Q);
 
     return iterations;
 }
@@ -713,12 +645,9 @@ finish0:
 static float *compute_weighted_apsp_packed(vtx_data * graph, int n)
 {
     int i, j, count;
-    float *Dij = N_NEW(n * (n + 1) / 2, float);
+    float *Dij = gv_calloc(n * (n + 1) / 2, sizeof(float));
 
-    float *Di = N_NEW(n, float);
-    Queue Q;
-
-    mkQueue(&Q, n);
+    float *Di = gv_calloc(n, sizeof(float));
 
     count = 0;
     for (i = 0; i < n; i++) {
@@ -728,7 +657,6 @@ static float *compute_weighted_apsp_packed(vtx_data * graph, int n)
 	}
     }
     free(Di);
-    freeQueue(&Q);
     return Dij;
 }
 
@@ -738,7 +666,7 @@ static float *compute_weighted_apsp_packed(vtx_data * graph, int n)
  */
 float *mdsModel(vtx_data * graph, int nG)
 {
-    int i, j, e;
+    int i, j;
     float *Dij;
     int shift = 0;
     double delta = 0.0;
@@ -752,7 +680,7 @@ float *mdsModel(vtx_data * graph, int nG)
     /* then, replace edge entries will user-supplied len */
     for (i = 0; i < nG; i++) {
 	shift += i;
-	for (e = 1; e < graph[i].nedges; e++) {
+	for (size_t e = 1; e < graph[i].nedges; e++) {
 	    j = graph[i].edges[e];
 	    if (j < i)
 		continue;
@@ -772,63 +700,48 @@ float *mdsModel(vtx_data * graph, int nG)
 float *compute_apsp_packed(vtx_data * graph, int n)
 {
     int i, j, count;
-    float *Dij = N_NEW(n * (n + 1) / 2, float);
+    float *Dij = gv_calloc(n * (n + 1) / 2, sizeof(float));
 
-    DistType *Di = N_NEW(n, DistType);
-    Queue Q;
-
-    mkQueue(&Q, n);
+    DistType *Di = gv_calloc(n, sizeof(DistType));
 
     count = 0;
     for (i = 0; i < n; i++) {
-	bfs(i, graph, n, Di, &Q);
+	bfs(i, graph, n, Di);
 	for (j = i; j < n; j++) {
-	    Dij[count++] = ((float) Di[j]);
+	    Dij[count++] = (float)Di[j];
 	}
     }
     free(Di);
-    freeQueue(&Q);
     return Dij;
 }
 
-#define max(x,y) ((x)>(y)?(x):(y))
-
-float *compute_apsp_artifical_weights_packed(vtx_data * graph, int n)
-{
+float *compute_apsp_artificial_weights_packed(vtx_data *graph, int n) {
     /* compute all-pairs-shortest-path-length while weighting the graph */
     /* so high-degree nodes are distantly located */
 
     float *Dij;
-    int i, j;
+    int i;
     float *old_weights = graph[0].ewgts;
-    int nedges = 0;
-    float *weights;
-    int *vtx_vec;
-    int deg_i, deg_j, neighbor;
+    size_t nedges = 0;
+    size_t deg_i, deg_j;
+    int neighbor;
 
     for (i = 0; i < n; i++) {
 	nedges += graph[i].nedges;
     }
 
-    weights = N_NEW(nedges, float);
-    vtx_vec = N_NEW(n, int);
-    for (i = 0; i < n; i++) {
-	vtx_vec[i] = 0;
-    }
+    float *weights = gv_calloc(nedges, sizeof(float));
+    int *vtx_vec = gv_calloc(n, sizeof(int));
 
     if (graph->ewgts) {
 	for (i = 0; i < n; i++) {
 	    fill_neighbors_vec_unweighted(graph, i, vtx_vec);
 	    deg_i = graph[i].nedges - 1;
-	    for (j = 1; j <= deg_i; j++) {
+	    for (size_t j = 1; j <= deg_i; j++) {
 		neighbor = graph[i].edges[j];
 		deg_j = graph[neighbor].nedges - 1;
-		weights[j] = (float)
-		    max((float)
-			(deg_i + deg_j -
-			 2 * common_neighbors(graph, i, neighbor,
-					      vtx_vec)),
-			graph[i].ewgts[j]);
+		weights[j] = fmaxf((float)(deg_i + deg_j -
+			 2 * common_neighbors(graph, neighbor, vtx_vec)), graph[i].ewgts[j]);
 	    }
 	    empty_neighbors_vec(graph, i, vtx_vec);
 	    graph[i].ewgts = weights;
@@ -840,12 +753,11 @@ float *compute_apsp_artifical_weights_packed(vtx_data * graph, int n)
 	    graph[i].ewgts = weights;
 	    fill_neighbors_vec_unweighted(graph, i, vtx_vec);
 	    deg_i = graph[i].nedges - 1;
-	    for (j = 1; j <= deg_i; j++) {
+	    for (size_t j = 1; j <= deg_i; j++) {
 		neighbor = graph[i].edges[j];
 		deg_j = graph[neighbor].nedges - 1;
 		weights[j] =
-		    ((float) deg_i + deg_j -
-		     2 * common_neighbors(graph, i, neighbor, vtx_vec));
+		    (float)(deg_i + deg_j - 2 * common_neighbors(graph, neighbor, vtx_vec));
 	    }
 	    empty_neighbors_vec(graph, i, vtx_vec);
 	    weights += graph[i].nedges;
@@ -865,7 +777,7 @@ float *compute_apsp_artifical_weights_packed(vtx_data * graph, int n)
     return Dij;
 }
 
-#if DEBUG > 1
+#if defined(DEBUG) && DEBUG > 1
 static void dumpMatrix(float *Dij, int n)
 {
     int i, j, count = 0;
@@ -888,7 +800,6 @@ static void dumpMatrix(float *Dij, int n)
  */
 int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse representation */
 				   int n,	/* Number of nodes */
-				   int nedges_graph,	/* Number of edges */
 				   double **d_coords,	/* coordinates of nodes (output layout) */
 				   node_t ** nodes,	/* original nodes */
 				   int dim,	/* dimemsionality of layout */
@@ -913,7 +824,7 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
     int step;
     float val;
     double old_stress, new_stress;
-    boolean converged;
+    bool converged;
     float **b = NULL;
     float *tmp_coords = NULL;
     float *dist_accumulator = NULL;
@@ -922,13 +833,6 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
     int exp = opts & opt_exp_flag;
     int len;
     int havePinned;		/* some node is pinned */
-#ifdef ALTERNATIVE_STRESS_CALC
-    double mat_stress;
-#endif
-#ifdef NONCORE
-    FILE *fp = NULL;
-#endif
-
 
 	/*************************************************
 	** Computation of full, dense, unrestricted k-D ** 
@@ -950,11 +854,11 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
 	/* and perform slower Dijkstra-based computation */
 	if (Verbose)
 	    fprintf(stderr, "Calculating subset model");
-	Dij = compute_apsp_artifical_weights_packed(graph, n);
+	Dij = compute_apsp_artificial_weights_packed(graph, n);
     } else if (model == MODEL_CIRCUIT) {
 	Dij = circuitModel(graph, n);
 	if (!Dij) {
-	    agerr(AGWARN,
+	    agwarningf(
 		  "graph is disconnected. Hence, the circuit model\n");
 	    agerr(AGPREV,
 		  "is undefined. Reverting to the shortest path model.\n");
@@ -983,15 +887,14 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
 	** Layout initialization **
 	**************************/
 
-    if (smart_ini && (n > 1)) {
+    if (smart_ini && n > 1) {
 	havePinned = 0;
 	/* optimize layout quickly within subspace */
 	/* perform at most 50 iterations within 30-D subspace to 
 	   get an estimate */
-	if (sparse_stress_subspace_majorization_kD(graph, n, nedges_graph,
+	if (sparse_stress_subspace_majorization_kD(graph, n,
 					       d_coords, dim, smart_ini, exp,
-					       (model == MODEL_SUBSET), 50,
-					       neighborhood_radius_subspace,
+					       model == MODEL_SUBSET, 50,
 					       num_pivots_stress) < 0) {
 	    iterations = -1;
 	    goto finish1;
@@ -1015,50 +918,33 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
 	    orthog1(n, d_coords[i]);
 	}
     } else {
-	havePinned = initLayout(graph, n, dim, d_coords, nodes);
+	havePinned = initLayout(n, dim, d_coords, nodes);
     }
     if (Verbose)
 	fprintf(stderr, ": %.2f sec", elapsed_sec());
-    if ((n == 1) || (maxi == 0))
+    if (n == 1 || maxi == 0) {
+	free(Dij);
 	return 0;
+    }
 
     if (Verbose) {
 	fprintf(stderr, ": %.2f sec\n", elapsed_sec());
 	fprintf(stderr, "Setting up stress function");
 	start_timer();
     }
-    coords = N_NEW(dim, float *);
-    f_storage = N_NEW(dim * n, float);
+    coords = gv_calloc(dim, sizeof(float *));
+    f_storage = gv_calloc(dim * n, sizeof(float));
     for (i = 0; i < dim; i++) {
 	coords[i] = f_storage + i * n;
 	for (j = 0; j < n; j++) {
-	    coords[i][j] = ((float) d_coords[i][j]);
+	    coords[i][j] = (float)d_coords[i][j];
 	}
     }
 
     /* compute constant term in stress sum */
     /* which is \sum_{i<j} w_{ij}d_{ij}^2 */
-    if (exp) {
-#ifdef Dij2
-	constant_term = ((float) n * (n - 1) / 2);
-#else
-	constant_term = 0;
-	for (count = 0, i = 0; i < n - 1; i++) {
-	    count++;		/* skip self distance */
-	    for (j = 1; j < n - i; j++, count++) {
-		constant_term += Dij[count];
-	    }
-	}
-#endif
-    } else {
-	constant_term = 0;
-	for (count = 0, i = 0; i < n - 1; i++) {
-	    count++;		/* skip self distance */
-	    for (j = 1; j < n - i; j++, count++) {
-		constant_term += Dij[count];
-	    }
-	}
-    }
+    assert(exp == 1 || exp == 2);
+    constant_term = (float)n * (n - 1) / 2;
 
 	/**************************
 	** Laplacian computation **
@@ -1067,18 +953,14 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
     lap_length = n * (n + 1) / 2;
     lap2 = Dij;
     if (exp == 2) {
-#ifdef Dij2
     square_vec(lap_length, lap2);
-#endif
     }
     /* compute off-diagonal entries */
     invert_vec(lap_length, lap2);
 
     /* compute diagonal entries */
     count = 0;
-    degrees = N_NEW(n, DegType);
-    /* set_vector_val(n, 0, degrees); */
-    memset(degrees, 0, n * sizeof(DegType));
+    degrees = gv_calloc(n, sizeof(DegType));
     for (i = 0; i < n - 1; i++) {
 	degree = 0;
 	count++;		/* skip main diag entry */
@@ -1093,71 +975,36 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
 	lap2[count] = degrees[i];
     }
 
-#ifdef NONCORE
-    if (n > max_nodes_in_mem) {
-#define FILENAME "tmp_Dij$$$.bin"
-	fp = fopen(FILENAME, "wb");
-	fwrite(lap2, sizeof(float), lap_length, fp);
-	fclose(fp);
-	fp = NULL;
-    }
-#endif
-
 	/*************************
 	** Layout optimization  **
 	*************************/
 
-    b = N_NEW(dim, float *);
-    b[0] = N_NEW(dim * n, float);
+    b = gv_calloc(dim, sizeof(float *));
+    b[0] = gv_calloc(dim * n, sizeof(float));
     for (k = 1; k < dim; k++) {
 	b[k] = b[0] + k * n;
     }
 
-    tmp_coords = N_NEW(n, float);
-    dist_accumulator = N_NEW(n, float);
-    lap1 = NULL;
-#ifdef NONCORE
-    if (n <= max_nodes_in_mem) {
-	lap1 = N_NEW(lap_length, float);
-    } else {
-	lap1 = lap2;
-	fp = fopen(FILENAME, "rb");
-	fgetpos(fp, &pos);
-    }
-#else
-    lap1 = N_NEW(lap_length, float);
-#endif
+    tmp_coords = gv_calloc(n, sizeof(float));
+    dist_accumulator = gv_calloc(n, sizeof(float));
+    lap1 = gv_calloc(lap_length, sizeof(float));
 
 
-#ifdef USE_MAXFLOAT
-    old_stress = MAXFLOAT;	/* at least one iteration */
-#else
     old_stress = MAXDOUBLE;	/* at least one iteration */
-#endif
     if (Verbose) {
 	fprintf(stderr, ": %.2f sec\n", elapsed_sec());
 	fprintf(stderr, "Solving model: ");
 	start_timer();
     }
 
-    for (converged = FALSE, iterations = 0;
+    for (converged = false, iterations = 0;
 	 iterations < maxi && !converged; iterations++) {
 
 	/* First, construct Laplacian of 1/(d_ij*|p_i-p_j|)  */
 	/* set_vector_val(n, 0, degrees); */
 	memset(degrees, 0, n * sizeof(DegType));
 	if (exp == 2) {
-#ifdef Dij2
-#ifdef NONCORE
-	    if (n <= max_nodes_in_mem) {
-		sqrt_vecf(lap_length, lap2, lap1);
-	    } else {
-		sqrt_vec(lap_length, lap1);
-	    }
-#else
 	    sqrt_vecf(lap_length, lap2, lap1);
-#endif
-#endif
 	}
 	for (count = 0, i = 0; i < n - 1; i++) {
 	    len = n - i - 1;
@@ -1166,20 +1013,18 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
 
 	    /* put into 'dist_accumulator' all squared distances between 'i' and 'i'+1,...,'n'-1 */
 	    for (k = 0; k < dim; k++) {
-		set_vector_valf(len, coords[k][i], tmp_coords);
-		vectors_mult_additionf(len, tmp_coords, -1,
-				       coords[k] + i + 1);
-		square_vec(len, tmp_coords);
-		vectors_additionf(len, tmp_coords, dist_accumulator,
-				  dist_accumulator);
+		size_t x;
+		for (x = 0; x < (size_t)len; ++x) {
+		    float tmp = coords[k][i] + -1.0f * (coords[k] + i + 1)[x];
+		    dist_accumulator[x] += tmp * tmp;
+		}
 	    }
 
 	    /* convert to 1/d_{ij} */
 	    invert_sqrt_vec(len, dist_accumulator);
 	    /* detect overflows */
 	    for (j = 0; j < len; j++) {
-		if (dist_accumulator[j] >= MAXFLOAT
-		    || dist_accumulator[j] < 0) {
+		if (dist_accumulator[j] >= FLT_MAX || dist_accumulator[j] < 0) {
 		    dist_accumulator[j] = 0;
 		}
 	    }
@@ -1188,11 +1033,7 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
 	    degree = 0;
 	    if (exp == 2) {
 		for (j = 0; j < len; j++, count++) {
-#ifdef Dij2
 		    val = lap1[count] *= dist_accumulator[j];
-#else
-		    val = lap1[count] = dist_accumulator[j];
-#endif
 		    degree += val;
 		    degrees[i + j + 1] -= val;
 		}
@@ -1224,34 +1065,17 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
 	}
 	new_stress *= 2;
 	new_stress += constant_term;	/* only after mult by 2 */
-#ifdef NONCORE
-	if (n > max_nodes_in_mem) {
-	    /* restore lap2 from memory */
-	    fsetpos(fp, &pos);
-	    fread(lap2, sizeof(float), lap_length, fp);
-	}
-#endif
 	for (k = 0; k < dim; k++) {
 	    right_mult_with_vector_ff(lap2, n, coords[k], tmp_coords);
 	    new_stress -= vectors_inner_productf(n, coords[k], tmp_coords);
 	}
-#ifdef ALTERNATIVE_STRESS_CALC
-	mat_stress = new_stress;
-	new_stress = compute_stressf(coords, lap2, dim, n);
-	if (fabs(mat_stress - new_stress) / min(mat_stress, new_stress) >
-	    0.001) {
-	    fprintf(stderr, "Diff stress vals: %lf %lf (iteration #%d)\n",
-		    mat_stress, new_stress, iterations);
-	}
-#endif
 	/* Invariant: old_stress > 0. In theory, old_stress >= new_stress
 	 * but we use fabs in case of numerical error.
 	 */
 	{
 	    double diff = old_stress - new_stress;
-	    double change = ABS(diff);
-	    converged = (((change / old_stress) < Epsilon)
-			 || (new_stress < Epsilon));
+	    double change = fabs(diff);
+	    converged = change / old_stress < Epsilon || new_stress < Epsilon;
 	}
 	old_stress = new_stress;
 
@@ -1277,7 +1101,7 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
 		}
 	    }
 	}
-	if (Verbose && (iterations % 5 == 0)) {
+	if (Verbose && iterations % 5 == 0) {
 	    fprintf(stderr, "%.3f ", new_stress);
 	    if ((iterations + 5) % 50 == 0)
 		fprintf(stderr, "\n");
@@ -1294,10 +1118,6 @@ int stress_majorization_kD_mkernel(vtx_data * graph,	/* Input graph in sparse re
 	    d_coords[i][j] = coords[i][j];
 	}
     }
-#ifdef NONCORE
-    if (fp)
-	fclose(fp);
-#endif
 finish1:
     free(f_storage);
     free(coords);

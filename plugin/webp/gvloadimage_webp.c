@@ -1,30 +1,29 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <cgraph/prisize_t.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "gvplugin_loadimage.h"
-#include "gvio.h"
+#include <gvc/gvplugin_loadimage.h>
+#include <gvc/gvio.h>
 
 #ifdef HAVE_WEBP
 #ifdef HAVE_PANGOCAIRO
 #include <cairo.h>
 #include <webp/decode.h>
 
-#ifdef _WIN32 //*dependencies
+#ifdef _MSC_VER //*dependencies
     #pragma comment( lib, "gvc.lib" )
     #pragma comment( lib, "glib-2.0.lib" )
     #pragma comment( lib, "pango-1.0.lib" )
@@ -46,7 +45,7 @@ typedef enum {
 
 static void webp_freeimage(usershape_t *us)
 {
-    cairo_surface_destroy((cairo_surface_t*)(us->data));
+    cairo_surface_destroy(us->data);
 }
 
 static cairo_surface_t* webp_really_loadimage(const char *in_file, FILE* const in)
@@ -57,7 +56,6 @@ static cairo_surface_t* webp_really_loadimage(const char *in_file, FILE* const i
     VP8StatusCode status = VP8_STATUS_OK;
     cairo_surface_t *surface = NULL; /* source surface */
     int ok;
-    uint32_t data_size = 0;
     void* data = NULL;
 
     if (!WebPInitDecoderConfig(&config)) {
@@ -66,24 +64,29 @@ static cairo_surface_t* webp_really_loadimage(const char *in_file, FILE* const i
     }
 
     fseek(in, 0, SEEK_END);
-    data_size = ftell(in);
+    long size = ftell(in);
+    if (size < 0) {
+	fprintf(stderr, "Error: WebP could not determine %s size\n", in_file);
+	return NULL;
+    }
+    size_t data_size = (size_t)size;
     fseek(in, 0, SEEK_SET);
     data = malloc(data_size);
-    ok = (fread(data, data_size, 1, in) == 1);
+    ok = fread(data, data_size, 1, in) == 1;
     if (!ok) {
-        fprintf(stderr, "Error: WebP could not read %d bytes of data from %s\n",
-            data_size, in_file);
+        fprintf(stderr, "Error: WebP could not read %" PRISIZE_T
+                " bytes of data from %s\n", data_size, in_file);
         free(data);
         return NULL;
     }
 
-    status = WebPGetFeatures((const uint8_t*)data, data_size, bitstream);
+    status = WebPGetFeatures(data, data_size, bitstream);
     if (status != VP8_STATUS_OK) {
 	goto end;
     }
 
     output_buffer->colorspace = MODE_RGBA;
-    status = WebPDecode((const uint8_t*)data, data_size, &config);
+    status = WebPDecode(data, data_size, &config);
 
     /* FIXME - this is ugly */
     if (! bitstream->has_alpha) {
@@ -91,7 +94,7 @@ static cairo_surface_t* webp_really_loadimage(const char *in_file, FILE* const i
 	unsigned char *p, t;
 
 	for (y = 0; y < output_buffer->height; y++) {
-	    p = output_buffer->u.RGBA.rgba + (output_buffer->u.RGBA.stride * y);
+	    p = output_buffer->u.RGBA.rgba + output_buffer->u.RGBA.stride * y;
 	    for (x = 0; x < output_buffer->width; x++) {
 		t = p[0];     /* swap red/blue */
 		p[0] = p[2];
@@ -103,7 +106,7 @@ static cairo_surface_t* webp_really_loadimage(const char *in_file, FILE* const i
 
 end:
     free(data);
-    ok = (status == VP8_STATUS_OK);
+    ok = status == VP8_STATUS_OK;
     if (!ok) {
 	fprintf(stderr, "Error: WebP decoding of %s failed.\n", in_file);
 	fprintf(stderr, "Status: %d (%s)\n", status, kStatusMessages[status]);
@@ -131,7 +134,7 @@ static cairo_surface_t* webp_loadimage(GVJ_t * job, usershape_t *us)
 
     if (us->data) {
         if (us->datafree == webp_freeimage)
-             surface = (cairo_surface_t*)(us->data); /* use cached data */
+             surface = us->data; /* use cached data */
         else {
              us->datafree(us);        /* free incompatible cache data */
              us->datafree = NULL;
@@ -150,7 +153,7 @@ static cairo_surface_t* webp_loadimage(GVJ_t * job, usershape_t *us)
                 surface = NULL;
         }
         if (surface) {
-            us->data = (void*)surface;
+            us->data = surface;
             us->datafree = webp_freeimage;
         }
 	gvusershape_file_release(us);
@@ -159,16 +162,18 @@ static cairo_surface_t* webp_loadimage(GVJ_t * job, usershape_t *us)
 }
 
 /* paint image into required location in graph */
-static void webp_loadimage_cairo(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void webp_loadimage_cairo(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
-    cairo_t *cr = (cairo_t *) job->context; /* target context */
+    (void)filled;
+
+    cairo_t *cr = job->context; /* target context */
     cairo_surface_t *surface;	 /* source surface */
 
     surface = webp_loadimage(job, us);
     if (surface) {
         cairo_save(cr);
 	cairo_translate(cr, b.LL.x, -b.UR.y);
-	cairo_scale(cr, (b.UR.x - b.LL.x)/(us->w), (b.UR.y - b.LL.y)/(us->h)); 
+	cairo_scale(cr, (b.UR.x - b.LL.x) / us->w, (b.UR.y - b.LL.y) / us->h);
         cairo_set_source_surface (cr, surface, 0, 0);
         cairo_paint (cr);
         cairo_restore(cr);

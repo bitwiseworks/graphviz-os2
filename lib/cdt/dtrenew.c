@@ -1,23 +1,23 @@
-#include	"dthdr.h"
-
+#include	<cdt/dthdr.h>
+#include	<stddef.h>
 
 /*	Renew the object at the current finger.
 **
 **	Written by Kiem-Phong Vo (5/25/96)
 */
 
-void* dtrenew(Dt_t* dt, reg void* obj)
+void* dtrenew(Dt_t* dt, void* obj)
 {
-	reg void*	key;
-	reg Dtlink_t	*e, *t, **s;
-	reg Dtdisc_t*	disc = dt->disc;
+	void*	key;
+	Dtlink_t	*e, *t, **s;
+	Dtdisc_t*	disc = dt->disc;
 
 	UNFLATTEN(dt);
 
 	if(!(e = dt->data->here) || _DTOBJ(e,disc->link) != obj)
-		return NIL(void*);
+		return NULL;
 
-	if(dt->data->type&(DT_STACK|DT_QUEUE|DT_LIST))
+	if(dt->data->type&DT_QUEUE)
 		return obj;
 	else if(dt->data->type&(DT_OSET|DT_OBAG) )
 	{	if(!e->right )	/* make left child the new root */
@@ -43,10 +43,10 @@ void* dtrenew(Dt_t* dt, reg void* obj)
 			t->right = e->right;
 		}
 		key = _DTKEY(obj,disc->key,disc->size);
-		e->hash = _DTHSH(dt,key,disc,disc->size);
-		dt->data->here = NIL(Dtlink_t*);
+		e->hash = dtstrhash(key, disc->size);
+		dt->data->here = NULL;
 	}
 
 	dt->data->size -= 1;
-	return (*dt->meth->searchf)(dt,(void*)e,DT_RENEW) ? obj : NIL(void*);
+	return dt->meth->searchf(dt, e, DT_RENEW) ? obj : NULL;
 }

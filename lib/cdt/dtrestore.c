@@ -1,4 +1,5 @@
-#include	"dthdr.h"
+#include	<cdt/dthdr.h>
+#include	<stddef.h>
 
 /*	Restore dictionary from given tree or list of elements.
 **	There are two cases. If called from within, list is nil.
@@ -7,11 +8,11 @@
 **	Written by Kiem-Phong Vo (5/25/96)
 */
 
-int dtrestore(reg Dt_t* dt, reg Dtlink_t* list)
+int dtrestore(Dt_t* dt, Dtlink_t* list)
 {
-	reg Dtlink_t	*t, **s, **ends;
-	reg int		type;
-	reg Dtsearch_f	searchf = dt->meth->searchf;
+	Dtlink_t	*t, **s, **ends;
+	int		type;
+	Dtsearch_f	searchf = dt->meth->searchf;
 
 	type = dt->data->type&DT_FLATTEN;
 	if(!list) /* restoring a flattened dictionary */
@@ -26,14 +27,14 @@ int dtrestore(reg Dt_t* dt, reg Dtlink_t* list)
 	}
 	dt->data->type &= ~DT_FLATTEN;
 
-	if(dt->data->type&(DT_SET|DT_BAG))
-	{	dt->data->here = NIL(Dtlink_t*);
+	if(dt->data->type&DT_SET)
+	{	dt->data->here = NULL;
 		if(type) /* restoring a flattened dictionary */
 		{	for(ends = (s = dt->data->htab) + dt->data->ntab; s < ends; ++s)
 			{	if((t = *s) )
 				{	*s = list;
 					list = t->right;
-					t->right = NIL(Dtlink_t*);
+					t->right = NULL;
 				}
 			}
 		}
@@ -41,7 +42,7 @@ int dtrestore(reg Dt_t* dt, reg Dtlink_t* list)
 		{	dt->data->size = 0;
 			while(list)
 			{	t = list->right;
-				(*searchf)(dt,(void*)list,DT_RENEW);
+				searchf(dt, list, DT_RENEW);
 				list = t;
 			}
 		}
@@ -50,7 +51,7 @@ int dtrestore(reg Dt_t* dt, reg Dtlink_t* list)
 	{	if(dt->data->type&(DT_OSET|DT_OBAG))
 			dt->data->here = list;
 		else /*if(dt->data->type&(DT_LIST|DT_STACK|DT_QUEUE))*/
-		{	dt->data->here = NIL(Dtlink_t*);
+		{	dt->data->here = NULL;
 			dt->data->head = list;
 		}
 		if(!type)

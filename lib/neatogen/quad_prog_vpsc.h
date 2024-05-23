@@ -1,6 +1,3 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /**
  * Authors:
  *   Tim Dwyer <tgdwyer@gmail.com>
@@ -18,28 +15,24 @@
 
 /**********************************************************
 *      Written by Tim Dwyer for the graphviz package      *
-*                http://www.graphviz.org/                 *
+*                  https://graphviz.org                   *
 *                                                         *
 **********************************************************/
+
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#ifndef _QUAD_PROG_VPSC_H_
-#define _QUAD_PROG_VPSC_H_
-
 #ifdef DIGCOLA
 
-#include "defs.h"
-#include "digcola.h"
-#ifdef MOSEK
-#include "mosek_quad_solve.h"
-#endif /* MOSEK */
+#include <neatogen/defs.h>
+#include <neatogen/digcola.h>
+#include <stdbool.h>
 
 typedef struct CMajEnvVPSC {
 	float **A;
-	float *packedMat;
 	int nv;   /* number of actual vars */
 	int nldv; /* number of dummy nodes included in lap matrix */
 	int ndv;  /* number of dummy nodes not included in lap matrix */
@@ -53,9 +46,6 @@ typedef struct CMajEnvVPSC {
 	float *fArray1; /* utility arrays - reusable memory */
 	float *fArray2;
 	float *fArray3;
-#ifdef MOSEK
-	MosekEnv *mosekEnv;
-#endif /* MOSEK */
 } CMajEnvVPSC;
 
 extern CMajEnvVPSC* initCMajVPSC(int n, float *packedMat, vtx_data* graph, ipsep_options *opt, int diredges);
@@ -68,7 +58,7 @@ extern void generateNonoverlapConstraints(
         float nsizeScale,
         float** coords,
         int k,
-	boolean transitiveClosure,
+	bool transitiveClosure,
 	ipsep_options* opt
 );
 
@@ -83,12 +73,8 @@ typedef struct {
  * unpack the "ordering" array into an array of DigColaLevel (as defined above)
  */
 extern DigColaLevel* assign_digcola_levels(int *ordering, int n, int *level_inds, int num_divisions);
-extern void delete_digcola_levels(DigColaLevel *l, int num_levels);
-extern void print_digcola_levels(FILE* logfile, DigColaLevel *levels, int num_levels);
 int get_num_digcola_constraints(DigColaLevel *levels, int num_levels);
 #endif 
-
-#endif /* _QUAD_PROG_VPSC_H_ */
 
 #ifdef __cplusplus
 }

@@ -1,8 +1,7 @@
-# $Id$ $Revision$
 ## Process this file with automake to produce Makefile.in
 
 AM_CPPFLAGS = \
-	-I$(top_srcdir) \
+	-I$(top_srcdir)/lib \
 	-I$(top_srcdir)/lib/common \
 	-I$(top_srcdir)/lib/pathplan \
 	-I$(top_srcdir)/lib/gvc \
@@ -23,14 +22,10 @@ libgvplugin_devil_C_la_SOURCES = \
 	gvplugin_devil.c \
 	gvdevice_devil.c
 
-libgvplugin_devil_la_LDFLAGS = -version-info @GVPLUGIN_VERSION_INFO@
+libgvplugin_devil_la_LDFLAGS = -version-info $(GVPLUGIN_VERSION_INFO)
 libgvplugin_devil_la_SOURCES = $(libgvplugin_devil_C_la_SOURCES)
-libgvplugin_devil_la_LIBADD = @DEVIL_LIBS@
+libgvplugin_devil_la_LIBADD = $(DEVIL_LIBS)
 
 if WITH_WIN32
 libgvplugin_devil_la_LDFLAGS += -no-undefined
-endif
-
-if WITH_DARWIN9
-libgvplugin_devil_la_LDFLAGS += -Wl,-exported_symbol,_gvplugin_devil_LTX_library
 endif

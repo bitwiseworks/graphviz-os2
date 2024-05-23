@@ -1,8 +1,7 @@
-# $Id$ $Revision$
 ## Process this file with automake to produce Makefile.in
 
 AM_CPPFLAGS = \
-	-I$(top_srcdir) \
+	-I$(top_srcdir)/lib \
 	-I$(top_srcdir)/lib/common \
 	-I$(top_srcdir)/lib/pathplan \
 	-I$(top_srcdir)/lib/gvc \
@@ -28,15 +27,11 @@ libgvplugin_gdk_C_la_SOURCES = \
 	gvdevice_gdk.c \
 	gvloadimage_gdk.c
 
-libgvplugin_gdk_la_LDFLAGS = -version-info @GVPLUGIN_VERSION_INFO@
+libgvplugin_gdk_la_LDFLAGS = -version-info $(GVPLUGIN_VERSION_INFO)
 libgvplugin_gdk_la_SOURCES = $(libgvplugin_gdk_C_la_SOURCES)
 libgvplugin_gdk_la_LIBADD = \
-	$(top_builddir)/lib/gvc/libgvc.la @GDK_PIXBUF_LIBS@ @PANGOCAIRO_LIBS@ @GDK_LIBS@
-	
+	$(top_builddir)/lib/gvc/libgvc.la $(GDK_PIXBUF_LIBS) $(PANGOCAIRO_LIBS) $(GDK_LIBS)
+
 if WITH_WIN32
 libgvplugin_gdk_la_LDFLAGS += -no-undefined
-endif
-
-if WITH_DARWIN9
-libgvplugin_gdk_la_LDFLAGS += -Wl,-exported_symbol,_gvplugin_gdk_LTX_library
 endif

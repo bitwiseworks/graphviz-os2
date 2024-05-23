@@ -51,63 +51,67 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)windows\getopt;$(SolutionDir);$(SolutionDir)lib\ast;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;$(SolutionDir)lib\expr;$(SolutionDir)lib\ingraphs;$(SolutionDir)lib\sfio;$(SolutionDir)lib\vmalloc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>EXPORT_GVPR;_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <MinimalRebuild>true</MinimalRebuild>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)windows\include\unistd;$(SolutionDir)windows\dependencies\libraries\vcpkg\installed\x86-windows\include;$(SolutionDir);$(SolutionDir)lib;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>EXPORT_GVPR;_DEBUG;GVDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
     </ClCompile>
     <Lib />
     <Lib>
-      <AdditionalLibraryDirectories>$(SolutionDir)windows\getopt</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)windows\dependencies\libraries\vcpkg\installed\x86-windows\lib</AdditionalLibraryDirectories>
       <AdditionalDependencies>getopt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Lib>
     <Link>
-      <AdditionalLibraryDirectories>$(OutDir);$(SolutionDir)windows\getopt</AdditionalLibraryDirectories>
-      <AdditionalDependencies>ast.lib;cdt.lib;cgraph.lib;expr.lib;ingraphs.lib;getopt.lib;gvc.lib;sfio.lib;vmalloc.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(OutDir);$(SolutionDir)windows\dependencies\libraries\vcpkg\installed\x86-windows\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ast.lib;cdt.lib;cgraph.lib;expr.lib;getopt.lib;gvc.lib;sfio.lib;vmalloc.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy $(SolutionDir)windows\dependencies\libraries\vcpkg\installed\x86-windows\bin\getopt.dll $(OutDir)getopt.dll</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)windows\getopt;$(SolutionDir);$(SolutionDir)lib\ast;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;$(SolutionDir)lib\expr;$(SolutionDir)lib\ingraphs;$(SolutionDir)lib\sfio;$(SolutionDir)lib\vmalloc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>EXPORT_GVPR;_LIB;GVDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)windows\include;$(SolutionDir)windows\include\unistd;$(SolutionDir)windows\dependencies\libraries\vcpkg\installed\x86-windows\include;$(SolutionDir);$(SolutionDir)lib;$(SolutionDir)lib\cdt;$(SolutionDir)lib\cgraph;$(SolutionDir)lib\common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>EXPORT_GVPR;GVDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader />
       <WarningLevel>Level4</WarningLevel>
       <EnablePREfast>true</EnablePREfast>
-      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4223;4706;4996</DisableSpecificWarnings>
     </ClCompile>
     <Lib />
     <Lib>
-      <AdditionalLibraryDirectories>$(SolutionDir)windows\getopt</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)windows\dependencies\libraries\vcpkg\installed\x86-windows\lib</AdditionalLibraryDirectories>
       <AdditionalDependencies>getopt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Lib>
     <Link>
       <GenerateDebugInformation>false</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(OutDir);$(SolutionDir)windows\getopt</AdditionalLibraryDirectories>
-      <AdditionalDependencies>ast.lib;cdt.lib;cgraph.lib;expr.lib;ingraphs.lib;getopt.lib;gvc.lib;sfio.lib;vmalloc.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(OutDir);$(SolutionDir)windows\dependencies\libraries\vcpkg\installed\x86-windows\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ast.lib;cdt.lib;cgraph.lib;expr.lib;getopt.lib;gvc.lib;sfio.lib;vmalloc.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy $(SolutionDir)windows\dependencies\libraries\vcpkg\installed\x86-windows\bin\getopt.dll $(OutDir)getopt.dll</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="actions.h" />
     <ClInclude Include="compile.h" />
+    <ClInclude Include="gdefs.h" />
+    <ClInclude Include="gprdata.inc" />
     <ClInclude Include="gprstate.h" />
     <ClInclude Include="gvpr.h" />
     <ClInclude Include="parse.h" />
-    <ClInclude Include="queue.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="actions.c" />
     <ClCompile Include="compile.c" />
     <ClCompile Include="gprstate.c" />
     <ClCompile Include="gvpr.c" />
-    <ClCompile Include="mkdefs.c" />
     <ClCompile Include="parse.c" />
-    <ClCompile Include="queue.c" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\cgraph\cgraph.vcxproj">

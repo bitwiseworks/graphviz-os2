@@ -1,6 +1,3 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /**
  * \brief A constraint determines a minimum or exact spacing required between
  * two variables.
@@ -13,19 +10,18 @@
  * This version is released under the CPL (Common Public License) with
  * the Graphviz distribution.
  * A version is also available under the LGPL as part of the Adaptagrams
- * project: http://sourceforge.net/projects/adaptagrams.  
+ * project: https://github.com/mjwybrow/adaptagrams.  
  * If you make improvements or bug fixes to this code it would be much
  * appreciated if you could also contribute those changes back to the
  * Adaptagrams repository.
  */
 
-#ifndef SEEN_REMOVEOVERLAP_CONSTRAINT_H
-#define SEEN_REMOVEOVERLAP_CONSTRAINT_H
+#pragma once
 
 #include <iostream>
-#include "variable.h"
+#include <vpsc/variable.h>
 
-class Constraint
+struct Constraint
 {
 	friend std::ostream& operator <<(std::ostream &os,const Constraint &c);
 public:
@@ -33,16 +29,15 @@ public:
 	Variable *right;
 	double gap;
 	double lm;
-	Constraint(Variable *left, Variable *right, double gap, bool equality=false);
+	Constraint(Variable *left, Variable *right, double gap);
 	~Constraint();
-	inline double slack() const { return right->position() - gap - left->position(); }
+	double slack() const { return right->position() - gap - left->position(); }
 	long timeStamp;
 	bool active;
 	bool visited;
-	bool equality;
 };
 #include <float.h>
-#include "block.h"
+#include <vpsc/block.h>
 static inline bool compareConstraints(Constraint *const &l, Constraint *const &r) {
 	double const sl = 
 		l->left->block->timeStamp > l->timeStamp
@@ -63,5 +58,3 @@ static inline bool compareConstraints(Constraint *const &l, Constraint *const &r
 	}
 	return sl < sr;
 }
-
-#endif // SEEN_REMOVEOVERLAP_CONSTRAINT_H

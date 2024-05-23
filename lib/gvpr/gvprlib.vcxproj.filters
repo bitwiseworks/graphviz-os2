@@ -21,6 +21,12 @@
     <ClInclude Include="compile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gdefs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gprdata.inc">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="gprstate.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -28,9 +34,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="parse.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="queue.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -47,13 +50,7 @@
     <ClCompile Include="gvpr.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="mkdefs.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="parse.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="queue.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

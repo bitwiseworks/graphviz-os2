@@ -1,20 +1,18 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup gvc_api
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /* Common header used by both clients and plugins */
 
-#ifndef GVCJOB_H
-#define GVCJOB_H
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +20,8 @@ extern "C" {
 
 #include "gvcommon.h"
 #include "color.h"
+#include <stdbool.h>
+#include <stddef.h>
 
 #define ARRAY_SIZE(A) (sizeof(A)/sizeof(A[0]))
 
@@ -39,7 +39,6 @@ extern "C" {
 
 #define PENWIDTH_NORMAL 1.
 #define PENWIDTH_BOLD 2.
-    typedef enum { GVATTR_STRING, GVATTR_BOOL, GVATTR_COLOR } gvattr_t;
 
 /* The -T output formats listed below are examples only, they are not definitive or inclusive,
  other outputs may use the flags now, or in the future 
@@ -57,14 +56,13 @@ extern "C" {
  GVDEVICE_DOES_TRUECOLOR	supports alpha channel -Tpng, -Tgtk, -Txlib 
  GVDEVICE_BINARY_FORMAT		Suppresses \r\n substitution for linends 
  GVDEVICE_COMPRESSED_FORMAT	controls libz compression		
- GVDEVICE_NO_WRITER		used when gvdevice is not used because device uses its own writer, -Tming, devil outputs   (FIXME seems to overlap OUTPUT_NOT_REQUIRED)
+ GVDEVICE_NO_WRITER		used when gvdevice is not used because device uses its own writer, devil outputs   (FIXME seems to overlap OUTPUT_NOT_REQUIRED)
 
  GVRENDER_Y_GOES_DOWN		device origin top left, y goes down, otherwise
   				device origin lower left, y goes up	
  GVRENDER_DOES_TRANSFORM	device uses scale, translate, rotate to do its own
  				coordinate transformations, otherwise coordinates 
   				are pre-transformed			
- GVRENDER_DOES_ARROWS		renderer has its own idea of arrow shapes (deprecated) 
  GVRENDER_DOES_LABELS		basically, maps don't need labels	
  GVRENDER_DOES_MAPS		renderer encodes mapping information for mouse events -Tcmapx -Tsvg 
  GVRENDER_DOES_MAP_RECTANGLE	supports a 2 coord rectngle optimization 
@@ -95,7 +93,6 @@ extern "C" {
 #define GVDEVICE_NO_WRITER (1<<11)
 #define GVRENDER_Y_GOES_DOWN (1<<12)
 #define GVRENDER_DOES_TRANSFORM (1<<13)
-#define GVRENDER_DOES_ARROWS (1<<14)
 #define GVRENDER_DOES_LABELS (1<<15)
 #define GVRENDER_DOES_MAPS (1<<16)
 #define GVRENDER_DOES_MAP_RECTANGLE (1<<17)
@@ -146,12 +143,6 @@ extern "C" {
 	int id;
 	const char *type;
     } gvplugin_active_loadimage_t;
-
-    typedef struct gv_argvlist_s {
-	char **argv;
-	int argc;
-	int alloc;
-    } gv_argvlist_t;
     
     typedef struct gvdevice_callbacks_s {
 	void (*refresh) (GVJ_t * job);
@@ -232,26 +223,26 @@ extern "C" {
 	char *tailtarget;
 	char *headtarget; 
 
-	int explicit_tooltip:1;
-	int explicit_tailtooltip:1;
-	int explicit_headtooltip:1;
-	int explicit_labeltooltip:1;
-	int explicit_tailtarget:1;
-	int explicit_headtarget:1;
-	int explicit_edgetarget:1;
-	int explicit_tailurl:1;
-	int explicit_headurl:1;
-	int labeledgealigned:1;
+	unsigned explicit_tooltip:1;
+	unsigned explicit_tailtooltip:1;
+	unsigned explicit_headtooltip:1;
+	unsigned explicit_labeltooltip:1;
+	unsigned explicit_tailtarget:1;
+	unsigned explicit_headtarget:1;
+	unsigned explicit_edgetarget:1;
+	unsigned explicit_tailurl:1;
+	unsigned explicit_headurl:1;
+	unsigned labeledgealigned:1;
 
 	/* primary mapped region - node shape, edge labels */
 	map_shape_t url_map_shape; 
-	int url_map_n;                  /* number of points for url map if GVRENDER_DOES_MAPS */
+	size_t url_map_n; // number of points for url map if GVRENDER_DOES_MAPS
 	pointf *url_map_p;
 
 	/* additional mapped regions for edges */
-	int url_bsplinemap_poly_n;      /* number of polygons in url bspline map
+	size_t url_bsplinemap_poly_n;      /* number of polygons in url bspline map
 					 if GVRENDER_DOES_MAPS && GVRENDER_DOES_MAP_BSPLINES */
-	int *url_bsplinemap_n;          /* array of url_bsplinemap_poly_n ints 
+	size_t *url_bsplinemap_n;          /* array of url_bsplinemap_poly_n ints 
 					 of number of points in each polygon */
 	pointf *url_bsplinemap_p;       /* all the polygon points */
 
@@ -296,13 +287,13 @@ extern "C" {
 	gvplugin_active_loadimage_t loadimage;
 	gvdevice_callbacks_t *callbacks;
 	pointf device_dpi;
-	boolean device_sets_dpi;
+	bool device_sets_dpi;
 
 	void *display;
 	int screen;
 
 	void *context;		/* gd or cairo surface */
-	boolean external_context;	/* context belongs to caller */
+	bool external_context;	/* context belongs to caller */
 	char *imagedata;	/* location of imagedata */
 
         int flags;		/* emit_graph flags */
@@ -342,7 +333,7 @@ extern "C" {
 	pointf  translation;    /* composite translation */
 	pointf  devscale;	/* composite device to points: dpi, y_goes_down */
 
-	boolean	fit_mode,
+	bool	fit_mode,
 		needs_refresh,
 		click,
 		has_grown,
@@ -358,20 +349,15 @@ extern "C" {
 					/* (e.g. button 1 clicked on current obj) */
 	char *active_tooltip;		/* tooltip of active object - or NULL */
 	char *selected_href;		/* href of selected object - or NULL */
-	gv_argvlist_t selected_obj_type_name; /* (e.g. "edge" "node3" "e" "->" "node5" "") */
-	gv_argvlist_t selected_obj_attributes; /* attribute triplets: name, value, type */
-				/* e.g. "color", "red", GVATTR_COLOR,
-					"style", "filled", GVATTR_BOOL, */
 
 	void *window;		/* display-specific data for gvrender plugin */
 
         /* keybindings for keyboard events */
 	gvevent_key_binding_t *keybindings;
-	int numkeys;
+	size_t numkeys;
 	void *keycodes;
     };
 
 #ifdef __cplusplus
 }
 #endif
-#endif				/* GVCJOB_H */

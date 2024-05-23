@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /*
@@ -28,16 +25,22 @@
 #define _GNU_SOURCE 1
 
 #include                <sys/types.h>
+#include                <stdbool.h>
+#include                <stdint.h>
 #include                <stdlib.h>
 #include                <string.h>
-#include                <unistd.h>
 
 #include <inttypes.h>
 #include <assert.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <cgraph/list.h>
+#include <limits.h>
+#include "makecw.h"
 #include <math.h>
-#include <pathutil.h>
-#include <vispath.h>
-#include <tri.h>
+#include <pathplan/pathutil.h>
+#include <pathplan/vispath.h>
+#include <pathplan/tri.h>
 #include <tcl.h>
 #include "tclhandle.h"
 
@@ -59,10 +62,10 @@ typedef struct poly_s {
     Ppoly_t boundary;
 } poly;
 
+DEFINE_LIST(polys, poly)
+
 typedef struct vgpane_s {
-    int Npoly;			/* number of polygons */
-    poly *poly;			/* set of polygons */
-    int N_poly_alloc;		/* for allocation */
+    polys_t poly; // set of polygons
     vconfig_t *vc;		/* visibility graph handle */
     Tcl_Interp *interp;		/* interpreter that owns the binding */
     char *triangle_cmd;		/* why is this here any more */
@@ -76,22 +79,16 @@ extern void sincos(double x, double *s, double *c);
 
 tblHeader_pt vgpaneTable;
 
-extern void make_CW(Ppoly_t * poly);
-extern int Plegal_arrangement(Ppoly_t ** polys, int n_polys);
+extern int Plegal_arrangement(Ppoly_t **polys, size_t n_polys);
 
 static int polyid = 0;		/* unique and unchanging id for each poly */
 
 static poly *allocpoly(vgpane_t * vgp, int id, int npts)
 {
-    poly *rv;
-    if (vgp->Npoly >= vgp->N_poly_alloc) {
-	vgp->N_poly_alloc *= 2;
-	vgp->poly = realloc(vgp->poly, vgp->N_poly_alloc * sizeof(poly));
-    }
-    rv = &(vgp->poly[vgp->Npoly++]);
-    rv->id = id;
+    polys_append(&vgp->poly, (poly){.id = id});
+    poly *rv = polys_at(&vgp->poly, polys_size(&vgp->poly) - 1);
     rv->boundary.pn = 0;
-    rv->boundary.ps = malloc(npts * sizeof(point));
+    rv->boundary.ps = gv_calloc(npts, sizeof(point));
     return rv;
 }
 
@@ -99,26 +96,23 @@ static void vc_stale(vgpane_t * vgp)
 {
     if (vgp->vc) {
 	Pobsclose(vgp->vc);
-	vgp->vc = (vconfig_t *) 0;
+	vgp->vc = NULL;
     }
 }
 
 static int vc_refresh(vgpane_t * vgp)
 {
-    int i;
-    Ppoly_t **obs;
-
-    if (vgp->vc == (vconfig_t *) 0) {
-	obs = malloc(vgp->Npoly * sizeof(Ppoly_t));
-	for (i = 0; i < vgp->Npoly; i++)
-	    obs[i] = &(vgp->poly[i].boundary);
-	if (NOT(Plegal_arrangement(obs, vgp->Npoly)))
+    if (vgp->vc == NULL) {
+	Ppoly_t **obs = gv_calloc(polys_size(&vgp->poly), sizeof(Ppoly_t*));
+	for (size_t i = 0; i < polys_size(&vgp->poly); i++)
+	    obs[i] = &polys_at(&vgp->poly, i)->boundary;
+	if (!Plegal_arrangement(obs, polys_size(&vgp->poly)))
 	    fprintf(stderr, "bad arrangement\n");
 	else
-	    vgp->vc = Pobsopen(obs, vgp->Npoly);
+	    vgp->vc = Pobsopen(obs, (int)polys_size(&vgp->poly));
 	free(obs);
     }
-    return (vgp->vc != 0);
+    return vgp->vc != NULL;
 }
 
 static void dgsprintxy(Tcl_DString * result, int npts, point p[])
@@ -129,9 +123,9 @@ static void dgsprintxy(Tcl_DString * result, int npts, point p[])
     if (npts != 1)
 	Tcl_DStringStartSublist(result);
     for (i = 0; i < npts; i++) {
-	sprintf(buf, "%g", p[i].x);
+	snprintf(buf, sizeof(buf), "%g", p[i].x);
 	Tcl_DStringAppendElement(result, buf);
-	sprintf(buf, "%g", p[i].y);
+	snprintf(buf, sizeof(buf), "%g", p[i].y);
 	Tcl_DStringAppendElement(result, buf);
     }
     if (npts != 1)
@@ -139,13 +133,13 @@ static void dgsprintxy(Tcl_DString * result, int npts, point p[])
 }
 
 static void expandPercentsEval(Tcl_Interp * interp,	/* interpreter context */
-			       register char *before,	/* Command with percent expressions */
+			       char *before,	/* Command with percent expressions */
 			       char *r,	/* vgpaneHandle string to substitute for "%r" */
 			       int npts,	/* number of coordinates */
 			       point * ppos	/* Cordinates to substitute for %t */
     )
 {
-    register char *string;
+    char *string;
     Tcl_DString scripts;
 
     Tcl_DStringInit(&scripts);
@@ -155,7 +149,7 @@ static void expandPercentsEval(Tcl_Interp * interp,	/* interpreter context */
 	 * result string.
 	 */
 
-	for (string = before; (*string != 0) && (*string != '%'); string++) {
+	for (string = before; *string != '\0' && *string != '%'; string++) {
 	    /* Empty loop body. */
 	}
 	if (string != before) {
@@ -188,24 +182,22 @@ static void expandPercentsEval(Tcl_Interp * interp,	/* interpreter context */
     Tcl_DStringFree(&scripts);
 }
 
-void triangle_callback(void *vgparg, point pqr[])
+static void triangle_callback(void *vgparg, point pqr[])
 {
     char vbuf[20];
     vgpane_t *vgp;
 
     vgp = vgparg;
 
-/*	    TBL_ENTRY((tblHeader_pt)vgpaneTable, (ubyte_pt)vgp));*/
-
     if (vgp->triangle_cmd) {
-	sprintf(vbuf, "vgpane%lu",
-		(uint64_t) (((ubyte_pt) vgp - (vgpaneTable->bodyPtr))
-				 / (vgpaneTable->entrySize)));
+	snprintf(vbuf, sizeof(vbuf), "vgpane%" PRIu64,
+		((uint64_t)((uintptr_t)vgp - (uintptr_t)vgpaneTable->bodyPtr))
+				 / vgpaneTable->entrySize);
 	expandPercentsEval(vgp->interp, vgp->triangle_cmd, vbuf, 3, pqr);
     }
 }
 
-static char *buildBindings(char *s1, char *s2)
+static char *buildBindings(char *s1, const char *s2)
 /*
  * previous binding in s1 binding to be added in s2 result in s3
  *
@@ -220,32 +212,28 @@ static char *buildBindings(char *s1, char *s2)
 	if (s1) {
 	    l = strlen(s2) - 1;
 	    if (l) {
-		s3 = malloc(strlen(s1) + l + 2);
-		strcpy(s3, s1);
-		strcat(s3, "\n");
-		strcat(s3, s2 + 1);
+		agxbuf new = {0};
+		agxbprint(&new, "%s\n%s", s1, s2 + 1);
 		free(s1);
+		return agxbdisown(&new);
 	    } else {
 		s3 = s1;
 	    }
 	} else {
 	    l = strlen(s2) - 1;
 	    if (l) {
-		s3 = malloc(l + 2);
-		strcpy(s3, s2 + 1);
+		s3 = gv_strdup(s2 + 1);
 	    } else {
-		s3 = (char *) NULL;
+		s3 = NULL;
 	    }
 	}
     } else {
-	if (s1)
-	    free(s1);
+	free(s1);
 	l = strlen(s2);
 	if (l) {
-	    s3 = malloc(l + 2);
-	    strcpy(s3, s2);
+	    s3 = gv_strdup(s2);
 	} else {
-	    s3 = (char *) NULL;
+	    s3 = NULL;
 	}
     }
     return s3;
@@ -257,30 +245,26 @@ static char *buildBindings(char *s1, char *s2)
 static int scanpoint(Tcl_Interp * interp, char *argv[], point * p)
 {
     if (sscanf(argv[0], "%lg", &(p->x)) != 1) {
-	Tcl_AppendResult(interp, "invalid x coordinate: \"", argv[0],
-			 "\"", (char *) NULL);
+	Tcl_AppendResult(interp, "invalid x coordinate: \"", argv[0], "\"", NULL);
 	return TCL_ERROR;
     }
     if (sscanf(argv[1], "%lg", &(p->y)) != 1) {
-	Tcl_AppendResult(interp, "invalid y coordinate: \"", argv[1],
-			 "\"", (char *) NULL);
+	Tcl_AppendResult(interp, "invalid y coordinate: \"", argv[1], "\"", NULL);
 	return TCL_ERROR;
     }
     return TCL_OK;
 }
 
-static point center(point vertex[], int n)
-{
-    int i;
+static point center(point vertex[], size_t n) {
     point c;
 
     c.x = c.y = 0;
-    for (i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
 	c.x += vertex[i].x;
 	c.y += vertex[i].y;
     }
-    c.x /= n;
-    c.y /= n;
+    c.x /= (int)n;
+    c.y /= (int)n;
     return c;
 }
 
@@ -290,7 +274,7 @@ static double distance(point p, point q)
 
     dx = p.x - q.x;
     dy = p.y - q.y;
-    return sqrt(dx * dx + dy * dy);
+    return hypot(dx, dy);
 }
 
 static point rotate(point c, point p, double alpha)
@@ -315,32 +299,29 @@ static point scale(point c, point p, double gain)
     return q;
 }
 
-static int remove_poly(vgpane_t * vgp, int polyid)
-{
-    int i, j;
-
-    for (i = 0; i < vgp->Npoly; i++) {
-	if (vgp->poly[i].id == polyid) {
-	    free(vgp->poly[i].boundary.ps);
-	    for (j = i++; i < vgp->Npoly; i++, j++) {
-		vgp->poly[j] = vgp->poly[i];
+static bool remove_poly(vgpane_t *vgp, int id) {
+    for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+	if (polys_get(&vgp->poly, i).id == id) {
+	    free(polys_get(&vgp->poly, i).boundary.ps);
+	    for (size_t j = i++; i < polys_size(&vgp->poly); i++, j++) {
+		polys_set(&vgp->poly, j, polys_get(&vgp->poly, i));
 	    }
-	    vgp->Npoly -= 1;
+	    polys_resize(&vgp->poly, polys_size(&vgp->poly) - 1, (poly){0});
 	    vc_stale(vgp);
-	    return TRUE;
+	    return true;
 	}
     }
-    return FALSE;
+    return false;
 }
 
 static int
-insert_poly(Tcl_Interp * interp, vgpane_t * vgp, int polyid, char *vargv[],
+insert_poly(Tcl_Interp * interp, vgpane_t * vgp, int id, char *vargv[],
 	    int vargc)
 {
     poly *np;
     int i, result;
 
-    np = allocpoly(vgp, polyid, vargc);
+    np = allocpoly(vgp, id, vargc);
     for (i = 0; i < vargc; i += 2) {
 	result =
 	    scanpoint(interp, &vargv[i],
@@ -354,34 +335,30 @@ insert_poly(Tcl_Interp * interp, vgpane_t * vgp, int polyid, char *vargv[],
     return TCL_OK;
 }
 
-static void
-make_barriers(vgpane_t * vgp, int pp, int qp, Pedge_t ** barriers,
-	      int *n_barriers)
-{
-    int i, j, k, n, b;
-    Pedge_t *bar;
+static void make_barriers(vgpane_t *vgp, int pp, int qp, Pedge_t **barriers,
+                          size_t *n_barriers) {
 
-    n = 0;
-    for (i = 0; i < vgp->Npoly; i++) {
-	if (vgp->poly[i].id == pp)
+    size_t n = 0;
+    for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+	if (polys_get(&vgp->poly, i).id == pp)
 	    continue;
-	if (vgp->poly[i].id == qp)
+	if (polys_get(&vgp->poly, i).id == qp)
 	    continue;
-	n = n + vgp->poly[i].boundary.pn;
+	n += polys_get(&vgp->poly, i).boundary.pn;
     }
-    bar = malloc(n * sizeof(Pedge_t));
-    b = 0;
-    for (i = 0; i < vgp->Npoly; i++) {
-	if (vgp->poly[i].id == pp)
+    Pedge_t *bar = gv_calloc(n, sizeof(Pedge_t));
+    size_t b = 0;
+    for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+	if (polys_get(&vgp->poly, i).id == pp)
 	    continue;
-	if (vgp->poly[i].id == qp)
+	if (polys_get(&vgp->poly, i).id == qp)
 	    continue;
-	for (j = 0; j < vgp->poly[i].boundary.pn; j++) {
-	    k = j + 1;
-	    if (k >= vgp->poly[i].boundary.pn)
+	for (size_t j = 0; j < polys_get(&vgp->poly, i).boundary.pn; j++) {
+	    size_t k = j + 1;
+	    if (k >= polys_get(&vgp->poly, i).boundary.pn)
 		k = 0;
-	    bar[b].a = vgp->poly[i].boundary.ps[j];
-	    bar[b].b = vgp->poly[i].boundary.ps[k];
+	    bar[b].a = polys_get(&vgp->poly, i).boundary.ps[j];
+	    bar[b].b = polys_get(&vgp->poly, i).boundary.ps[k];
 	    b++;
 	}
     }
@@ -395,9 +372,9 @@ static void appendpoint(Tcl_Interp * interp, point p)
 {
     char buf[30];
 
-    sprintf(buf, "%g", p.x);
+    snprintf(buf, sizeof(buf), "%g", p.x);
     Tcl_AppendElement(interp, buf);
-    sprintf(buf, "%g", p.y);
+    snprintf(buf, sizeof(buf), "%g", p.y);
     Tcl_AppendElement(interp, buf);
 }
 
@@ -406,59 +383,51 @@ static int
 vgpanecmd(ClientData clientData, Tcl_Interp * interp, int argc,
 	  char *argv[])
 {
-    int vargc, i, j, n, result;
-    char c, *s, **vargv, vbuf[30];
+    (void)clientData;
+
+    int vargc, result;
+    char *s, **vargv, vbuf[30];
     vgpane_t *vgp, **vgpp;
     point p, q, *ps;
-    poly *tpp;
     double alpha, gain;
     Pvector_t slopes[2];
     Ppolyline_t line, spline;
     int pp, qp;			/* polygon indices for p, q */
     Pedge_t *barriers;
-    int n_barriers;
 
     if (argc < 2) {
 	Tcl_AppendResult(interp, "wrong # args: should be \"",
-			 " ", argv[0], " method ?arg arg ...?\"",
-			 (char *) NULL);
+			 " ", argv[0], " method ?arg arg ...?\"", NULL);
 	return TCL_ERROR;
     }
     if (!(vgpp = (vgpane_t **) tclhandleXlate(vgpaneTable, argv[0]))) {
-	Tcl_AppendResult(interp, "Invalid handle: \"", argv[0],
-			 "\"", (char *) NULL);
+	Tcl_AppendResult(interp, "Invalid handle: \"", argv[0], "\"", NULL);
 	return TCL_ERROR;
     }
     vgp = *vgpp;
 
-    c = argv[1][0];
-    size_t length = strlen(argv[1]);
-
-    if ((c == 'c') && (strncmp(argv[1], "coords", length) == 0)) {
-	if ((argc < 3)) {
+    if (strcmp(argv[1], "coords") == 0) {
+	if (argc < 3) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-			     " ", argv[1], " id ?x1 y1 x2 y2...?\"",
-			     (char *) NULL);
+			     " ", argv[1], " id ?x1 y1 x2 y2...?\"", NULL);
 	    return TCL_ERROR;
 	}
 	if (sscanf(argv[2], "%d", &polyid) != 1) {
-	    Tcl_AppendResult(interp, "not an integer: ", argv[2],
-			     (char *) NULL);
+	    Tcl_AppendResult(interp, "not an integer: ", argv[2], NULL);
 	    return TCL_ERROR;
 	}
 	if (argc == 3) {
 	    /* find poly and return its coordinates */
-	    for (i = 0; i < vgp->Npoly; i++) {
-		if (vgp->poly[i].id == polyid) {
-		    n = vgp->poly[i].boundary.pn;
-		    for (j = 0; j < n; j++) {
-			appendpoint(interp, vgp->poly[i].boundary.ps[j]);
+	    for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+		if (polys_get(&vgp->poly, i).id == polyid) {
+		    const size_t n = polys_get(&vgp->poly, i).boundary.pn;
+		    for (size_t j = 0; j < n; j++) {
+			appendpoint(interp, polys_get(&vgp->poly, i).boundary.ps[j]);
 		    }
 		    return TCL_OK;
 		}
 	    }
-	    Tcl_AppendResult(interp, " no such polygon: ", argv[2],
-			     (char *) NULL);
+	    Tcl_AppendResult(interp, " no such polygon: ", argv[2], NULL);
 	    return TCL_ERROR;
 	}
 	/* accept either inline or delimited list */
@@ -475,42 +444,40 @@ vgpanecmd(ClientData clientData, Tcl_Interp * interp, int argc,
 	}
 	if (!vargc || vargc % 2) {
 	    Tcl_AppendResult(interp,
-			     "There must be a multiple of two terms in the list.",
-			     (char *) NULL);
+			     "There must be a multiple of two terms in the list.", NULL);
 	    return TCL_ERROR;
 	}
 
 	/* remove old poly, add modified polygon to the end with 
 	   the same id as the original */
 
-	if (!(remove_poly(vgp, polyid))) {
-	    Tcl_AppendResult(interp, " no such polygon: ", argv[2],
-			     (char *) NULL);
+	if (!remove_poly(vgp, polyid)) {
+	    Tcl_AppendResult(interp, " no such polygon: ", argv[2], NULL);
 	    return TCL_ERROR;
 	}
 
-	return (insert_poly(interp, vgp, polyid, vargv, vargc));
+	return insert_poly(interp, vgp, polyid, vargv, vargc);
 
-    } else if ((c == 'd') && (strncmp(argv[1], "debug", length) == 0)) {
+    } else if (strcmp(argv[1], "debug") == 0) {
 	/* debug only */
 	printf("debug output goes here\n");
 	return TCL_OK;
 
-    } else if ((c == 'd') && (strncmp(argv[1], "delete", length) == 0)) {
+    } else if (strcmp(argv[1], "delete") == 0) {
 	/* delete a vgpane and all memory associated with it */
 	if (vgp->vc)
 	    Pobsclose(vgp->vc);
-	free(vgp->poly);	/* ### */
+	polys_free(&vgp->poly);
 	Tcl_DeleteCommand(interp, argv[0]);
-	free((char *) tclhandleFree(vgpaneTable, argv[0]));
+	free(tclhandleFree(vgpaneTable, argv[0]));
 	return TCL_OK;
 
-    } else if ((c == 'f') && (strncmp(argv[1], "find", length) == 0)) {
+    } else if (strcmp(argv[1], "find") == 0) {
 	/* find the polygon that the point is inside and return it
 	   id, or null */
-	if ((argc < 3)) {
+	if (argc < 3) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-			     " ", argv[1], " x y\"", (char *) NULL);
+			     " ", argv[1], " x y\"", NULL);
 	    return TCL_ERROR;
 	}
 	if (argc == 3) {
@@ -529,21 +496,20 @@ vgpanecmd(ClientData clientData, Tcl_Interp * interp, int argc,
 	    return result;
 
 	/* determine the polygons (if any) that contain the point */
-	for (i = 0; i < vgp->Npoly; i++) {
-	    if (in_poly(vgp->poly[i].boundary, p)) {
-		sprintf(vbuf, "%d", vgp->poly[i].id);
+	for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+	    if (in_poly(polys_get(&vgp->poly, i).boundary, p)) {
+		snprintf(vbuf, sizeof(vbuf), "%d", polys_get(&vgp->poly, i).id);
 		Tcl_AppendElement(interp, vbuf);
 	    }
 	}
 	return TCL_OK;
 
-    } else if ((c == 'i') && (strncmp(argv[1], "insert", length) == 0)) {
+    } else if (strcmp(argv[1], "insert") == 0) {
 	/* add poly to end poly list, and it coordinates to the end of 
 	   the point list */
 	if ((argc < 3)) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-			     " ", argv[1], " x1 y1 x2 y2 ...\"",
-			     (char *) NULL);
+			     " ", argv[1], " x1 y1 x2 y2 ...\"", NULL);
 	    return TCL_ERROR;
 	}
 	/* accept either inline or delimited list */
@@ -561,8 +527,7 @@ vgpanecmd(ClientData clientData, Tcl_Interp * interp, int argc,
 
 	if (!vargc || vargc % 2) {
 	    Tcl_AppendResult(interp,
-			     "There must be a multiple of two terms in the list.",
-			     (char *) NULL);
+			     "There must be a multiple of two terms in the list.", NULL);
 	    return TCL_ERROR;
 	}
 
@@ -572,25 +537,24 @@ vgpanecmd(ClientData clientData, Tcl_Interp * interp, int argc,
 	if (result != TCL_OK)
 	    return result;
 
-	sprintf(vbuf, "%d", polyid);
-	Tcl_AppendResult(interp, vbuf, (char *) NULL);
+	snprintf(vbuf, sizeof(vbuf), "%d", polyid);
+	Tcl_AppendResult(interp, vbuf, NULL);
 	return TCL_OK;
 
-    } else if ((c == 'l') && (strncmp(argv[1], "list", length) == 0)) {
+    } else if (strcmp(argv[1], "list") == 0) {
 	/* return list of polygon ids */
-	for (i = 0; i < vgp->Npoly; i++) {
-	    sprintf(vbuf, "%d", vgp->poly[i].id);
+	for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+	    snprintf(vbuf, sizeof(vbuf), "%d", polys_get(&vgp->poly, i).id);
 	    Tcl_AppendElement(interp, vbuf);
 	}
 	return TCL_OK;
 
-    } else if ((c == 'p') && (strncmp(argv[1], "path", length) == 0)) {
+    } else if (strcmp(argv[1], "path") == 0) {
 	/* return a list of points corresponding to the shortest path
 	   that does not cross the remaining "visible" polygons. */
-	if ((argc < 3)) {
+	if (argc < 3) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-			     " ", argv[1], " x1 y1 x2 y2\"",
-			     (char *) NULL);
+			     " ", argv[1], " x1 y1 x2 y2\"", NULL);
 	    return TCL_ERROR;
 	}
 	if (argc == 3) {
@@ -604,10 +568,9 @@ vgpanecmd(ClientData clientData, Tcl_Interp * interp, int argc,
 	    vargc = argc - 2;
 	    vargv = &argv[2];
 	}
-	if ((vargc < 4)) {
+	if (vargc < 4) {
 	    Tcl_AppendResult(interp,
-			     "invalid points: should be: \"x1 y1 x2 y2\"",
-			     (char *) NULL);
+			     "invalid points: should be: \"x1 y1 x2 y2\"", NULL);
 	    return TCL_ERROR;
 	}
 	result = scanpoint(interp, &vargv[0], &p);
@@ -618,49 +581,45 @@ vgpanecmd(ClientData clientData, Tcl_Interp * interp, int argc,
 	    return result;
 
 	/* only recompute the visibility graph if we have to */
-	if ((vc_refresh(vgp))) {
+	if (vc_refresh(vgp)) {
 	    Pobspath(vgp->vc, p, POLYID_UNKNOWN, q, POLYID_UNKNOWN, &line);
 
-	    for (i = 0; i < line.pn; i++) {
+	    for (size_t i = 0; i < line.pn; i++) {
 		appendpoint(interp, line.ps[i]);
 	    }
 	}
 
 	return TCL_OK;
 
-    } else if ((c == 'b') && (strncmp(argv[1], "bind", length) == 0)) {
-	if ((argc < 2) || (argc > 4)) {
+    } else if (strcmp(argv[1], "bind") == 0) {
+	if (argc < 2 || argc > 4) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"",
-			     argv[0], " bind triangle ?command?\"",
-			     (char *) NULL);
+			     argv[0], " bind triangle ?command?\"", NULL);
 	    return TCL_ERROR;
 	}
 	if (argc == 2) {
 	    Tcl_AppendElement(interp, "triangle");
 	    return TCL_OK;
 	}
-	length = strlen(argv[2]);
-	if (strncmp(argv[2], "triangle", length) == 0) {
+	if (strcmp(argv[2], "triangle") == 0) {
 	    s = vgp->triangle_cmd;
 	    if (argc == 4)
 		vgp->triangle_cmd = s = buildBindings(s, argv[3]);
 	} else {
 	    Tcl_AppendResult(interp, "unknown event \"", argv[2],
-			     "\": must be one of:\n\ttriangle.",
-			     (char *) NULL);
+			     "\": must be one of:\n\ttriangle.", NULL);
 	    return TCL_ERROR;
 	}
 	if (argc == 3)
-	    Tcl_AppendResult(interp, s, (char *) NULL);
+	    Tcl_AppendResult(interp, s, NULL);
 	return TCL_OK;
 
-    } else if ((c == 'b') && (strncmp(argv[1], "bpath", length) == 0)) {
+    } else if (strcmp(argv[1], "bpath") == 0) {
 	/* return a list of points corresponding to the shortest path
 	   that does not cross the remaining "visible" polygons. */
-	if ((argc < 3)) {
+	if (argc < 3) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-			     " ", argv[1], " x1 y1 x2 y2\"",
-			     (char *) NULL);
+			     " ", argv[1], " x1 y1 x2 y2\"", NULL);
 	    return TCL_ERROR;
 	}
 	if (argc == 3) {
@@ -676,8 +635,7 @@ vgpanecmd(ClientData clientData, Tcl_Interp * interp, int argc,
 	}
 	if ((vargc < 4)) {
 	    Tcl_AppendResult(interp,
-			     "invalid points: should be: \"x1 y1 x2 y2\"",
-			     (char *) NULL);
+			     "invalid points: should be: \"x1 y1 x2 y2\"", NULL);
 	    return TCL_ERROR;
 	}
 
@@ -690,218 +648,198 @@ vgpanecmd(ClientData clientData, Tcl_Interp * interp, int argc,
 
 	/* determine the polygons (if any) that contain the endpoints */
 	pp = qp = POLYID_NONE;
-	for (i = 0; i < vgp->Npoly; i++) {
-	    tpp = &(vgp->poly[i]);
+	for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+	    poly *tpp = polys_at(&vgp->poly, i);
 	    if ((pp == POLYID_NONE) && in_poly(tpp->boundary, p))
-		pp = i;
+		pp = (int)i;
 	    if ((qp == POLYID_NONE) && in_poly(tpp->boundary, q))
-		qp = i;
+		qp = (int)i;
 	}
 
 	if (vc_refresh(vgp)) {
-	    /*Pobspath(vgp->vc, p, pp, q, qp, &line); */
 	    Pobspath(vgp->vc, p, POLYID_UNKNOWN, q, POLYID_UNKNOWN, &line);
+	    size_t n_barriers;
 	    make_barriers(vgp, pp, qp, &barriers, &n_barriers);
 	    slopes[0].x = slopes[0].y = 0.0;
 	    slopes[1].x = slopes[1].y = 0.0;
 	    Proutespline(barriers, n_barriers, line, slopes, &spline);
 
-	    for (i = 0; i < spline.pn; i++) {
+	    for (size_t i = 0; i < spline.pn; i++) {
 		appendpoint(interp, spline.ps[i]);
 	    }
 	}
 	return TCL_OK;
 
-    } else if ((c == 'b') && (strncmp(argv[1], "bbox", length) == 0)) {
-	if ((argc < 3)) {
+    } else if (strcmp(argv[1], "bbox") == 0) {
+	if (argc < 3) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-			     " ", argv[1], " id\"", (char *) NULL);
+			     " ", argv[1], " id\"", NULL);
 	    return TCL_ERROR;
 	}
 	if (sscanf(argv[2], "%d", &polyid) != 1) {
-	    Tcl_AppendResult(interp, "not an integer: ", argv[2],
-			     (char *) NULL);
+	    Tcl_AppendResult(interp, "not an integer: ", argv[2], NULL);
 	    return TCL_ERROR;
 	}
-	for (i = 0; i < vgp->Npoly; i++) {
-	    if (vgp->poly[i].id == polyid) {
-		Ppoly_t pp = vgp->poly[i].boundary;
+	for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+	    if (polys_get(&vgp->poly, i).id == polyid) {
+		Ppoly_t pp = polys_get(&vgp->poly, i).boundary;
 		point LL, UR;
 		LL = UR = pp.ps[0];
-		for (j = 1; j < pp.pn; j++) {
+		for (size_t j = 1; j < pp.pn; j++) {
 		    p = pp.ps[j];
-		    if (p.x > UR.x)
-			UR.x = p.x;
-		    if (p.y > UR.y)
-			UR.y = p.y;
-		    if (p.x < LL.x)
-			LL.x = p.x;
-		    if (p.y < LL.y)
-			LL.y = p.y;
+		    UR.x = fmax(UR.x, p.x);
+		    UR.y = fmax(UR.y, p.y);
+		    LL.x = fmin(LL.x, p.x);
+		    LL.y = fmin(LL.y, p.y);
 		}
 		appendpoint(interp, LL);
 		appendpoint(interp, UR);
 		return TCL_OK;
 	    }
 	}
-	Tcl_AppendResult(interp, " no such polygon: ", argv[2],
-			 (char *) NULL);
+	Tcl_AppendResult(interp, " no such polygon: ", argv[2], NULL);
 	return TCL_ERROR;
 
-    } else if ((c == 'c') && (strncmp(argv[1], "center", length) == 0)) {
-	if ((argc < 3)) {
+    } else if (strcmp(argv[1], "center") == 0) {
+	if (argc < 3) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-			     " ", argv[1], " id\"", (char *) NULL);
+			     " ", argv[1], " id\"", NULL);
 	    return TCL_ERROR;
 	}
 	if (sscanf(argv[2], "%d", &polyid) != 1) {
-	    Tcl_AppendResult(interp, "not an integer: ", argv[2],
-			     (char *) NULL);
+	    Tcl_AppendResult(interp, "not an integer: ", argv[2], NULL);
 	    return TCL_ERROR;
 	}
-	for (i = 0; i < vgp->Npoly; i++) {
-	    if (vgp->poly[i].id == polyid) {
-		appendpoint(interp, center(vgp->poly[i].boundary.ps,
-					   vgp->poly[i].boundary.pn));
+	for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+	    if (polys_get(&vgp->poly, i).id == polyid) {
+		appendpoint(interp, center(polys_get(&vgp->poly, i).boundary.ps,
+					   polys_get(&vgp->poly, i).boundary.pn));
 		return TCL_OK;
 	    }
 	}
-	Tcl_AppendResult(interp, " no such polygon: ", argv[2],
-			 (char *) NULL);
+	Tcl_AppendResult(interp, " no such polygon: ", argv[2], NULL);
 	return TCL_ERROR;
 
-    } else if ((c == 't')
-	       && (strncmp(argv[1], "triangulate", length) == 0)) {
-	if ((argc < 2)) {
+    } else if (strcmp(argv[1], "triangulate") == 0) {
+	if (argc < 2) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-			     " id ", (char *) NULL);
+			     " id ", NULL);
 	    return TCL_ERROR;
 	}
 
 	if (sscanf(argv[2], "%d", &polyid) != 1) {
-	    Tcl_AppendResult(interp, "not an integer: ", argv[2],
-			     (char *) NULL);
+	    Tcl_AppendResult(interp, "not an integer: ", argv[2], NULL);
 	    return TCL_ERROR;
 	}
 
-	for (i = 0; i < vgp->Npoly; i++) {
-	    if (vgp->poly[i].id == polyid) {
-		Ptriangulate(&(vgp->poly[i].boundary), triangle_callback,
-			     vgp);
+	for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+	    if (polys_get(&vgp->poly, i).id == polyid) {
+		Ptriangulate(&polys_at(&vgp->poly, i)->boundary, triangle_callback, vgp);
 		return TCL_OK;
 	    }
 	}
-	Tcl_AppendResult(interp, " no such polygon: ", argv[2],
-			 (char *) NULL);
+	Tcl_AppendResult(interp, " no such polygon: ", argv[2], NULL);
 	return TCL_ERROR;
-    } else if ((c == 'r') && (strncmp(argv[1], "rotate", length) == 0)) {
-	if ((argc < 4)) {
+    } else if (strcmp(argv[1], "rotate") == 0) {
+	if (argc < 4) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-			     " ", argv[1], " id alpha\"", (char *) NULL);
+			     " ", argv[1], " id alpha\"", NULL);
 	    return TCL_ERROR;
 	}
 	if (sscanf(argv[2], "%d", &polyid) != 1) {
-	    Tcl_AppendResult(interp, "not an integer: ", argv[2],
-			     (char *) NULL);
+	    Tcl_AppendResult(interp, "not an integer: ", argv[2], NULL);
 	    return TCL_ERROR;
 	}
 	if (sscanf(argv[3], "%lg", &alpha) != 1) {
-	    Tcl_AppendResult(interp, "not an angle in radians: ", argv[3],
-			     (char *) NULL);
+	    Tcl_AppendResult(interp, "not an angle in radians: ", argv[3], NULL);
 	    return TCL_ERROR;
 	}
-	for (i = 0; i < vgp->Npoly; i++) {
-	    if (vgp->poly[i].id == polyid) {
-		n = vgp->poly[i].boundary.pn;
-		ps = vgp->poly[i].boundary.ps;
+	for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+	    if (polys_get(&vgp->poly, i).id == polyid) {
+		const size_t n = polys_get(&vgp->poly, i).boundary.pn;
+		ps = polys_get(&vgp->poly, i).boundary.ps;
 		p = center(ps, n);
-		for (j = 0; j < n; j++) {
+		for (size_t j = 0; j < n; j++) {
 		    appendpoint(interp, rotate(p, ps[j], alpha));
 		}
 		return TCL_OK;
 	    }
 	}
-	Tcl_AppendResult(interp, " no such polygon: ", argv[2],
-			 (char *) NULL);
+	Tcl_AppendResult(interp, " no such polygon: ", argv[2], NULL);
 	return TCL_ERROR;
 
-    } else if ((c == 's') && (strncmp(argv[1], "scale", length) == 0)) {
-	if ((argc < 4)) {
+    } else if (strcmp(argv[1], "scale") == 0) {
+	if (argc < 4) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-			     " ", argv[1], " id gain\"", (char *) NULL);
+			     " ", argv[1], " id gain\"", NULL);
 	    return TCL_ERROR;
 	}
 	if (sscanf(argv[2], "%d", &polyid) != 1) {
-	    Tcl_AppendResult(interp, "not an integer: ", argv[2],
-			     (char *) NULL);
+	    Tcl_AppendResult(interp, "not an integer: ", argv[2], NULL);
 	    return TCL_ERROR;
 	}
 	if (sscanf(argv[3], "%lg", &gain) != 1) {
-	    Tcl_AppendResult(interp, "not a number: ", argv[3],
-			     (char *) NULL);
+	    Tcl_AppendResult(interp, "not a number: ", argv[3], NULL);
 	    return TCL_ERROR;
 	}
-	for (i = 0; i < vgp->Npoly; i++) {
-	    if (vgp->poly[i].id == polyid) {
-		n = vgp->poly[i].boundary.pn;
-		ps = vgp->poly[i].boundary.ps;
-		for (j = 0; j < n; j++) {
+	for (size_t i = 0; i < polys_size(&vgp->poly); i++) {
+	    if (polys_get(&vgp->poly, i).id == polyid) {
+		const size_t n = polys_get(&vgp->poly, i).boundary.pn;
+		ps = polys_get(&vgp->poly, i).boundary.ps;
+		for (size_t j = 0; j < n; j++) {
 		    appendpoint(interp, scale(p, ps[j], gain));
 		}
 		return TCL_OK;
 	    }
 	}
-	Tcl_AppendResult(interp, " no such polygon: ", argv[2],
-			 (char *) NULL);
+	Tcl_AppendResult(interp, " no such polygon: ", argv[2], NULL);
 	return TCL_ERROR;
 
-    } else if ((c == 'r') && (strncmp(argv[1], "remove", length) == 0)) {
-	if ((argc < 3)) {
+    } else if (strcmp(argv[1], "remove") == 0) {
+	if (argc < 3) {
 	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-			     " ", argv[1], " id\"", (char *) NULL);
+			     " ", argv[1], " id\"", NULL);
 	    return TCL_ERROR;
 	}
 	if (sscanf(argv[2], "%d", &polyid) != 1) {
-	    Tcl_AppendResult(interp, "not an integer: ", argv[2],
-			     (char *) NULL);
+	    Tcl_AppendResult(interp, "not an integer: ", argv[2], NULL);
 	    return TCL_ERROR;
 	}
 
 	if (remove_poly(vgp, polyid))
 	    return TCL_OK;
 
-	Tcl_AppendResult(interp, " no such polygon: ", argv[2],
-			 (char *) NULL);
+	Tcl_AppendResult(interp, " no such polygon: ", argv[2], NULL);
 	return TCL_ERROR;
     }
 
     Tcl_AppendResult(interp, "bad method \"", argv[1],
 		     "\" must be one of:",
 		     "\n\tbbox, bind, bpath, center, coords, delete, find,",
-		     "\n\tinsert, list, path, remove, rotate, scale, triangulate.",
-		     (char *) NULL);
+		     "\n\tinsert, list, path, remove, rotate, scale, triangulate.", NULL);
     return TCL_ERROR;
 }
 
 static int
 vgpane(ClientData clientData, Tcl_Interp * interp, int argc, char *argv[])
 {
-    char vbuf[30];
-    vgpane_t *vgp;
+    (void)clientData;
+    (void)argc;
+    (void)argv;
 
-    vgp = (vgpane_t *) malloc(sizeof(vgpane_t));
-    *(vgpane_t **) tclhandleAlloc(vgpaneTable, vbuf, NULL) = vgp;
+    char *vbuf = NULL;
+    vgpane_t *vgp = gv_alloc(sizeof(vgpane_t));
+    *(vgpane_t **) tclhandleAlloc(vgpaneTable, &vbuf, NULL) = vgp;
+    assert(vbuf != NULL);
 
-    vgp->vc = (vconfig_t *) 0;
-    vgp->Npoly = 0;
-    vgp->N_poly_alloc = 250;
-    vgp->poly = malloc(vgp->N_poly_alloc * sizeof(poly));
+    vgp->vc = NULL;
+    vgp->poly = (polys_t){0};
     vgp->interp = interp;
-    vgp->triangle_cmd = (char *) NULL;
+    vgp->triangle_cmd = NULL;
 
-    Tcl_CreateCommand(interp, vbuf, vgpanecmd,
-		      (ClientData) NULL, (Tcl_CmdDeleteProc *) NULL);
-    Tcl_AppendResult(interp, vbuf, (char *) NULL);
+    Tcl_CreateCommand(interp, vbuf, vgpanecmd, (ClientData)NULL, NULL);
+    Tcl_AppendResult(interp, vbuf, NULL);
+    free(vbuf);
     return TCL_OK;
 }
 
@@ -916,12 +854,20 @@ int Tclpathplan_Init(Tcl_Interp * interp)
 	return TCL_ERROR;
     }
 #endif
-    if (Tcl_PkgProvide(interp, "Tclpathplan", PACKAGE_VERSION) != TCL_OK) {
+    // inter-release Graphviz versions have a number including '~dev.' that does
+    // not comply with TCL version number rules, so replace this with 'b'
+    char adjusted_version[sizeof(PACKAGE_VERSION)] = PACKAGE_VERSION;
+    char *tilde_dev = strstr(adjusted_version, "~dev.");
+    if (tilde_dev != NULL) {
+	*tilde_dev = 'b';
+	memmove(tilde_dev + 1, tilde_dev + strlen("~dev."),
+	        strlen(tilde_dev + strlen("~dev.")) + 1);
+    }
+    if (Tcl_PkgProvide(interp, "Tclpathplan", adjusted_version) != TCL_OK) {
 	return TCL_ERROR;
     }
 
-    Tcl_CreateCommand(interp, "vgpane", vgpane,
-		      (ClientData) NULL, (Tcl_CmdDeleteProc *) NULL);
+    Tcl_CreateCommand(interp, "vgpane", vgpane, (ClientData)NULL, NULL);
 
     vgpaneTable = tclhandleInit("vgpane", sizeof(vgpane_t), 10);
 

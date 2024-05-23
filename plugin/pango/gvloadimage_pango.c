@@ -1,22 +1,20 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
 
-#include "gvplugin_loadimage.h"
-#include "gvio.h"
+#include <gvc/gvplugin_loadimage.h>
+#include <gvc/gvio.h>
 
 #include <cairo.h>
 
@@ -36,7 +34,7 @@ reader (void *closure, unsigned char *data, unsigned int length)
 
 static void cairo_freeimage(usershape_t *us)
 {
-    cairo_surface_destroy((cairo_surface_t*)(us->data));
+    cairo_surface_destroy(us->data);
 }
 
 static cairo_surface_t* cairo_loadimage(GVJ_t * job, usershape_t *us)
@@ -50,7 +48,7 @@ static cairo_surface_t* cairo_loadimage(GVJ_t * job, usershape_t *us)
 
     if (us->data) {
         if (us->datafree == cairo_freeimage)
-             surface = (cairo_surface_t*)(us->data); /* use cached data */
+             surface = us->data; /* use cached data */
         else {
              us->datafree(us);        /* free incompatible cache data */
              us->datafree = NULL;
@@ -72,7 +70,7 @@ static cairo_surface_t* cairo_loadimage(GVJ_t * job, usershape_t *us)
                 surface = NULL;
         }
         if (surface) {
-            us->data = (void*)surface;
+            us->data = surface;
             us->datafree = cairo_freeimage;
         }
 	gvusershape_file_release(us);
@@ -80,15 +78,18 @@ static cairo_surface_t* cairo_loadimage(GVJ_t * job, usershape_t *us)
     return surface;
 }
 
-static void pango_loadimage_cairo(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void pango_loadimage_cairo(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
-    cairo_t *cr = (cairo_t *) job->context; /* target context */
+    cairo_t *cr = job->context; /* target context */
     cairo_surface_t *surface;	 /* source surface */
 
     assert(job);
     assert(us);
     assert(us->name);
     assert(us->name[0]);
+
+    // suppress unused parameter warning
+    (void)filled;
 
     surface = cairo_loadimage(job, us);
     if (surface) {
@@ -101,12 +102,15 @@ static void pango_loadimage_cairo(GVJ_t * job, usershape_t *us, boxf b, boolean 
     }
 }
 
-static void pango_loadimage_ps(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void pango_loadimage_ps(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
     cairo_surface_t *surface; 	/* source surface */
     cairo_format_t format;
     int X, Y, x, y, stride;
     unsigned char *data, *ix, alpha, red, green, blue;
+
+    // suppress unused parameter warning
+    (void)filled;
 
     surface = cairo_loadimage(job, us);
     if (surface) {

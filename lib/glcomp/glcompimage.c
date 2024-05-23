@@ -1,36 +1,27 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "glcompimage.h"
-#include "glcompfont.h"
-#include "glcompset.h"
-#include "glutils.h"
-#include "glcomptexture.h"
-#include "memory.h"
+#include <cgraph/alloc.h>
+#include <glcomp/glcompimage.h>
+#include <glcomp/glcompfont.h>
+#include <glcomp/glcompset.h>
+#include <glcomp/glutils.h>
+#include <glcomp/glcomptexture.h>
 
-glCompImage *glCompImageNew(glCompObj * par, GLfloat x, GLfloat y)
-{
-    glCompImage *p;
-    p = NEW(glCompImage);
+glCompImage *glCompImageNew(glCompObj *par, float x, float y) {
+    glCompImage *p = gv_alloc(sizeof(glCompImage));
     glCompInitCommon((glCompObj *) p, par, x, y);
     p->objType = glImageObj;
-    //typedef enum {glPanelObj,glbuttonObj,glLabelObj,glImageObj}glObjType;
 
     p->objType = glImageObj;
     p->stretch = 0;
-#if 0
-    p->pngFile = (char *) 0;
-#endif
     p->texture = NULL;
     p->common.functions.draw = glCompImageDraw;
     return p;
@@ -41,15 +32,14 @@ glCompImage *glCompImageNew(glCompObj * par, GLfloat x, GLfloat y)
  * At present, we assume png input.
  * Return 0 on failure.
  */
-glCompImage *glCompImageNewFile (glCompObj * par, GLfloat x, GLfloat y, char* imgfile, int is2D)
-{
+glCompImage *glCompImageNewFile(float x, float y, char *imgfile) {
     int imageWidth, imageHeight;
     unsigned char *data = glCompLoadPng (imgfile, &imageWidth, &imageHeight);
     glCompImage *p;
 
     if (!data) return NULL;
-    p = glCompImageNew (par, x, y);
-    if (!glCompImageLoad (p, data, imageWidth, imageHeight, is2D)) {
+    p = glCompImageNew(NULL, x, y);
+    if (!glCompImageLoad(p, data, imageWidth, imageHeight, 0)) {
 	glCompImageDelete (p);
 	return NULL;
     }
@@ -59,10 +49,6 @@ glCompImage *glCompImageNewFile (glCompObj * par, GLfloat x, GLfloat y, char* im
 void glCompImageDelete(glCompImage * p)
 {
     glCompEmptyCommon(&p->common);
-#if 0
-    if (p->pngFile)
-	free(p->pngFile);
-#endif
     if (p->texture)
 	glCompDeleteTexture(p->texture);
     free(p);
@@ -96,21 +82,11 @@ int glCompImageLoadPng(glCompImage * i, char *pngFile,int is2D)
     return glCompImageLoad(i, data, imageWidth, imageHeight,is2D);
 }
 
-#if 0
-int glCompImageLoadRaw(glCompSet * s, glCompImage * i, char *rawFile,int is2D)
-{
-    int imageWidth, imageHeight;
-    unsigned char *data;
-    data = glCompLoadPng (rawFile, &imageWidth, &imageHeight);
-    return glCompImageLoad(i, data, imageWidth, imageHeight,is2D);
-}
-#endif
-
 void glCompImageDraw(void *obj)
 {
-    glCompImage *p = (glCompImage *) obj;
+    glCompImage *p = obj;
     glCompCommon ref = p->common;
-    GLfloat w,h,d;
+    float w,h,d;
 
     glCompCalcWidget((glCompCommon *) p->common.parent, &p->common, &ref);
     if (!p->common.visible)
@@ -125,13 +101,9 @@ void glCompImageDraw(void *obj)
     }
     else
     {
-#if 0
-	w=ref.width;
-	h=ref.height;
-#endif
 	w = p->width;
 	h = p->height;
-	d=(GLfloat)p->common.layer* (GLfloat)GLCOMPSET_BEVEL_DIFF;
+	d = (float)p->common.layer * GLCOMPSET_BEVEL_DIFF;
 	glDisable(GL_BLEND);
 	glEnable(GL_TEXTURE_2D);
 	glTexEnvf (GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_DECAL);
@@ -148,56 +120,4 @@ void glCompImageDraw(void *obj)
 	glEnable(GL_BLEND);
     }
 
-}
-
-void glCompImageClick(glCompObj * o, GLfloat x, GLfloat y,
-		      glMouseButtonType t)
-{
-    if (o->common.callbacks.click)
-	o->common.callbacks.click(o, x, y, t);
-}
-
-void glCompImageDoubleClick(glCompObj * obj, GLfloat x, GLfloat y,
-			    glMouseButtonType t)
-{
-    /*Put your internal code here */
-    if (((glCompImage *) obj)->common.callbacks.doubleclick)
-	((glCompImage *) obj)->common.callbacks.doubleclick(obj, x, y, t);
-}
-
-void glCompImageMouseDown(glCompObj * obj, GLfloat x, GLfloat y,
-			  glMouseButtonType t)
-{
-    /*Put your internal code here */
-    if (((glCompImage *) obj)->common.callbacks.mousedown)
-	((glCompImage *) obj)->common.callbacks.mousedown(obj, x, y, t);
-}
-
-void glCompImageMouseIn(glCompObj * obj, GLfloat x, GLfloat y)
-{
-    /*Put your internal code here */
-    if (((glCompImage *) obj)->common.callbacks.mousein)
-	((glCompImage *) obj)->common.callbacks.mousein(obj, x, y);
-}
-
-void glCompImageMouseOut(glCompObj * obj, GLfloat x, GLfloat y)
-{
-    /*Put your internal code here */
-    if (((glCompImage *) obj)->common.callbacks.mouseout)
-	((glCompImage *) obj)->common.callbacks.mouseout(obj, x, y);
-}
-
-void glCompImageMouseOver(glCompObj * obj, GLfloat x, GLfloat y)
-{
-    /*Put your internal code here */
-    if (((glCompImage *) obj)->common.callbacks.mouseover)
-	((glCompImage *) obj)->common.callbacks.mouseover(obj, x, y);
-}
-
-void glCompImageMouseUp(glCompObj * obj, GLfloat x, GLfloat y,
-			glMouseButtonType t)
-{
-    /*Put your internal code here */
-    if (((glCompImage *) obj)->common.callbacks.mouseup)
-	((glCompImage *) obj)->common.callbacks.mouseup(obj, x, y, t);
 }

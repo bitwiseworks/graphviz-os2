@@ -1,32 +1,26 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 #include "topfisheyeview.h"
-
-//#include "glcomptext.h"
-//#include "glcomptextpng.h"
-#include "math.h"
-#include "memory.h"
+#include <cgraph/alloc.h>
+#include <math.h>
 #include "viewport.h"
 #include "viewportcamera.h"
 #include "draw.h"
 #include "smyrna_utils.h"
 
-#include "assert.h"
+#include <assert.h>
 #include "hier.h"
 #include "topfisheyeview.h"
 #include <string.h>
-#include "color.h"
-#include "colorprocs.h"
+#include <common/color.h>
+#include <common/colorprocs.h>
 
 #ifdef _WIN32
 #include <wincrypt.h>
@@ -34,10 +28,6 @@
 
 static int get_temp_coords(topview * t, int level, int v, double *coord_x,
 			   double *coord_y);
-#ifdef UNUSED
-static int get_temp_coords2(topview * t, int level, int v, double *coord_x,
-			    double *coord_y, float *R, float *G, float *B);
-#endif
 
 static void color_interpolation(glCompColor srcColor, glCompColor tarColor,
 				glCompColor * color, int levelcount,
@@ -58,156 +48,20 @@ static void color_interpolation(glCompColor srcColor, glCompColor tarColor,
 	 (float) levelcount * srcColor.B) / (float) levelcount;
 }
 
-#ifdef UNUSED
-static double dist(double x1, double y1, double x2, double y2)
-{
-    return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
-}
-static double dist3d(double x1, double y1, double z1, double x2, double y2,
-		     double z2)
-{
-    return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2) +
-		(z1 - z2) * (z1 - z2));
-}
-#endif
-
-#ifdef UNUSED
-static void drawtopologicalfisheyestatic(topview * t);
-#endif
-
-#ifdef UNUSED
-
-The code below now longer works. First, t->Nodes == NULL, since
-we now rely on the libgraph graph for data. Second, the code that
-drew the distorted view was left out of the move from topview.c
-to topviewfuncs.c. The magnifiers were cute but not particularly
-useful, so we leave the feature out for now.
-
-static double G(double x)
-{
-    // distortion function for fisheye display
-    return (view->fmg.fisheye_distortion_fac +
-	    1) * x / (view->fmg.fisheye_distortion_fac * x + 1);
-}
-
-
-void fisheye_polar(double x_focus, double y_focus, topview * t)
-{
-    int i;
-    double distance, distorted_distance, ratio, range;
-
-    range = 0;
-    for (i = 1; i < t->Nodecount; i++) {
-	if (point_within_ellips_with_coords
-	    ((float) x_focus, (float) y_focus, (float) view->fmg.R,
-	     (float) view->fmg.R, t->Nodes[i].x, t->Nodes[i].y)) {
-	    range = MAX(range,
-			dist(t->Nodes[i].x, t->Nodes[i].y, x_focus,
-			     y_focus));
-	}
-    }
-
-    for (i = 1; i < t->Nodecount; i++) {
-
-	if (point_within_ellips_with_coords
-	    ((float) x_focus, (float) y_focus, (float) view->fmg.R,
-	     (float) view->fmg.R, t->Nodes[i].x, t->Nodes[i].y)) {
-	    distance =
-		dist(t->Nodes[i].x, t->Nodes[i].y, x_focus, y_focus);
-	    distorted_distance = G(distance / range) * range;
-	    if (distance != 0) {
-		ratio = distorted_distance / distance;
-	    } else {
-		ratio = 0;
-	    }
-	    t->Nodes[i].distorted_x =
-		(float) x_focus + (t->Nodes[i].x -
-				   (float) x_focus) * (float) ratio;
-	    t->Nodes[i].distorted_y =
-		(float) y_focus + (t->Nodes[i].y -
-				   (float) y_focus) * (float) ratio;
-	    t->Nodes[i].zoom_factor =
-		(float) 1 *(float) distorted_distance / (float) distance;
-	} else {
-	    t->Nodes[i].distorted_x = t->Nodes[i].x;
-	    t->Nodes[i].distorted_y = t->Nodes[i].y;
-	    t->Nodes[i].zoom_factor = 1;
-	}
-    }
-}
-void fisheye_spherical(double x_focus, double y_focus, double z_focus,
-		       topview * t)
-{
-    int i;
-    double distance, distorted_distance, ratio, range;
-
-    range = 0;
-    for (i = 1; i < t->Nodecount; i++) {
-	if (point_within_sphere_with_coords
-	    ((float) x_focus, (float) y_focus, (float) z_focus,
-	     (float) view->fmg.R, t->Nodes[i].x, t->Nodes[i].y,
-	     t->Nodes[i].z)) {
-
-
-	    range =
-		MAX(range,
-		    dist3d(t->Nodes[i].x, t->Nodes[i].y, t->Nodes[i].z,
-			   x_focus, y_focus, z_focus));
-	}
-    }
-
-    for (i = 1; i < t->Nodecount; i++) {
-
-
-	if (point_within_sphere_with_coords
-	    ((float) x_focus, (float) y_focus, (float) z_focus,
-	     (float) view->fmg.R, t->Nodes[i].x, t->Nodes[i].y,
-	     t->Nodes[i].z)) {
-	    distance =
-		dist3d(t->Nodes[i].x, t->Nodes[i].y, t->Nodes[i].z,
-		       x_focus, y_focus, z_focus);
-	    distorted_distance = G(distance / range) * range;
-	    if (distance != 0) {
-		ratio = distorted_distance / distance;
-	    } else {
-		ratio = 0;
-	    }
-	    t->Nodes[i].distorted_x =
-		(float) x_focus + (t->Nodes[i].x -
-				   (float) x_focus) * (float) ratio;
-	    t->Nodes[i].distorted_y =
-		(float) y_focus + (t->Nodes[i].y -
-				   (float) y_focus) * (float) ratio;
-	    t->Nodes[i].distorted_z =
-		(float) z_focus + (t->Nodes[i].z -
-				   (float) z_focus) * (float) ratio;
-	    t->Nodes[i].zoom_factor =
-		(float) 1 *(float) distorted_distance / (float) distance;
-	} else {
-	    t->Nodes[i].distorted_x = t->Nodes[i].x;
-	    t->Nodes[i].distorted_y = t->Nodes[i].y;
-	    t->Nodes[i].distorted_z = t->Nodes[i].z;
-	    t->Nodes[i].zoom_factor = 1;
-	}
-    }
-}
-#endif
-
 static v_data *makeGraph(Agraph_t* gg, int *nedges)
 {
     int i;
     int ne = agnedges(gg);
     int nv = agnnodes(gg);
-    v_data *graph = N_NEW(nv, v_data);
-    int *edges = N_NEW(2 * ne + nv, int);	/* reserve space for self loops */
-    float *ewgts = N_NEW(2 * ne + nv, float);
+    v_data *graph = gv_calloc(nv, sizeof(v_data));
+    int *edges = gv_calloc(2 * ne + nv, sizeof(int));	/* reserve space for self loops */
+    float *ewgts = gv_calloc(2 * ne + nv, sizeof(float));
     Agnode_t *np;
     Agedge_t *ep;
     Agraph_t *g = NULL;
     int i_nedges;
     ne = 0;
     i=0;
-//    for (i = 0; i < nv; i++) {
     for (np = agfstnode(gg); np; np = agnxtnode(gg, np))
     {
 	graph[i].edges = edges++;	/* reserve space for the self loop */
@@ -229,7 +83,6 @@ static v_data *makeGraph(Agraph_t* gg, int *nedges)
 	    vp = (tp == np ? hp : tp);
 	    ne++;
 	    i_nedges++;
-//	    *edges++ = ((temp_node_record *) AGDATA(vp))->TVref;
 	    *edges++ = ND_TVref(vp);
 	    *ewgts++ = 1;
 
@@ -245,59 +98,6 @@ static v_data *makeGraph(Agraph_t* gg, int *nedges)
     return graph;
 }
 
-
-
-
-#if 0
-static v_data *makeGraph_old(topview * tv, int *nedges)
-{
-    int i;
-    int ne = tv->Edgecount;	/* upper bound */
-    int nv = tv->Nodecount;
-    v_data *graph = N_NEW(nv, v_data);
-    int *edges = N_NEW(2 * ne + nv, int);	/* reserve space for self loops */
-    float *ewgts = N_NEW(2 * ne + nv, float);
-    Agnode_t *np;
-    Agedge_t *ep;
-    Agraph_t *g = NULL;
-    int i_nedges;
-
-    ne = 0;
-    for (i = 0; i < nv; i++) {
-	graph[i].edges = edges++;	/* reserve space for the self loop */
-	graph[i].ewgts = ewgts++;
-#ifdef STYLES
-	graph[i].styles = NULL;
-#endif
-	i_nedges = 1;		/* one for the self */
-
-	np = tv->Nodes[i].Node;
-	if (!g)
-	    g = agraphof(np);
-	for (ep = agfstedge(g, np); ep; ep = agnxtedge(g, ep, np))
-	{
-	    Agnode_t *vp;
-	    Agnode_t *tp = agtail(ep);
-	    Agnode_t *hp = aghead(ep);
-	    assert(hp != tp);
-	    /* FIX: handle multiedges */
-	    vp = (tp == np ? hp : tp);
-	    ne++;
-	    i_nedges++;
-	    *edges++ = ((temp_node_record *) AGDATA(vp))->TVref;
-	    *ewgts++ = 1;
-	}
-
-	graph[i].nedges = i_nedges;
-	graph[i].edges[0] = i;
-	graph[i].ewgts[0] = 1 - i_nedges;
-    }
-    ne /= 2;			/* each edge counted twice */
-    *nedges = ne;
-    return graph;
-}
-#endif
-
 static void refresh_old_values(topview * t)
 {
     int level, v;
@@ -305,8 +105,6 @@ static void refresh_old_values(topview * t)
     for (level = 0; level < hp->nlevels; level++) {
 	for (v = 0; v < hp->nvtxs[level]; v++) {
 	    ex_vtx_data *gg = hp->geom_graphs[level];
-	    /* v_data *g = hp->graphs[level]; */
-	    /* double x0,y0; */
 	    gg[v].old_physical_x_coord = gg[v].physical_x_coord;
 	    gg[v].old_physical_y_coord = gg[v].physical_y_coord;
 	    gg[v].old_active_level = gg[v].active_level;
@@ -327,21 +125,19 @@ static void refresh_old_values(topview * t)
  */
 void prepare_topological_fisheye(Agraph_t* g,topview * t)
 {
-    double *x_coords = N_NEW(t->Nodecount, double);	// initial x coordinates
-    double *y_coords = N_NEW(t->Nodecount, double);	// initial y coordinates
+    double *x_coords = gv_calloc(t->Nodecount, sizeof(double));	// initial x coordinates
+    double *y_coords = gv_calloc(t->Nodecount, sizeof(double));	// initial y coordinates
     focus_t *fs;
     int ne;
     int i;
     int closest_fine_node;
     int cur_level = 0;
     Hierarchy *hp;
-    ex_vtx_data *gg;
     gvcolor_t cl;
     Agnode_t *np;
 
     v_data *graph = makeGraph(g, &ne);
 
-//      t->fisheyeParams.animate=1;   //turn the animation on
     i=0;
     for (np = agfstnode(g); np; np = agnxtnode(g, np))
     {
@@ -357,7 +153,6 @@ void prepare_topological_fisheye(Agraph_t* g,topview * t)
     free(y_coords);
 
     fs = t->fisheyeParams.fs = initFocus(agnnodes(g));	// create focus set
-    gg = hp->geom_graphs[0];
 
     closest_fine_node = 0;	/* first node */
     fs->num_foci = 1;
@@ -369,7 +164,6 @@ void prepare_topological_fisheye(Agraph_t* g,topview * t)
 	(int) (view->bdxRight - view->bdxLeft);
     view->Topview->fisheyeParams.repos.height =
 	(int) (view->bdyTop - view->bdyBottom);
-    view->Topview->fisheyeParams.repos.rescale = Polar;
 
     //topological fisheye
 
@@ -407,37 +201,7 @@ void prepare_topological_fisheye(Agraph_t* g,topview * t)
     set_active_levels(hp, fs->foci_nodes, fs->num_foci, &(t->fisheyeParams.level));
     positionAllItems(hp, fs, &(t->fisheyeParams.repos));
     refresh_old_values(t);
-
-/* fprintf (stderr, "No. of active nodes = %d\n", count_active_nodes(hp)); */
-
 }
-
-#if 0
-/*
-	draws all level 0 nodes and edges, during animation
-*/
-void printalllevels(topview * t)
-{
-    int level, v;
-    Hierarchy *hp = t->fisheyeParams.h;
-    glPointSize(5);
-    glBegin(GL_POINTS);
-    for (level = 0; level < hp->nlevels; level++) {
-	for (v = 0; v < hp->nvtxs[level]; v++) {
-	    ex_vtx_data *gg = hp->geom_graphs[level];
-	    if (gg[v].active_level == level) {
-		double x0, y0;
-		get_temp_coords(t, level, v, &x0, &y0);
-		glColor3f((GLfloat) (hp->nlevels - level) /
-			  (GLfloat) hp->nlevels,
-			  (GLfloat) level / (GLfloat) hp->nlevels, 0);
-		glVertex3f((GLfloat) x0, (GLfloat) y0, (GLfloat) 0);
-	    }
-	}
-    }
-    glEnd();
-}
-#endif
 
 static void drawtopfishnodes(topview * t)
 {
@@ -454,12 +218,6 @@ static void drawtopfishnodes(topview * t)
     tarColor.G = view->Topview->fisheyeParams.tarColor.G;
     tarColor.B = view->Topview->fisheyeParams.tarColor.B;
 
-
-    //draw focused node little bigger than others
-/*		ex_vtx_data *gg = hp->geom_graphs[0];
-		if ((gg[v].active_level == 0) &&(v==t->fisheyeParams.fs->foci_nodes[0]))*/
-
-
     //drawing nodes
     glPointSize(7);
     level = 0;
@@ -475,24 +233,13 @@ static void drawtopfishnodes(topview * t)
 		       && (-y0 / view->zoom < view->clipY2))))
 		    continue;
 
-//                              if (level !=0)
-//                                      glColor4f((GLfloat) (hp->nlevels - level)*(GLfloat)0.5 /  (GLfloat) hp->nlevels,
-//                                (GLfloat) level / (GLfloat) hp->nlevels, (GLfloat)0,(GLfloat)view->defaultnodealpha);
-		//                      else
-//                              glColor4f((GLfloat) 1,
-//                                (GLfloat) level / (GLfloat) hp->nlevels*2, 0,view->defaultnodealpha);
-
 		if (max_visible_level < level)
 		    max_visible_level = level;
 		color_interpolation(srcColor, tarColor, &color,
 				    max_visible_level, level);
-		glColor4f(color.R, color.G, color.B,
-			  (GLfloat) view->defaultnodealpha);
+		glColor4f(color.R, color.G, color.B, view->defaultnodealpha);
 
-/*								glColor3f((GLfloat) (hp->nlevels - level)*0.5 /  (GLfloat) hp->nlevels,
-				  (GLfloat) level / (GLfloat) hp->nlevels, 0);*/
-
-		glVertex3f((GLfloat) x0, (GLfloat) y0, (GLfloat) 0);
+		glVertex3f((float)x0, (float)y0, 0.0f);
 	    }
 	}
     }
@@ -500,52 +247,6 @@ static void drawtopfishnodes(topview * t)
 
 }
 
-#if 0
-static void drawtopfishnodelabels(topview * t)
-{
-    int v, finenodes, focusnodes;
-    char buf[512];
-    char *str;
-    Hierarchy *hp = t->fisheyeParams.h;
-    finenodes = focusnodes = 0;
-    str =
-	agget(view->g[view->activeGraph],
-	      "topologicalfisheyelabelfinenodes");
-    if (strcmp(str, "1") == 0) {
-	finenodes = 1;
-    }
-    str =
-	agget(view->g[view->activeGraph], "topologicalfisheyelabelfocus");
-    if (strcmp(str, "1") == 0) {
-	focusnodes = 1;
-    }
-    if ((finenodes) || (focusnodes)) {
-	for (v = 0; v < hp->nvtxs[0]; v++) {
-	    ex_vtx_data *gg = hp->geom_graphs[0];
-	    if (gg[v].active_level == 0) {
-		if (view->Topview->Nodes[v].Label)
-		    strcpy(buf, view->Topview->Nodes[v].Label);
-		else
-		    sprintf(buf, "%d", v);
-
-		if ((v == t->fisheyeParams.fs->foci_nodes[0]) && (focusnodes)) {
-		    glColor4f((float) 0, (float) 0, (float) 1, (float) 1);
-		    glprintfglut(GLUT_BITMAP_HELVETICA_18,
-				 gg[v].physical_x_coord,
-				 gg[v].physical_y_coord, 0, buf);
-		} else if (finenodes) {
-		    glColor4f(0, 0, 0, 1);
-		    glprintfglut(GLUT_BITMAP_HELVETICA_10,
-				 gg[v].physical_x_coord,
-				 gg[v].physical_y_coord, 0, buf);
-		}
-	    }
-
-	}
-    }
-
-}
-#endif
 static void drawtopfishedges(topview * t)
 {
     glCompColor srcColor;
@@ -578,39 +279,32 @@ static void drawtopfishedges(topview * t)
 			max_visible_level = level;
 		    color_interpolation(srcColor, tarColor, &color,
 					max_visible_level, level);
-		    glColor4f(color.R, color.G, color.B,
-			      (GLfloat) view->defaultnodealpha);
-
+		    glColor4f(color.R, color.G, color.B, view->defaultnodealpha);
 
 		    if (get_temp_coords(t, level, n, &x, &y)) {
-			glVertex3f((GLfloat) x0, (GLfloat) y0,
-				   (GLfloat) 0);
-			glVertex3f((GLfloat) x, (GLfloat) y, (GLfloat) 0);
-		    } else	// if (gg[n].active_level > level)
+			glVertex3f((float)x0, (float)y0, 0.0f);
+			glVertex3f((float)x, (float)y, 0.0f);
+		    } else
 		    {
 			int levell, nodee;
 			find_active_ancestor_info(hp, level, n, &levell,
 						  &nodee);
-//                                              find_physical_coords(hp, level, n, &x, &y);
 			if (get_temp_coords(t, levell, nodee, &x, &y)) {
 
-			    if ((!(((-x0 / view->zoom > view->clipX1)
-				    && (-x0 / view->zoom < view->clipX2)
-				    && (-y0 / view->zoom > view->clipY1)
-				    && (-y0 / view->zoom < view->clipY2))))
-				&& (!(((-x / view->zoom > view->clipX1)
-				       && (-x / view->zoom < view->clipX2)
-				       && (-y / view->zoom > view->clipY1)
-				       && (-y / view->zoom <
-					   view->clipY2)))))
+			    if (!(-x0 / view->zoom > view->clipX1
+				    && -x0 / view->zoom < view->clipX2
+				    && -y0 / view->zoom > view->clipY1
+				    && -y0 / view->zoom < view->clipY2)
+				&& !(-x / view->zoom > view->clipX1
+				       && -x / view->zoom < view->clipX2
+				       && -y / view->zoom > view->clipY1
+				       && -y / view->zoom < view->clipY2))
 
 				continue;
 
 
-			    glVertex3f((GLfloat) x0, (GLfloat) y0,
-				       (GLfloat) 0);
-			    glVertex3f((GLfloat) x, (GLfloat) y,
-				       (GLfloat) 0);
+			    glVertex3f((float)x0, (float)y0, 0.0f);
+			    glVertex3f((float)x, (float)y, 0.0f);
 			}
 		    }
 		}
@@ -621,13 +315,13 @@ static void drawtopfishedges(topview * t)
 
 }
 
-static int get_active_frame(topview * t)
+static int get_active_frame(void)
 {
     gulong microseconds;
     gdouble seconds;
     int fr;
     seconds = g_timer_elapsed(view->timer, &microseconds);
-    fr = (int) (seconds / ((double) view->frame_length / (double) 1000));
+    fr = (int)(seconds * 1000.0);
     if (fr < view->total_frames) {
 
 	if (fr == view->active_frame)
@@ -646,12 +340,9 @@ static int get_active_frame(topview * t)
 
 void drawtopologicalfisheye(topview * t)
 {
-    get_active_frame(t);
+    get_active_frame();
     drawtopfishnodes(t);
     drawtopfishedges(t);
-/*    if (!t->fisheyeParams.animate)
-	drawtopfishnodelabels(t);*/
-
 }
 
 static void get_interpolated_coords(double x0, double y0, double x1, double y1,
@@ -661,12 +352,11 @@ static void get_interpolated_coords(double x0, double y0, double x1, double y1,
     *y = y0 + (y1 - y0) / (double) total_fr *(double) (fr + 1);
 }
 
-int get_temp_coords(topview * t, int level, int v, double *coord_x,
+static int get_temp_coords(topview * t, int level, int v, double *coord_x,
 		    double *coord_y)
 {
     Hierarchy *hp = t->fisheyeParams.h;
     ex_vtx_data *gg = hp->geom_graphs[level];
-    /* v_data *g = hp->graphs[level]; */
 
     if (!t->fisheyeParams.animate) {
 	if (gg[v].active_level != level)
@@ -720,41 +410,7 @@ int get_temp_coords(topview * t, int level, int v, double *coord_x,
     return 1;
 }
 
-
-
-/*  In loop,
- *  update fs.
- *    For example, if user clicks mouse at (p.x,p.y) to pick a single new focus,
- *      int closest_fine_node;
- *      find_closest_active_node(hierarchy, p.x, p.y, &closest_fine_node);
- *      fs->num_foci = 1;
- *      fs->foci_nodes[0] = closest_fine_node;
- *      fs->x_foci[0] = hierarchy->geom_graphs[cur_level][closest_fine_node].x_coord;
- *      fs->y_foci[0] = hierarchy->geom_graphs[cur_level][closest_fine_node].y_coord;
- *  set_active_levels(hierarchy, fs->foci_nodes, fs->num_foci);
- *  positionAllItems(hierarchy, fs, parms)
- */
-
-#if 0
-void infotopfisheye(topview * t, float *x, float *y, float *z)
-{
-
-    Hierarchy *hp = t->fisheyeParams.h;
-    int closest_fine_node;
-    find_closest_active_node(hp, *x, *y, &closest_fine_node);
-
-
-
-
-/*		hp->geom_graphs[0][closest_fine_node].x_coord;
-	    hp->geom_graphs[0][closest_fine_node].y_coord;*/
-}
-#endif
-
-
-
-void changetopfishfocus(topview * t, float *x, float *y,
-			float *z, int num_foci)
+void changetopfishfocus(topview * t, float *x, float *y, int num_foci)
 {
 
     gvcolor_t cl;
@@ -829,65 +485,3 @@ void changetopfishfocus(topview * t, float *x, float *y,
     }
 
 }
-
-
-
-#ifdef UNUSED
-void drawtopologicalfisheyestatic(topview * t)
-{
-    int level, v;
-    Hierarchy *hp = t->fisheyeParams.h;
-
-    glPointSize(15);
-    glBegin(GL_POINTS);
-    for (level = 0; level < hp->nlevels; level++) {
-	for (v = 0; v < hp->nvtxs[level]; v++) {
-	    ex_vtx_data *gg = hp->geom_graphs[level];
-	    if (gg[v].active_level == level) {
-		double x0 = gg[v].physical_x_coord;
-		double y0 = gg[v].physical_y_coord;
-//              glColor3f((GLfloat)(hp->nlevels-level)/(GLfloat)hp->nlevels,(GLfloat)level/(GLfloat)hp->nlevels,0);
-		glColor4f((GLfloat) 0, (GLfloat) 1, (GLfloat) 0,
-			  (GLfloat) 0.2);
-		glVertex3f((GLfloat) x0, (GLfloat) y0, (GLfloat) 0);
-	    }
-	}
-    }
-    glEnd();
-
-
-
-
-/*	glBegin(GL_LINES);
-    for (level=0;level < hp->nlevels;level++) {
-	for (v=0;v < hp->nvtxs[level]; v++) {
-	    ex_vtx_data* gg = hp->geom_graphs[level];
-	    vtx_data* g = hp->graphs[level];
-	    if(gg[v].active_level==level) {
-		double x0 = gg[v].physical_x_coord;
-		double y0 = gg[v].physical_y_coord;
-
-		for (i=1;i < g[v].nedges;i++) {
-		    double x,y;
-			n = g[v].edges[i];
-			glColor3f((GLfloat)(hp->nlevels-level)/(GLfloat)hp->nlevels,(GLfloat)level/(GLfloat)hp->nlevels,0);
-			if (gg[n].active_level == level) {
-			if (v < n) {
-			    x = gg[n].physical_x_coord;
-			    y = gg[n].physical_y_coord;
-			    glVertex3f((GLfloat)x0,(GLfloat)y0,(GLfloat)0);
-			    glVertex3f((GLfloat)x,(GLfloat)y,(GLfloat)0);
-			}
-			}
-		    else if (gg[n].active_level > level) {
-			find_physical_coords(hp, level, n, &x, &y);
-			glVertex3f((GLfloat)x0,(GLfloat)y0,(GLfloat)0);
-			glVertex3f((GLfloat)x,(GLfloat)y,(GLfloat)0);
-		    }
-		}
-	    }
-	}
-    }
-    glEnd();*/
-}
-#endif

@@ -1,23 +1,22 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include "render.h"
+#include <cgraph/alloc.h>
+#include <cgraph/prisize_t.h>
+#include <common/render.h>
+#include <stdbool.h>
 #include <stdio.h>
 
-#include "mem.h"
-#include "hedges.h"
-#include "heap.h"
+#include <neatogen/mem.h>
+#include <neatogen/hedges.h>
+#include <neatogen/heap.h>
 
 
 static Halfedge *PQhash;
@@ -39,7 +38,7 @@ static int PQbucket(Halfedge * he)
 	bucket = b;
     if (bucket < PQmin)
 	PQmin = bucket;
-    return (bucket);
+    return bucket;
 }
 
 void PQinsert(Halfedge * he, Site * v, double offset)
@@ -50,7 +49,7 @@ void PQinsert(Halfedge * he, Site * v, double offset)
     ref(v);
     he->ystar = v->coord.y + offset;
     last = &PQhash[PQbucket(he)];
-    while ((next = last->PQnext) != (struct Halfedge *) NULL &&
+    while ((next = last->PQnext) != NULL &&
 	   (he->ystar > next->ystar ||
 	    (he->ystar == next->ystar
 	     && v->coord.x > next->vertex->coord.x))) {
@@ -58,28 +57,28 @@ void PQinsert(Halfedge * he, Site * v, double offset)
     }
     he->PQnext = last->PQnext;
     last->PQnext = he;
-    PQcount += 1;
+    ++PQcount;
 }
 
 void PQdelete(Halfedge * he)
 {
     Halfedge *last;
 
-    if (he->vertex != (Site *) NULL) {
+    if (he->vertex != NULL) {
 	last = &PQhash[PQbucket(he)];
 	while (last->PQnext != he)
 	    last = last->PQnext;
 	last->PQnext = he->PQnext;
-	PQcount -= 1;
+	--PQcount;
 	deref(he->vertex);
-	he->vertex = (Site *) NULL;
+	he->vertex = NULL;
     }
 }
 
 
-int PQempty(void)
+bool PQempty(void)
 {
-    return (PQcount == 0);
+    return PQcount == 0;
 }
 
 
@@ -87,12 +86,12 @@ Point PQ_min(void)
 {
     Point answer;
 
-    while (PQhash[PQmin].PQnext == (struct Halfedge *) NULL) {
-	PQmin += 1;
+    while (PQhash[PQmin].PQnext == NULL) {
+	++PQmin;
     }
     answer.x = PQhash[PQmin].PQnext->vertex->coord.x;
     answer.y = PQhash[PQmin].PQnext->ystar;
-    return (answer);
+    return answer;
 }
 
 Halfedge *PQextractmin(void)
@@ -101,8 +100,8 @@ Halfedge *PQextractmin(void)
 
     curr = PQhash[PQmin].PQnext;
     PQhash[PQmin].PQnext = curr->PQnext;
-    PQcount -= 1;
-    return (curr);
+    --PQcount;
+    return curr;
 }
 
 void PQcleanup(void)
@@ -119,17 +118,22 @@ void PQinitialize(void)
     PQmin = 0;
     PQhashsize = 4 * sqrt_nsites;
     if (PQhash == NULL)
-	PQhash = N_GNEW(PQhashsize, Halfedge);
-    for (i = 0; i < PQhashsize; i += 1)
-	PQhash[i].PQnext = (Halfedge *) NULL;
+	PQhash = gv_calloc(PQhashsize, sizeof(Halfedge));
+    for (i = 0; i < PQhashsize; ++i)
+	PQhash[i].PQnext = NULL;
 }
 
 static void PQdumphe(Halfedge * p)
 {
-    printf("  [%p] %p %p %d %d %d %d %f\n",
+    printf("  [%p] %p %p %d %d %d ",
 	   p, p->ELleft, p->ELright, p->ELedge->edgenbr,
-	   p->ELrefcnt, p->ELpm, (p->vertex ? p->vertex->sitenbr : -1),
-	   p->ystar);
+	   p->ELrefcnt, p->ELpm);
+    if (p->vertex != 0) {
+      printf("%" PRISIZE_T, p->vertex->sitenbr);
+    } else {
+      printf("-1");
+    }
+    printf(" %f\n", p->ystar);
 }
 
 void PQdump(void)
@@ -137,7 +141,7 @@ void PQdump(void)
     int i;
     Halfedge *p;
 
-    for (i = 0; i < PQhashsize; i += 1) {
+    for (i = 0; i < PQhashsize; ++i) {
 	printf("[%d]\n", i);
 	p = PQhash[i].PQnext;
 	while (p != NULL) {

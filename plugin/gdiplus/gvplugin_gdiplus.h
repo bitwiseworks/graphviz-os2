@@ -1,23 +1,20 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
- * Copyright (c) 2011 AT&T Intellectual Property 
+ * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef GVPLUGIN_GDIPLUS_H
-#define GVPLUGIN_GDIPLUS_H
+#pragma once
 
+#include <memory>
 #include <vector>
 
-#include <Windows.h>
-#include <GdiPlus.h>
+#include <windows.h>
+#include <gdiplus.h>
 
 typedef enum {
 	FORMAT_NONE,
@@ -37,11 +34,11 @@ struct DeviceContext
 {
 	HWND hwnd;
 	HDC hdc;
-	
-	DeviceContext(HWND wnd = NULL): hwnd(wnd), hdc(GetDC(wnd))
+
+	DeviceContext(HWND wnd = nullptr): hwnd(wnd), hdc(GetDC(wnd))
 	{
 	}
-	
+
 	~DeviceContext()
 	{
 		ReleaseDC(hwnd, hdc);
@@ -53,11 +50,10 @@ struct DeviceContext
 
 struct Layout
 {
-	Gdiplus::Font* font;
+	std::unique_ptr<Gdiplus::Font> font;
 	std::vector<WCHAR> text;
-	
+
 	Layout(char *fontname, double fontsize, char* string);
-	~Layout();
 };
 
 static const int BYTES_PER_PIXEL = 4;		/* bytes per pixel */
@@ -67,5 +63,3 @@ void gdiplus_free_layout(void *layout);
 void UseGdiplus();
 const Gdiplus::StringFormat* GetGenericTypographic();
 void SaveBitmapToStream(Gdiplus::Bitmap &bitmap, IStream *stream, int format);
-
-#endif

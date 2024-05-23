@@ -1,7 +1,10 @@
-#include	"dthdr.h"
+#include	<assert.h>
+#include	<cdt/dthdr.h>
+#include	<limits.h>
+#include	<string.h>
 
 /* Hashing a string into an unsigned integer.
-** The basic method is to continuingly accumulate bytes and multiply
+** The basic method is to continuously accumulate bytes and multiply
 ** with some given prime. The length n of the string is added last.
 ** The recurrent equation is like this:
 **	h[k] = (h[k-1] + bytes)*prime	for 0 <= k < n
@@ -13,21 +16,23 @@
 ** Written by Kiem-Phong Vo (02/28/03)
 */
 
-uint dtstrhash(reg uint h, void* args, reg int n)
-{
-	reg unsigned char*	s = (unsigned char*)args;
+unsigned dtstrhash(void *args, int n) {
+	unsigned h = 0;
+	unsigned char *s = args;
 
 	if(n <= 0)
 	{	for(; *s != 0; s += s[1] ? 2 : 1)
-			h = (h + (s[0]<<8) + s[1])*DT_PRIME;
-		n = s - (unsigned char*)args;
+			h = (h + ((unsigned)s[0] << 8u) + (unsigned)s[1]) * DT_PRIME;
+		assert(strlen(args) <= INT_MAX);
+		n = (int)(s - (unsigned char*)args);
 	}
 	else
-	{	reg unsigned char*	ends;
+	{	unsigned char*	ends;
 		for(ends = s+n-1; s < ends; s += 2)
-			h = (h + (s[0]<<8) + s[1])*DT_PRIME;
+			h = (h + ((unsigned)s[0] << 8u) + (unsigned)s[1]) * DT_PRIME;
 		if(s <= ends)
-			h = (h + (s[0]<<8))*DT_PRIME;
+			h = (h + ((unsigned)s[0] << 8u)) * DT_PRIME;
 	}
-	return (h+n)*DT_PRIME;
+	assert(n >= 0);
+	return (h + (unsigned)n) * DT_PRIME;
 }

@@ -1,17 +1,14 @@
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef INDEX_H
-#define INDEX_H
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,7 +29,6 @@ extern "C" {
  * per Antonin there is no copyright
  */
 
-/* %W% %G% */
 /*-----------------------------------------------------------------------------
 | Global definitions.
 -----------------------------------------------------------------------------*/
@@ -47,9 +43,9 @@ extern "C" {
 #define NODECARD 64
 typedef struct RTree RTree_t;
 
-#include <rectangle.h>
-#include <node.h>
-#include <split.q.h>
+#include <label/rectangle.h>
+#include <label/node.h>
+#include <label/split.q.h>
 
 #define CX(i)  (i)
 #define NX(i)  (i+NUMDIMS)
@@ -66,9 +62,6 @@ typedef struct LeafList {
     Leaf_t *leaf;
 } LeafList_t;
 
-#ifndef METHODS
-#define METHODS 1
-#endif /*METHODS*/
     struct RTree {
     Node_t *root;
 
@@ -76,50 +69,13 @@ typedef struct LeafList {
 
     /* balance criterion for node splitting */
     int MinFill;
-
-    /* times */
-    long ElapsedTime;
-    float UserTime, SystemTime;
-
-    int Deleting;
-
-    /* variables for statistics */
-    int StatFlag;		/* tells if we are counting or not */
-    /* counters affected only when StatFlag set */
-    int InsertCount;
-    int DeleteCount;
-    int ReInsertCount;
-    int InSplitCount;
-    int DeSplitCount;
-    int ElimCount;
-    int EvalCount;
-    int InTouchCount;
-    int DeTouchCount;
-    int SeTouchCount;
-    int CallCount;
-    float SplitMeritSum;
-
-    /* counters used even when StatFlag not set */
-    int RectCount;
-    int NodeCount;
-    int LeafCount, NonLeafCount;
-    int EntryCount;
-    int SearchCount;
-    int HitCount;
-
 };
-
-typedef struct ListNode {
-    struct ListNode *next;
-    struct Node *node;
-} ListNode_t;
 
 RTree_t *RTreeOpen(void);
 int RTreeClose(RTree_t * rtp);
-Node_t *RTreeNewIndex(RTree_t * rtp);
+Node_t *RTreeNewIndex(void);
 LeafList_t *RTreeSearch(RTree_t *, Node_t *, Rect_t *);
 int RTreeInsert(RTree_t *, Rect_t *, void *, Node_t **, int);
-int RTreeDelete(RTree_t *, Rect_t *, void *, Node_t **);
 
 LeafList_t *RTreeNewLeafList(Leaf_t * lp);
 LeafList_t *RTreeLeafListAdd(LeafList_t * llp, Leaf_t * lp);
@@ -132,5 +88,3 @@ void PrintNode(Node_t *);
 #ifdef __cplusplus
 }
 #endif
-
-#endif				/*INDEX_H */

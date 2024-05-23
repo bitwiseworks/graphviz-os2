@@ -1,34 +1,33 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/// @file
+/// @brief reads graphs with @ref gvNextInputGraph and renders with
+/// @ref gvLayoutJobs, @ref gvRenderJobs
 
 /*************************************************************************
- * Copyright (c) 2011 AT&T Intellectual Property 
+ * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include <gvc.h>
+#include <graphviz/gvc.h>
+#include <stddef.h>
 
-int main(int argc, char **argv)
-{
-    graph_t *g, *prev = NULL;
-    GVC_t *gvc;
+int main(int argc, char **argv) {
+  GVC_t *gvc = gvContext();
+  gvParseArgs(gvc, argc, argv);
 
-    gvc = gvContext();
-    gvParseArgs(gvc, argc, argv);
-
-    while ((g = gvNextInputGraph(gvc))) {
-	if (prev) {
-	    gvFreeLayout(gvc, prev);
-	    agclose(prev);
-	}
-	gvLayoutJobs(gvc, g);
-	gvRenderJobs(gvc, g);
-	prev = g;
+  graph_t *g, *prev = NULL;
+  while ((g = gvNextInputGraph(gvc))) {
+    if (prev) {
+      gvFreeLayout(gvc, prev);
+      agclose(prev);
     }
-    return (gvFreeContext(gvc));
+    gvLayoutJobs(gvc, g);
+    gvRenderJobs(gvc, g);
+    prev = g;
+  }
+  return gvFreeContext(gvc);
 }

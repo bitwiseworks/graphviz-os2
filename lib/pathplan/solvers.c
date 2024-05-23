@@ -1,24 +1,20 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
-#include "config.h"
 #include <math.h>
-#include "solvers.h"
+#include <pathplan/solvers.h>
 
-#ifndef HAVE_CBRT
-#define cbrt(x) ((x < 0) ? (-1*pow(-x, 1.0/3.0)) : pow (x, 1.0/3.0))
-#endif
+static int solve1(double *coeff, double *roots);
+static int solve2(double *coeff, double *roots);
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -69,7 +65,7 @@ int solve3(double *coeff, double *roots)
     return rootn;
 }
 
-int solve2(double *coeff, double *roots)
+static int solve2(double *coeff, double *roots)
 {
     double a, b, c;
     double disc, b_over_2a, c_over_a;
@@ -81,19 +77,18 @@ int solve2(double *coeff, double *roots)
     c_over_a = c / a;
 
     disc = b_over_2a * b_over_2a - c_over_a;
-    if (disc < 0)
+    if (disc < 0) {
 	return 0;
-    else if (disc == 0) {
-	roots[0] = -b_over_2a;
-	return 1;
-    } else {
+    } else if (disc > 0) {
 	roots[0] = -b_over_2a + sqrt(disc);
 	roots[1] = -2 * b_over_2a - roots[0];
 	return 2;
     }
+    roots[0] = -b_over_2a;
+    return 1;
 }
 
-int solve1(double *coeff, double *roots)
+static int solve1(double *coeff, double *roots)
 {
     double a, b;
 

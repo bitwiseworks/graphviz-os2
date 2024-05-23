@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 
@@ -32,19 +29,23 @@
 #define FDP_PRIVATE 1
 
 #include "config.h"
+#include <assert.h>
 #include <limits.h>
 #include <inttypes.h>
 #include <assert.h>
-#include "tlayout.h"
-#include "neatoprocs.h"
-#include "adjust.h"
-#include "comp.h"
-#include "pack.h"
-#include "clusteredges.h"
-#include "dbg.h"
-#include <setjmp.h>
-
-static jmp_buf jbuf;
+#include <cgraph/alloc.h>
+#include <cgraph/list.h>
+#include <cgraph/startswith.h>
+#include <fdpgen/tlayout.h>
+#include <math.h>
+#include <neatogen/neatoprocs.h>
+#include <neatogen/adjust.h>
+#include <fdpgen/comp.h>
+#include <pack/pack.h>
+#include <fdpgen/clusteredges.h>
+#include <fdpgen/dbg.h>
+#include <stddef.h>
+#include <stdbool.h>
 
 typedef struct {
     graph_t*  rootg;  /* logical root; graph passed in to fdp_layout */
@@ -72,26 +73,24 @@ typedef struct {
  * node's connected component.
  * Also, entire layout is translated to origin.
  */
-static void
-finalCC(graph_t * g, int c_cnt, graph_t ** cc, point * pts, graph_t * rg,
-	layout_info* infop)
-{
+static void finalCC(graph_t *g, size_t c_cnt, graph_t **cc, point *pts,
+                    graph_t *rg, layout_info* infop) {
     attrsym_t * G_width = infop->G_width;
     attrsym_t * G_height = infop->G_height;
     graph_t *cg;
-    box b, bb;
+    boxf bb;
     boxf bbf;
     point pt;
     int margin;
     graph_t **cp = cc;
     point *pp = pts;
-    int isRoot = (rg == infop->rootg);
+    int isRoot = rg == infop->rootg;
     int isEmpty = 0;
 
     /* compute graph bounding box in points */
     if (c_cnt) {
 	cg = *cp++;
-	BF2B(GD_bb(cg), bb);
+	bb = GD_bb(cg);
 	if (c_cnt > 1) {
 	    pt = *pp++;
 	    bb.LL.x += pt.x;
@@ -99,16 +98,16 @@ finalCC(graph_t * g, int c_cnt, graph_t ** cc, point * pts, graph_t * rg,
 	    bb.UR.x += pt.x;
 	    bb.UR.y += pt.y;
 	    while ((cg = *cp++)) {
-		BF2B(GD_bb(cg), b);
+		boxf b = GD_bb(cg);
 		pt = *pp++;
 		b.LL.x += pt.x;
 		b.LL.y += pt.y;
 		b.UR.x += pt.x;
 		b.UR.y += pt.y;
-		bb.LL.x = MIN(bb.LL.x, b.LL.x);
-		bb.LL.y = MIN(bb.LL.y, b.LL.y);
-		bb.UR.x = MAX(bb.UR.x, b.UR.x);
-		bb.UR.y = MAX(bb.UR.y, b.UR.y);
+		bb.LL.x = fmin(bb.LL.x, b.LL.x);
+		bb.LL.y = fmin(bb.LL.y, b.LL.y);
+		bb.UR.x = fmax(bb.UR.x, b.UR.x);
+		bb.UR.y = fmax(bb.UR.y, b.UR.y);
 	    }
 	}
     } else {			/* empty graph */
@@ -121,11 +120,10 @@ finalCC(graph_t * g, int c_cnt, graph_t ** cc, point * pts, graph_t * rg,
 
     if (GD_label(rg)) {
 	point p;
-	int d;
 
 	isEmpty = 0;
 	PF2P(GD_label(rg)->dimen, p);
-	d = p.x - (bb.UR.x - bb.LL.x);
+	double d = p.x - (bb.UR.x - bb.LL.x);
 	if (d > 0) {		/* height of label added below */
 	    d /= 2;
 	    bb.LL.x -= d;
@@ -186,9 +184,9 @@ static node_t *mkDeriveNode(graph_t * dg, char *name)
     node_t *dn;
 
     dn = agnode(dg, name,1);
-    agbindrec(dn, "Agnodeinfo_t", sizeof(Agnodeinfo_t), TRUE);	//node custom data
-    ND_alg(dn) = (void *) NEW(dndata);	/* free in freeDeriveNode */
-    ND_pos(dn) = N_GNEW(GD_ndim(dg), double);
+    agbindrec(dn, "Agnodeinfo_t", sizeof(Agnodeinfo_t), true);	//node custom data
+    ND_alg(dn) = gv_alloc(sizeof(dndata)); // free in freeDeriveNode
+    ND_pos(dn) = gv_calloc(GD_ndim(dg), sizeof(double));
     /* fprintf (stderr, "Creating %s\n", dn->name); */
     return dn;
 }
@@ -275,43 +273,13 @@ static void evalPositions(graph_t * g, graph_t* rootg)
     }
 }
 
-#define CL_CHUNK 10
-
-typedef struct {
-    graph_t **cl;
-    int sz;
-    int cnt;
-} clist_t;
-
-static void initCList(clist_t * clist)
-{
-    clist->cl = 0;
-    clist->sz = 0;
-    clist->cnt = 0;
-}
-
-/* addCluster:
- * Append a new cluster to the list.
- * NOTE: cl[0] is empty. The clusters are in cl[1..cnt].
- * Normally, we increase the array when cnt == sz.
- * The test for cnt > sz is necessary for the first time.
- */
-static void addCluster(clist_t * clist, graph_t * subg)
-{
-    clist->cnt++;
-    if (clist->cnt >= clist->sz) {
-	clist->sz += CL_CHUNK;
-	clist->cl = RALLOC(clist->sz, clist->cl, graph_t *);
-    }
-    clist->cl[clist->cnt] = subg;
-}
+DEFINE_LIST(clist, graph_t*)
 
 #define BSZ 1000
 
 /* portName:
  * Generate a name for a port.
- * We use the name of the subgraph and names of the nodes on the edge,
- * if possible. Otherwise, we use the ids of the nodes.
+ * We use the ids of the nodes.
  * This is for debugging. For production, just use edge id and some
  * id for the graph. Note that all the graphs are subgraphs of the
  * root graph.
@@ -322,15 +290,9 @@ static char *portName(graph_t * g, bport_t * p)
     node_t *h = aghead(e);
     node_t *t = agtail(e);
     static char buf[BSZ + 1];
-    int len = 8;
 
-    len += strlen(agnameof(g)) + strlen(agnameof(h)) + strlen(agnameof(t));
-    if (len >= BSZ)
-	sprintf(buf, "_port_%s_%s_%s_%ld", agnameof(g), agnameof(t), agnameof(h),
-		(uint64_t)AGSEQ(e));
-    else
-	sprintf(buf, "_port_%s_(%d)_(%d)_%ld",agnameof(g), ND_id(t), ND_id(h),
-		(uint64_t)AGSEQ(e));
+	snprintf(buf, sizeof(buf), "_port_%s_(%d)_(%d)_%u",agnameof(g),
+		ND_id(t), ND_id(h), AGSEQ(e));
     return buf;
 }
 
@@ -356,7 +318,7 @@ static void chkPos(graph_t* g, node_t* n, layout_info* infop, boxf* bbp)
 	if (g != infop->rootg) {
 	    parent =agparent(g);
 	    pp = agxget(parent, G_coord);
-	    if ((pp == p) || !strcmp(p, pp))
+	    if (!strcmp(p, pp))
 		return;
 	}
 	c = '\0';
@@ -376,7 +338,7 @@ static void chkPos(graph_t* g, node_t* n, layout_info* infop, boxf* bbp)
 		ND_pinned(n) = P_SET;
 	    *bbp = bb;
 	} else
-	    agerr(AGWARN, "graph %s, coord %s, expected four doubles\n",
+	    agwarningf("graph %s, coord %s, expected four doubles\n",
 		  agnameof(g), p);
     }
 }
@@ -390,8 +352,8 @@ static void addEdge(edge_t * de, edge_t * e)
     short cnt = ED_count(de);
     edge_t **el;
 
-    el = (edge_t **) (ED_to_virt(de));
-    el = ALLOC(cnt + 1, el, edge_t *);
+    el = (edge_t**)ED_to_virt(de);
+    el = gv_recalloc(el, cnt, cnt + 1, sizeof(edge_t*));
     el[cnt] = e;
     ED_to_virt(de) = (edge_t *) el;
     ED_count(de)++;
@@ -428,23 +390,22 @@ static graph_t *deriveGraph(graph_t * g, layout_info * infop)
     graph_t *dg;
     node_t *dn;
     graph_t *subg;
-    char name[100];
     bport_t *pp;
     node_t *n;
     edge_t *de;
     int i, id = 0;
 
-    sprintf(name, "_dg_%d", infop->gid++);
     if (Verbose >= 2)
-	fprintf(stderr, "derive graph %s of %s\n", name, agnameof(g));
+	fprintf(stderr, "derive graph _dg_%d of %s\n", infop->gid, agnameof(g));
+    infop->gid++;
 
-    dg = agopen("derived", Agstrictdirected,NIL(Agdisc_t *));
-    agbindrec(dg, "Agraphinfo_t", sizeof(Agraphinfo_t), TRUE);
-    GD_alg(dg) = (void *) NEW(gdata);	/* freed in freeDeriveGraph */
+    dg = agopen("derived", Agstrictdirected,NULL);
+    agbindrec(dg, "Agraphinfo_t", sizeof(Agraphinfo_t), true);
+    GD_alg(dg) = gv_alloc(sizeof(gdata)); // freed in freeDeriveGraph
 #ifdef DEBUG
     GORIG(dg) = g;
 #endif
-    GD_ndim(dg) = GD_ndim(g);
+    GD_ndim(dg) = GD_ndim(agroot(g));
 
     /* Copy attributes from g.
      */
@@ -465,20 +426,6 @@ static graph_t *deriveGraph(graph_t * g, layout_info * infop)
 		chkPos(subg, dn, infop, &fix_bb);
 	for (n = agfstnode(subg); n; n = agnxtnode(subg, n)) {
 	    DNODE(n) = dn;
-#ifdef UNIMPLEMENTED
-/* This code starts the implementation of supporting pinned nodes
- * within clusters. This needs more work. In particular, we may need
- * a separate notion of pinning related to contained nodes, which will
- * allow the cluster itself to wiggle.
- */
-	    if (ND_pinned(n)) {
-		fix_bb.LL.x = MIN(fix_bb.LL.x, ND_pos(n)[0]);
-		fix_bb.LL.y = MIN(fix_bb.LL.y, ND_pos(n)[1]);
-		fix_bb.UR.x = MAX(fix_bb.UR.x, ND_pos(n)[0]);
-		fix_bb.UR.y = MAX(fix_bb.UR.y, ND_pos(n)[1]);
-		ND_pinned(dn) = MAX(ND_pinned(dn), ND_pinned(n));
-	    }
-#endif
 	}
 	if (ND_pinned(dn)) {
 	    ND_pos(dn)[0] = (fix_bb.LL.x + fix_bb.UR.x) / 2;
@@ -489,9 +436,9 @@ static graph_t *deriveGraph(graph_t * g, layout_info * infop)
     /* create derived nodes from remaining nodes */
     for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
 	if (!DNODE(n)) {
-	    if (PARENT(n) && (PARENT(n) != GPARENT(g))) {
-		agerr (AGERR, "node \"%s\" is contained in two non-comparable clusters \"%s\" and \"%s\"\n", agnameof(n), agnameof(g), agnameof(PARENT(n)));
-		longjmp (jbuf, 1);
+	    if (PARENT(n) && PARENT(n) != GPARENT(g)) {
+		agerrorf("node \"%s\" is contained in two non-comparable clusters \"%s\" and \"%s\"\n", agnameof(n), agnameof(g), agnameof(PARENT(n)));
+		return NULL;
 	    }
 	    PARENT(n) = g;
 	    if (IS_CLUST_NODE(n))
@@ -528,7 +475,7 @@ static graph_t *deriveGraph(graph_t * g, layout_info * infop)
 		de = agedge(dg, tl, hd, NULL,1);
 	    else
 		de = agedge(dg, hd, tl, NULL,1);
-	    agbindrec(de, "Agedgeinfo_t", sizeof(Agedgeinfo_t), TRUE);
+	    agbindrec(de, "Agedgeinfo_t", sizeof(Agedgeinfo_t), true);
 	    ED_dist(de) = ED_dist(e);
 	    ED_factor(de) = ED_factor(e);
 	    /* fprintf (stderr, "edge %s -- %s\n", tl->name, hd->name); */
@@ -549,7 +496,7 @@ static graph_t *deriveGraph(graph_t * g, layout_info * infop)
 	int sz = NPORTS(g);
 
 	/* freed in freeDeriveGraph */
-	PORTS(dg) = pq = N_NEW(sz + 1, bport_t);
+	PORTS(dg) = pq = gv_calloc(sz + 1, sizeof(bport_t));
 	sz = 0;
 	while (pp->e) {
 	    m = DNODE(pp->n);
@@ -562,7 +509,7 @@ static graph_t *deriveGraph(graph_t * g, layout_info * infop)
 		    de = agedge(dg, m, dn, NULL,1);
 		else
 		    de = agedge(dg, dn, m, NULL,1);
-		agbindrec(de, "Agedgeinfo_t", sizeof(Agedgeinfo_t), TRUE);
+		agbindrec(de, "Agedgeinfo_t", sizeof(Agedgeinfo_t), true);
 		ED_dist(de) = ED_dist(pp->e);
 		ED_factor(de) = ED_factor(pp->e);
 		addEdge(de, pp->e);
@@ -588,8 +535,8 @@ static graph_t *deriveGraph(graph_t * g, layout_info * infop)
  */
 static int ecmp(const void *v1, const void *v2)
 {
-    erec *e1 = (erec *) v1;
-    erec *e2 = (erec *) v2;
+    const erec *e1 = v1;
+    const erec *e2 = v2;
     if (e1->alpha > e2->alpha)
 	return 1;
     else if (e1->alpha < e2->alpha)
@@ -611,7 +558,6 @@ static int ecmp(const void *v1, const void *v2)
  */
 static erec *getEdgeList(node_t * n, graph_t * g)
 {
-    erec *erecs;
     int deg = DEG(n);
     int i;
     double dx, dy;
@@ -619,7 +565,7 @@ static erec *getEdgeList(node_t * n, graph_t * g)
     node_t *m;
 
     /* freed in expandCluster */
-    erecs = N_NEW(deg + 1, erec);
+    erec *erecs = gv_calloc(deg + 1, sizeof(erec));
     i = 0;
     for (e = agfstedge(g, n); e; e = agnxtedge(g, e, n)) {
 	if (aghead(e) == n)
@@ -645,7 +591,7 @@ static erec *getEdgeList(node_t * n, graph_t * g)
 	while (i < deg - 1) {
 	    a = erecs[i].alpha;
 	    j = i + 1;
-	    while ((j < deg) && (erecs[j].alpha == a))
+	    while (j < deg && erecs[j].alpha == a)
 		j++;
 	    if (j == i + 1)
 		i = j;
@@ -654,9 +600,7 @@ static erec *getEdgeList(node_t * n, graph_t * g)
 		    bnd = M_PI;	/* all values equal up to end */
 		else
 		    bnd = erecs[j].alpha;
-		delta = (bnd - a) / (j - i);
-		if (delta > ANG)
-		    delta = ANG;
+		delta = fmin((bnd - a) / (j - i), ANG);
 		inc = 0;
 		for (; i < j; i++) {
 		    erecs[i].alpha += inc;
@@ -695,10 +639,8 @@ genPorts(node_t * n, erec * er, bport_t * pp, int idx, double bnd)
     else
 	other = aghead(e);
 
-    delta = (bnd - er->alpha) / cnt;
+    delta = fmin((bnd - er->alpha) / cnt, ANG);
     angle = er->alpha;
-    if (delta > ANG)
-	delta = ANG;
 
     if (n < other) {
 	i = idx;
@@ -710,11 +652,11 @@ genPorts(node_t * n, erec * er, bport_t * pp, int idx, double bnd)
 	delta = -delta;
     }
 
-    ep = (edge_t **) (el = ED_to_virt(e));
+    ep = (edge_t **)ED_to_virt(e);
     for (j = 0; j < ED_count(e); j++, ep++) {
 	el = *ep;
 	pp[i].e = el;
-	pp[i].n = (DNODE(agtail(el)) == n ? agtail(el) : aghead(el));
+	pp[i].n = DNODE(agtail(el)) == n ? agtail(el) : aghead(el);
 	pp[i].alpha = angle;
 	i += inc;
 	angle += delta;
@@ -735,14 +677,13 @@ static graph_t *expandCluster(node_t * n, graph_t * cg)
     erec *ep;
     erec *next;
     graph_t *sg = ND_clust(n);
-    bport_t *pp;
     int sz = WDEG(n);
     int idx = 0;
     double bnd;
 
     if (sz != 0) {
 	/* freed in cleanup_subgs */
-	pp = N_NEW(sz + 1, bport_t);
+	bport_t *pp = gv_calloc(sz + 1, sizeof(bport_t));
 
 	/* create sorted list of edges of n */
 	es = ep = getEdgeList(n, cg);
@@ -811,6 +752,9 @@ setClustNodes(graph_t* root)
 	ND_pos(n)[1] = ctr.y;
 	ND_width(n) = w;
 	ND_height(n) = h;
+	const double penwidth = late_int(n, N_penwidth, DEFAULT_NODEPENWIDTH, MIN_NODEPENWIDTH);
+	ND_outline_width(n) = w + penwidth;
+	ND_outline_height(n) = h + penwidth;
 	/* ND_xsize(n) = POINTS(w); */
 	ND_lw(n) = ND_rw(n) = w2;
 	ND_ht(n) = h_pts;
@@ -824,6 +768,16 @@ setClustNodes(graph_t* root)
 	vertices[2].y = -h2;
 	vertices[3].x = ND_rw(n);
 	vertices[3].y = -h2;
+	// allocate extra vertices representing the outline, i.e., the outermost
+	// periphery with penwidth taken into account
+	vertices[4].x = ND_rw(n) + penwidth / 2;
+	vertices[4].y = h2 + penwidth / 2;
+	vertices[5].x = -ND_lw(n) - penwidth / 2;
+	vertices[5].y = h2 + penwidth / 2;
+	vertices[6].x = -ND_lw(n) - penwidth / 2;
+	vertices[6].y = -h2 - penwidth / 2;
+	vertices[7].x = ND_rw(n) + penwidth / 2;
+	vertices[7].y = -h2 - penwidth / 2;
     }
 }
 
@@ -854,8 +808,7 @@ setClustNodes(graph_t* root)
  * Add edges per components to get better packing, rather than
  * wait until the end.
  */
-static 
-void layout(graph_t * g, layout_info * infop)
+static int layout(graph_t * g, layout_info * infop)
 {
     point *pts = NULL;
     graph_t *dg;
@@ -865,7 +818,6 @@ void layout(graph_t * g, layout_info * infop)
     graph_t *sg;
     graph_t **cc;
     graph_t **pg;
-    int c_cnt;
     int pinned;
     xparams xpms;
 
@@ -883,6 +835,10 @@ void layout(graph_t * g, layout_info * infop)
 	DNODE(n) = 0;
 
     dg = deriveGraph(g, infop);
+    if (dg == NULL) {
+	return -1;
+    }
+    size_t c_cnt;
     cc = pg = findCComp(dg, &c_cnt, &pinned);
 
     while ((cg = *pg++)) {
@@ -893,8 +849,10 @@ void layout(graph_t * g, layout_info * infop)
 	    if (ND_clust(n)) {
 		pointf pt;
 		sg = expandCluster(n, cg);	/* attach ports to sg */
-		layout(sg, infop);
-		/* bb.LL == origin */
+		int r = layout(sg, infop);
+		if (r != 0) {
+                    return r;
+		}
 		ND_width(n) = BB(sg).UR.x;
 		ND_height(n) = BB(sg).UR.y;
 		pt.x = POINTS_PER_INCH * BB(sg).UR.x;
@@ -911,8 +869,6 @@ void layout(graph_t * g, layout_info * infop)
 		normalize (cg);
 	    fdp_xLayout(cg, &xpms);
 	}
-	/* set bounding box but don't use ports */
-	/* setBB (cg); */
     }
 
     /* At this point, each connected component has its nodes correctly
@@ -926,16 +882,15 @@ void layout(graph_t * g, layout_info * infop)
      * How to combine parts, especially with disparate components?
      */
     if (c_cnt > 1) {
-	boolean *bp;
+	bool *bp;
 	if (pinned) {
-	    bp = N_NEW(c_cnt, boolean);
-	    bp[0] = TRUE;
+	    bp = gv_calloc(c_cnt, sizeof(bool));
+	    bp[0] = true;
 	} else
-	    bp = 0;
+	    bp = NULL;
 	infop->pack.fixed = bp;
 	pts = putGraphs(c_cnt, cc, NULL, &infop->pack);
-	if (bp)
-	    free(bp);
+	free(bp);
     } else {
 	pts = NULL;
 	if (c_cnt == 1)
@@ -963,7 +918,7 @@ void layout(graph_t * g, layout_info * infop)
     BB(g) = BB(dg);
 #ifdef DEBUG
     if (g == infop->rootg)
-	dump(g, 1, 0);
+	dump(g, 1);
 #endif
 
     /* clean up temp graphs */
@@ -978,6 +933,8 @@ void layout(graph_t * g, layout_info * infop)
 #ifdef DEBUG
     decInd();
 #endif
+
+    return 0;
 }
 
 /* setBB;
@@ -1009,7 +966,7 @@ static void init_info(graph_t * g, layout_info * infop)
     infop->G_height = agattr(g, AGRAPH, "height", NULL);
     infop->rootg = g;
     infop->gid = 0;
-    infop->pack.mode = getPackInfo(g, l_node, CL_OFFSET / 2, &(infop->pack));
+    infop->pack.mode = getPackInfo(g, l_node, CL_OFFSET / 2, &infop->pack);
 }
 
 /* mkClusters:
@@ -1023,25 +980,26 @@ static void
 mkClusters (graph_t * g, clist_t* pclist, graph_t* parent)
 {
     graph_t* subg;
-    clist_t  list;
+    clist_t  list = {0};
     clist_t* clist;
 
     if (pclist == NULL) {
+	// [0] is empty. The clusters are in [1..cnt].
+	clist_append(&list, NULL);
 	clist = &list;
-	initCList(clist);
     }
     else
 	clist = pclist;
 
     for (subg = agfstsubg(g); subg; subg = agnxtsubg(subg))
 	{
-	if (!strncmp(agnameof(subg), "cluster", 7)) {
-	    agbindrec(subg, "Agraphinfo_t", sizeof(Agraphinfo_t), TRUE);
-	    GD_alg(subg) = (void *) NEW(gdata);	/* freed in cleanup_subgs */
-	    GD_ndim(subg) = GD_ndim(parent);
+	if (startswith(agnameof(subg), "cluster")) {
+	    agbindrec(subg, "Agraphinfo_t", sizeof(Agraphinfo_t), true);
+	    GD_alg(subg) = gv_alloc(sizeof(gdata)); // freed in cleanup_subgs
+	    GD_ndim(subg) = GD_ndim(agroot(parent));
 	    LEVEL(subg) = LEVEL(parent) + 1;
 	    GPARENT(subg) = parent;
-	    addCluster(clist, subg);
+	    clist_append(clist, subg);
 	    mkClusters(subg, NULL, subg);
 	}
 	else {
@@ -1049,30 +1007,38 @@ mkClusters (graph_t * g, clist_t* pclist, graph_t* parent)
 	}
     }
     if (pclist == NULL) {
-	GD_n_cluster(g) = list.cnt;
-	if (list.cnt)
-	    GD_clust(g) = RALLOC(list.cnt + 1, list.cl, graph_t*);
+	assert(clist_size(&list) - 1 <= INT_MAX);
+	GD_n_cluster(g) = (int)(clist_size(&list) - 1);
+	if (clist_size(&list) > 1) {
+	    clist_shrink_to_fit(&list);
+	    GD_clust(g) = clist_detach(&list);
+	} else {
+	    clist_free(&list);
+	}
     }
 }
 
 static void fdp_init_graph(Agraph_t * g)
 {
-    setEdgeType (g, ET_LINE);
-    GD_alg(g) = (void *) NEW(gdata);	/* freed in cleanup_graph */
-    GD_ndim(g) = late_int(g, agattr(g,AGRAPH, "dim", NULL), 2, 2);
-    Ndim = GD_ndim(g) = MIN(GD_ndim(g), MAXDIM);
+    setEdgeType (g, EDGETYPE_LINE);
+    GD_alg(g) = gv_alloc(sizeof(gdata)); // freed in cleanup_graph
+    GD_ndim(agroot(g)) = late_int(g, agattr(g,AGRAPH, "dim", NULL), 2, 2);
+    Ndim = GD_ndim(agroot(g)) = MIN(GD_ndim(agroot(g)), MAXDIM);
 
     mkClusters (g, NULL, g);
     fdp_initParams(g);
     fdp_init_node_edge(g);
 }
 
-static void fdpLayout(graph_t * g)
+static int fdpLayout(graph_t * g)
 {
     layout_info info;
 
     init_info(g, &info);
-    layout(g, &info);
+    int r = layout(g, &info);
+    if (r != 0) {
+        return r;
+    }
     setClustNodes(g);
     evalPositions(g,g);
 
@@ -1081,6 +1047,8 @@ static void fdpLayout(graph_t * g)
      * On return from spline drawing, all bounding boxes should be correct.
      */
     setBB(g);
+
+    return 0;
 }
 
 static void
@@ -1089,18 +1057,18 @@ fdpSplines (graph_t * g)
     int trySplines = 0;
     int et = EDGE_TYPE(g);
 
-    if (et > ET_ORTHO) {
-	if (et == ET_COMPOUND) {
-	    trySplines = splineEdges(g, compoundEdges, ET_SPLINE);
+    if (et > EDGETYPE_ORTHO) {
+	if (et == EDGETYPE_COMPOUND) {
+	    trySplines = splineEdges(g, compoundEdges, EDGETYPE_SPLINE);
 	    /* When doing the edges again, accept edges done by compoundEdges */
 	    if (trySplines)
 		Nop = 2;
 	}
-	if (trySplines || (et != ET_COMPOUND)) {
+	if (trySplines || et != EDGETYPE_COMPOUND) {
 	    if (HAS_CLUST_EDGE(g)) {
-		agerr(AGWARN,
+		agwarningf(
 		      "splines and cluster edges not supported - using line segments\n");
-		et = ET_LINE;
+		et = EDGETYPE_LINE;
 	    } else {
 		spline_edges1(g, et);
 	    }
@@ -1113,24 +1081,16 @@ fdpSplines (graph_t * g)
 
 void fdp_layout(graph_t * g)
 {
-    /* Agnode_t* n; */
-
     double save_scale = PSinputscale;
         
     PSinputscale = get_inputscale (g);
     fdp_init_graph(g);
-    if (setjmp(jbuf)) {
+    if (fdpLayout(g) != 0) {
 	return;
     }
-    fdpLayout(g);
-#if 0
-    /* free ND_alg field so it can be used in spline routing */
-    if ((n = agfstnode(g)))
-	free(ND_alg(n));
-#endif
     neato_set_aspect(g);
 
-    if (EDGE_TYPE(g) != ET_NONE) fdpSplines (g); 
+    if (EDGE_TYPE(g) != EDGETYPE_NONE) fdpSplines (g);
 
     gv_postprocess(g, 0);
     PSinputscale = save_scale;

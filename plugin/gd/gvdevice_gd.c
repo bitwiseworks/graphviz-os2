@@ -1,34 +1,36 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
+#include "gdioctx_wrapper.h"
 
-#include "gvplugin_device.h"
-#include "gvio.h"
+#include <gvc/gvplugin_device.h>
+#include <gvc/gvio.h>
 
-#include "gd.h"
+#include <gd.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 int gvdevice_gd_putBuf (gdIOCtx *context, const void *buffer, int len)
 {
-    return gvwrite((GVJ_t *)(context->tell), buffer, len);
+    gd_context_t *gd_context = get_containing_context(context);
+    return gvwrite(gd_context->job, buffer, len);
 }
 
 /* used by gif output */
 void gvdevice_gd_putC (gdIOCtx *context, int C)
 {
+    gd_context_t *gd_context = get_containing_context(context);
     char c = C;
 
-    gvwrite((GVJ_t *)(context->tell), &c, 1);
+    gvwrite(gd_context->job, &c, 1);
 }
 
 #ifdef HAVE_PANGOCAIRO
@@ -46,14 +48,14 @@ static void gd_format(GVJ_t * job)
 {
     gdImagePtr im;
     unsigned int x, y, color, alpha;
-    unsigned int *data = (unsigned int*)(job->imagedata);
+    unsigned int *data = (unsigned int*)job->imagedata;
     unsigned int width = job->width;
     unsigned int height = job->height;
-    gdIOCtx ctx;
+    gd_context_t gd_context = {{0}};
 
-    ctx.putBuf = gvdevice_gd_putBuf;
-    ctx.putC = gvdevice_gd_putC;
-    ctx.tell = (void*)job;    /* hide *job here */
+    gd_context.ctx.putBuf = gvdevice_gd_putBuf;
+    gd_context.ctx.putC = gvdevice_gd_putC;
+    gd_context.job = job;
 
     im = gdImageCreateTrueColor(width, height);
     switch (job->device.id) {
@@ -75,7 +77,7 @@ static void gd_format(GVJ_t * job)
 #define TRANSPARENT 0x7ffffffe
 
         gdImageColorTransparent(im, TRANSPARENT);
-        gdImageAlphaBlending(im, FALSE);
+        gdImageAlphaBlending(im, false);
         for (y = 0; y < height; y++) {
             for (x = 0; x < width; x++) {
                 color = *data++;
@@ -95,7 +97,7 @@ static void gd_format(GVJ_t * job)
 #ifdef HAVE_GD_GIF
     case FORMAT_GIF:
 	gdImageTrueColorToPalette(im, 0, 256);
-	gdImageGifCtx(im, &ctx);
+	gdImageGifCtx(im, &gd_context.ctx);
         break;
 #endif
 
@@ -111,14 +113,14 @@ static void gd_format(GVJ_t * job)
 	 * library documentation for more details.
 	 */ 
 #define JPEG_QUALITY -1
-	gdImageJpegCtx(im, &ctx, JPEG_QUALITY);
+	gdImageJpegCtx(im, &gd_context.ctx, JPEG_QUALITY);
 	break;
 #endif
 
 #ifdef HAVE_GD_PNG
     case FORMAT_PNG:
         gdImageTrueColorToPalette(im, 0, 256);
-	gdImagePngCtx(im, &ctx);
+	gdImagePngCtx(im, &gd_context.ctx);
         break;
 #endif
 
@@ -138,18 +140,11 @@ static void gd_format(GVJ_t * job)
 	{
 	    /* Use black for the foreground color for the B&W wbmp image. */
             int black = gdImageColorResolveAlpha(im, 0, 0, 0, gdAlphaOpaque);
-	    gdImageWBMPCtx(im, black, &ctx);
+	    gdImageWBMPCtx(im, black, &gd_context.ctx);
 	}
 	break;
 #endif
 
-#if 0
-/* libgd only supports reading of xpm files */
-#ifdef HAVE_GD_XPM
-    case FORMAT_XBM:
-	gdImageXbm(im, job->output_file);
-#endif
-#endif
 	break;
     default:
 	break;
@@ -202,13 +197,6 @@ gvplugin_installed_t gvdevice_gd_types[] = {
 
     {FORMAT_GD, "gd:cairo", 5, &gd_engine, &device_features_gd_no_writer},
     {FORMAT_GD2, "gd2:cairo", 5, &gd_engine, &device_features_gd_no_writer},
-
-#if 0
-/* libgd only supports reading of xpm files */
-#ifdef HAVE_GD_XPM
-    {FORMAT_XBM, "xbm:cairo", 5, &gd_engine, &device_features_gd},
-#endif
-#endif
 
 #endif
     {0, NULL, 0, NULL, NULL}

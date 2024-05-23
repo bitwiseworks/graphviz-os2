@@ -1,27 +1,25 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include	"dot.h"
-
+#include	<cgraph/alloc.h>
+#include	<dotgen/dot.h>
+#include	<stdbool.h>
+#include	<stddef.h>
 
 static node_t *make_vn_slot(graph_t * g, int r, int pos)
 {
     int i;
     node_t **v, *n;
 
-    v = GD_rank(g)[r].v =
-	ALLOC(GD_rank(g)[r].n + 2, GD_rank(g)[r].v, node_t *);
+    v = GD_rank(g)[r].v = gv_recalloc(GD_rank(g)[r].v, GD_rank(g)[r].n + 1,
+                                      GD_rank(g)[r].n + 2, sizeof(node_t *));
     for (i = GD_rank(g)[r].n; i > pos; i--) {
 	v[i] = v[i - 1];
 	ND_order(v[i])++;
@@ -78,21 +76,21 @@ static void setbounds(node_t * v, int *bounds, int lpos, int rpos)
 		    bounds[SRB] = ord;
 	    }
 	} else {		/* forward */
-	    boolean onleft, onright;
-	    onleft = onright = FALSE;
+	    bool onleft, onright;
+	    onleft = onright = false;
 	    for (i = 0; (f = ND_out(v).list[i]); i++) {
 		if (ND_order(aghead(f)) <= lpos) {
-		    onleft = TRUE;
+		    onleft = true;
 		    continue;
 		}
 		if (ND_order(aghead(f)) >= rpos) {
-		    onright = TRUE;
+		    onright = true;
 		    continue;
 		}
 	    }
-	    if (onleft && (onright == FALSE))
+	    if (onleft && !onright)
 		bounds[HLB] = ord + 1;
-	    if (onright && (onleft == FALSE))
+	    if (onright && !onleft)
 		bounds[HRB] = ord - 1;
 	}
     }
@@ -135,7 +133,8 @@ static int flat_limits(graph_t * g, edge_t * e)
 static void 
 flat_node(edge_t * e)
 {
-    int r, place, ypos, h2;
+    int r, place;
+    double ypos, h2;
     graph_t *g;
     node_t *n, *vn;
     edge_t *ve;
@@ -185,17 +184,17 @@ flat_node(edge_t * e)
 static void abomination(graph_t * g)
 {
     int r;
-    rank_t *rptr;
 
     assert(GD_minrank(g) == 0);
     /* 3 = one for new rank, one for sentinel, one for off-by-one */
     r = GD_maxrank(g) + 3;
-    rptr = ALLOC(r, GD_rank(g), rank_t);
+    rank_t *rptr = gv_recalloc(GD_rank(g), GD_maxrank(g) + 1, r,
+                               sizeof(rank_t));
     GD_rank(g) = rptr + 1;
     for (r = GD_maxrank(g); r >= 0; r--)
 	GD_rank(g)[r] = GD_rank(g)[r - 1];
     GD_rank(g)[r].n = GD_rank(g)[r].an = 0;
-    GD_rank(g)[r].v = GD_rank(g)[r].av = N_NEW(2, node_t *);
+    GD_rank(g)[r].v = GD_rank(g)[r].av = gv_calloc(2, sizeof(node_t *));
     GD_rank(g)[r].flat = NULL;
     GD_rank(g)[r].ht1 = GD_rank(g)[r].ht2 = 1;
     GD_rank(g)[r].pht1 = GD_rank(g)[r].pht2 = 1;
@@ -259,18 +258,18 @@ checkFlatAdjacent (edge_t* e)
 int 
 flat_edges(graph_t * g)
 {
-    int i, j, reset = FALSE;
+    int i;
+    bool reset = false;
     node_t *n;
     edge_t *e;
-    int found = FALSE;
 
     for (n = GD_nlist(g); n; n = ND_next(n)) {
 	if (ND_flat_out(n).list) {
-	    for (j = 0; (e = ND_flat_out(n).list[j]); j++) {
+	    for (size_t j = 0; (e = ND_flat_out(n).list[j]); j++) {
 		checkFlatAdjacent (e);
 	    }
 	}
-	for (j = 0; j < ND_other(n).size; j++) {
+	for (size_t j = 0; j < ND_other(n).size; j++) {
 	    e = ND_other(n).list[j];
 	    if (ND_rank(aghead(e)) == ND_rank(agtail(e)))
 		checkFlatAdjacent (e);
@@ -278,11 +277,12 @@ flat_edges(graph_t * g)
     }
 
     if ((GD_rank(g)[0].flat) || (GD_n_cluster(g) > 0)) {
+	bool found = false;
 	for (i = 0; (n = GD_rank(g)[0].v[i]); i++) {
-	    for (j = 0; (e = ND_flat_in(n).list[j]); j++) {
+	    for (size_t j = 0; (e = ND_flat_in(n).list[j]); j++) {
 		if ((ED_label(e)) && !ED_adjacent(e)) {
 		    abomination(g);
-		    found = TRUE;
+		    found = true;
 		    break;
 		}
 	    }
@@ -302,13 +302,13 @@ flat_edges(graph_t * g)
 			else ED_dist(e) = ED_label(e)->dimen.x; 
 		    }
 		    else {
-			reset = TRUE;
+			reset = true;
 			flat_node(e);
 		    }
 		}
 	    }
 		/* look for other flat edges with labels */
-	    for (j = 0; j < ND_other(n).size; j++) {
+	    for (size_t j = 0; j < ND_other(n).size; j++) {
 		edge_t* le;
 		e = ND_other(n).list[j];
 		if (ND_rank(agtail(e)) != ND_rank(aghead(e))) continue;
@@ -324,7 +324,7 @@ flat_edges(graph_t * g)
 			ED_dist(le) = MAX(lw,ED_dist(le));
 		    }
 		    else {
-			reset = TRUE;
+			reset = true;
 			flat_node(e);
 		    }
 		}

@@ -1,18 +1,16 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
@@ -21,9 +19,9 @@
 #include <cairo.h>
 #endif
 
-#include "gvplugin_loadimage.h"
-#include "gvio.h"
-#include "gd.h"
+#include <gvc/gvplugin_loadimage.h>
+#include <gvc/gvio.h>
+#include <gd.h>
 
 typedef enum {
     FORMAT_PNG_GD, FORMAT_GIF_GD, FORMAT_JPG_GD, FORMAT_GD_GD, FORMAT_GD2_GD, FORMAT_XPM_GD, FORMAT_WBMP_GD, FORMAT_XBM_GD,
@@ -34,7 +32,7 @@ typedef enum {
 
 static void gd_freeimage(usershape_t *us)
 {
-    gdImageDestroy((gdImagePtr)us->data);
+    gdImageDestroy(us->data);
 }
 
 static gdImagePtr gd_loadimage(GVJ_t * job, usershape_t *us)
@@ -54,40 +52,20 @@ static gdImagePtr gd_loadimage(GVJ_t * job, usershape_t *us)
 	if (!gvusershape_file_access(us))
 	    return NULL;
 	switch (us->type) {
-#if 0
-	    case FT_GD:
-		im = gdImageCreateFromGd(us->f);
-		break;
-	    case FT_GD2:
-		im = gdImageCreateFromGd2(us->f);
-		break;
-#endif
 #ifdef HAVE_GD_PNG
 	    case FT_PNG:
-		us->data = (void*)gdImageCreateFromPng(us->f);
+		us->data = gdImageCreateFromPng(us->f);
 		break;
 #endif
 #ifdef HAVE_GD_GIF
 	    case FT_GIF:
-		us->data = (void*)gdImageCreateFromGif(us->f);
+		us->data = gdImageCreateFromGif(us->f);
 		break;
 #endif
 #ifdef HAVE_GD_JPEG
 	    case FT_JPEG:
-		us->data = (void*)gdImageCreateFromJpeg(us->f);
+		us->data = gdImageCreateFromJpeg(us->f);
 		break;
-#endif
-#if 0
-#ifdef HAVE_GD_XPM
-	    case FT_XPM:
-		us->data = (void*)gdImageCreateFromXpm(us->f);
-		break;
-#endif
-#ifdef HAVE_GD_WBMP
-	    case FT_WBMP:
-		us->data = (void*)gdImageCreateFromWbmp(us->f);
-		break;
-#endif
 #endif
 	    default:
 		break;
@@ -97,7 +75,7 @@ static gdImagePtr gd_loadimage(GVJ_t * job, usershape_t *us)
 
 	gvusershape_file_release(us);
     }
-    return (gdImagePtr)(us->data);
+    return us->data;
 }
 
 static gdImagePtr gd_rotateimage(gdImagePtr im, int rotation)
@@ -110,9 +88,11 @@ static gdImagePtr gd_rotateimage(gdImagePtr im, int rotation)
     return im2;
 }
 	
-static void gd_loadimage_gd(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void gd_loadimage_gd(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
-    gdImagePtr im2, im = (gdImagePtr) job->context;
+    (void)filled;
+
+    gdImagePtr im2, im = job->context;
 
     if ((im2 = gd_loadimage(job, us))) {
         if (job->rotation)
@@ -123,10 +103,13 @@ static void gd_loadimage_gd(GVJ_t * job, usershape_t *us, boxf b, boolean filled
 }
 
 #ifdef HAVE_PANGOCAIRO
-static void gd_loadimage_cairo(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void gd_loadimage_cairo(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
-    cairo_t *cr = (cairo_t *) job->context; /* target context */
-    unsigned int x, y, stride, width, height, px;
+    (void)filled;
+
+    cairo_t *cr = job->context; /* target context */
+    int x, y, stride, width, height;
+    unsigned px;
     unsigned char *data;
     cairo_surface_t *surface;    /* source surface */
     gdImagePtr im;
@@ -189,8 +172,10 @@ static void gd_loadimage_cairo(GVJ_t * job, usershape_t *us, boxf b, boolean fil
 }
 #endif
 
-static void gd_loadimage_ps(GVJ_t * job, usershape_t *us, boxf b, boolean filled)
+static void gd_loadimage_ps(GVJ_t * job, usershape_t *us, boxf b, bool filled)
 {
+    (void)filled;
+
     gdImagePtr im = NULL;
     int X, Y, x, y, px;
 

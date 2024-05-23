@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=4: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #ifdef __cplusplus
@@ -30,21 +27,23 @@ extern "C" {
 #define _EXPARSE_H
 #endif
 
-#include "exlib.h"
+#include <cgraph/agxbuf.h>
+#include <cgraph/gv_ctype.h>
+#include <expr/exlib.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#define exlex()		extoken_fn(expr.program)
+#define ex_lex()		extoken_fn(expr.program)
 
-#define ALLOCATE(p,x)	(x*)exalloc(p,sizeof(x))
-#define QUALIFY(r,s)	((r)&&(expr.program->disc->flags&EX_QUALIFY)?qualify(r,s):(s))
+#define ALLOCATE(p,x)	exalloc(p,sizeof(x))
 
 static int		a2t[] = { 0, FLOATING, INTEGER, STRING };
 static Switch_t		swstate;
 
 Exstate_t		expr;
 
-static int T(int t) 
-{
+static int T(long t) {
 	if (expr.program->disc->types)
 	    return expr.program->disc->types[t & TMASK];
 	else
@@ -55,17 +54,16 @@ static int T(int t)
  * allocate and initialize a new expression node in the current program
  */
 
-Exnode_t*
-exnewnode(Expr_t* p, int op, int binary, int type, Exnode_t* left, Exnode_t* right)
-{
-	register Exnode_t*	x;
+Exnode_t *exnewnode(Expr_t *p, int op, int binary, long type, Exnode_t *left,
+                    Exnode_t *right) {
+	Exnode_t*	x;
 
 	x = ALLOCATE(p, Exnode_t);
+	*x = (Exnode_t){0};
 	x->op = op;
 	x->type = type;
 	x->binary = binary;
-	x->local.number = 0;
-	x->local.pointer = 0;
+	x->local = NULL;
 	x->data.operand.left = left;
 	x->data.operand.right = right;
 	return x;
@@ -76,13 +74,12 @@ exnewnode(Expr_t* p, int op, int binary, int type, Exnode_t* left, Exnode_t* rig
  */
 
 void
-exfreenode(Expr_t* p, register Exnode_t* x)
+exfreenode(Expr_t* p, Exnode_t* x)
 {
-	register Print_t*	pr;
-	register Exref_t*	r;
+	Print_t*	pr;
+	Exref_t*	r;
 	Print_t*		pn;
 	Exref_t*		rn;
-	int			i;
 
 	switch (x->op)
 	{
@@ -99,25 +96,25 @@ exfreenode(Expr_t* p, register Exnode_t* x)
 	case DYNAMIC:
 		if (x->data.variable.index)
 			exfreenode(p, x->data.variable.index);
-		if (x->data.variable.symbol->local.pointer)
+		if (x->data.variable.symbol->local)
 		{
-			dtclose((Dt_t*)x->data.variable.symbol->local.pointer);
-			x->data.variable.symbol->local.pointer = 0;
+			dtclose(x->data.variable.symbol->local);
+			x->data.variable.symbol->local = NULL;
 		}
 		break;
 	case '#':
-		if (x->data.variable.symbol->local.pointer) {
-			dtclose((Dt_t *) x->data.variable.symbol->local.pointer);
-			x->data.variable.symbol->local.pointer = 0;
+		if (x->data.variable.symbol->local) {
+			dtclose(x->data.variable.symbol->local);
+			x->data.variable.symbol->local = NULL;
 		}
 		break;
 //	case IN_OP:
 	case UNSET:
 		if (x->data.variable.index)
 			exfreenode(p, x->data.variable.index);
-		if (x->data.variable.symbol->local.pointer) {
-			dtclose((Dt_t *) x->data.variable.symbol->local.pointer);
-			x->data.variable.symbol->local.pointer = 0;
+		if (x->data.variable.symbol->local) {
+			dtclose(x->data.variable.symbol->local);
+			x->data.variable.symbol->local = NULL;
 		}
 		break;
 	case ITERATE:
@@ -148,9 +145,9 @@ exfreenode(Expr_t* p, register Exnode_t* x)
 		if (x->data.split.seps)
 			exfreenode(p, x->data.split.seps);
 		exfreenode(p, x->data.split.string);
-		if (x->data.split.array->local.pointer) {
-			dtclose((Dt_t *) x->data.split.array->local.pointer);
-			x->data.split.array->local.pointer = 0;
+		if (x->data.split.array->local) {
+			dtclose(x->data.split.array->local);
+			x->data.split.array->local = NULL;
 		}
 		break;
 	case PRINT:
@@ -163,6 +160,7 @@ exfreenode(Expr_t* p, register Exnode_t* x)
 		pn = x->data.print.args;
 		while ((pr = pn))
 		{
+			size_t i;
 			for (i = 0; i < elementsof(pr->param) && pr->param[i]; i++)
 				exfreenode(p, pr->param[i]);
 			if (pr->arg)
@@ -207,7 +205,7 @@ static Exnode_t *extract(Expr_t * p, Exnode_t ** argp, int type) {
 static Exnode_t *exnewsplit(Expr_t * p, int op, Exid_t* dyn, Exnode_t * s, Exnode_t* seps) {
 	Exnode_t *ss = 0;
 
-	if (dyn->local.pointer == 0)
+	if (dyn->local == NULL)
               	exerror("cannot use non-array %s in %s", dyn->name, exopname(op));
 	if ((dyn->index_type > 0) && (dyn->index_type != INTEGER))
             exerror("in %s, array %s must have integer index type, not %s", 
@@ -221,7 +219,7 @@ static Exnode_t *exnewsplit(Expr_t * p, int op, Exid_t* dyn, Exnode_t * s, Exnod
 	if (seps && (seps->type != STRING))
             exerror("third argument to %s must have string type, not %s", 
 		exopname(op), extypename(p, seps->type));
-	ss = exnewnode(p, op, 0, INTEGER, NiL, NiL);
+	ss = exnewnode(p, op, 0, INTEGER, NULL, NULL);
 	ss->data.split.array = dyn;
 	ss->data.split.string = s;
 	ss->data.split.seps = seps;
@@ -252,7 +250,7 @@ static Exnode_t *exnewsub(Expr_t * p, Exnode_t * args, int op) {
 	    repl = 0;
 	if (args)
 	    exerror("too many arguments to sub operator");
-	ss = exnewnode(p, op, 0, STRING, NiL, NiL);
+	ss = exnewnode(p, op, 0, STRING, NULL, NULL);
 	ss->data.string.base = base;
 	ss->data.string.pat = pat;
 	ss->data.string.repl = repl;
@@ -282,7 +280,7 @@ static Exnode_t *exnewsubstr(Expr_t * p, Exnode_t * args) {
 	    repl = 0;
 	if (args)
 	    exerror("too many arguments to substr operator");
-	ss = exnewnode(p, SUBSTR, 0, STRING, NiL, NiL);
+	ss = exnewnode(p, SUBSTR, 0, STRING, NULL, NULL);
 	ss->data.string.base = base;
 	ss->data.string.pat = pat;
 	ss->data.string.repl = repl;
@@ -293,8 +291,8 @@ static Exnode_t *exnewsubstr(Expr_t * p, Exnode_t * args) {
  * Cast x to type STRING
  * Assume x->type != STRING
  */
-static Exnode_t *exstringOf(Expr_t * p, register Exnode_t * x) {
-	int type = x->type;
+static Exnode_t *exstringOf(Expr_t * p, Exnode_t * x) {
+	const long type = x->type;
 	int cvt = 0;
 
 	if (!type) {
@@ -305,7 +303,7 @@ static Exnode_t *exstringOf(Expr_t * p, register Exnode_t * x) {
 	    exerror("cannot convert %s to STRING", extypename(p, type));
 	if (x->op != CONSTANT) {
 	    if (!BUILTIN(type)) {
-		if ((*p->disc->stringof) (p, x, 1, p->disc) < 0) {
+		if (p->disc->stringof(p, x, 1) < 0) {
 		    exerror("cannot convert %s to STRING",
 			    extypename(p, type));
 		}
@@ -321,25 +319,21 @@ static Exnode_t *exstringOf(Expr_t * p, register Exnode_t * x) {
 		}
 	    x = exnewnode(p, cvt, 0, STRING, x, 0);
 	} else if (!BUILTIN(type)) {
-	    if ((*p->disc->stringof) (p, x, 0, p->disc) < 0)
+	    if (p->disc->stringof(p, x, 0) < 0)
 		exerror("cannot convert constant %s to STRING",
 			extypename(p, x->type));
 	} else
 	    switch (type) {
 	    case FLOATING:
-		sfprintf(p->tmp, "%g", x->data.constant.value.floating);
 		x->data.constant.value.string =
-		    vmstrdup(p->vm, sfstruse(p->tmp));
+		  exprintf(p->vm, "%g", x->data.constant.value.floating);
 		break;
 	    case INTEGER:
-		sfprintf(p->tmp, "%I*d",
-			 sizeof(x->data.constant.value.integer),
-			 x->data.constant.value.integer);
 		x->data.constant.value.string =
-		    vmstrdup(p->vm, sfstruse(p->tmp));
+		  exprintf(p->vm, "%lld", x->data.constant.value.integer);
 		break;
 	    default:
-		exerror("internal error: %d: unknown type", type);
+		exerror("internal error: %ld: unknown type", type);
 		break;
 	    }
 	x->type = STRING;
@@ -359,7 +353,7 @@ static Exnode_t *exprint(Expr_t * p, Exid_t * ex, Exnode_t * args) {
 		    exstringOf(p, arg->data.operand.left);
 	    arg = arg->data.operand.right;
 	}
-	pr = exnewnode(p, ex->index, 1, ex->type, args, NiL);
+	pr = exnewnode(p, ex->index, 1, ex->type, args, NULL);
 	return pr;
 }
 
@@ -374,7 +368,6 @@ static Exnode_t *exprint(Expr_t * p, Exid_t * ex, Exnode_t * args) {
 static Exnode_t *makeVar(Expr_t * prog, Exid_t * s, Exnode_t * idx,
 			     Exnode_t * dyna, Exref_t * refs) {
 	Exnode_t *nn;
-	int kind;
 	Exid_t *sym;
 
 	/* parse components */
@@ -389,12 +382,9 @@ static Exnode_t *makeVar(Expr_t * prog, Exid_t * s, Exnode_t * idx,
 	} else
 	    sym = s;
 
-	if (sym->type)
-	    kind = sym->type;
-	else
-	    kind = STRING;
+	const long kind = sym->type ? sym->type : STRING;
 
-	nn = exnewnode(prog, ID, 0, kind, NiL, NiL);
+	nn = exnewnode(prog, ID, 0, kind, NULL, NULL);
 	nn->data.variable.symbol = sym;
 	nn->data.variable.reference = refs;
 	nn->data.variable.index = 0;
@@ -402,9 +392,7 @@ static Exnode_t *makeVar(Expr_t * prog, Exid_t * s, Exnode_t * idx,
 	if (!prog->disc->getf)
 	    exerror("%s: identifier references not supported", sym->name);
 	else if (expr.program->disc->reff)
-	    (*expr.program->disc->reff) (prog, nn,
-					 nn->data.variable.symbol, refs,
-					 NiL, EX_SCALAR, prog->disc);
+	    expr.program->disc->reff(prog, nn, nn->data.variable.symbol, refs);
 
 	return nn;
 }
@@ -434,25 +422,23 @@ static int	typecast[6][6] =
 
 #define EXTERNAL(t)	((t)>=F2X)
 
-char *extypename(Expr_t * p, int type) {
+char *extypename(Expr_t *p, long type) {
 	if (BUILTIN(type))
 	    return TYPENAME(type);
-	return (p->disc->typename) (p, type);
+	return p->disc->typename(type);
 }
 
 /* exnoncast:
  * Return first non-cast node.
  */
-Exnode_t *exnoncast(register Exnode_t * x) {
+Exnode_t *exnoncast(Exnode_t * x) {
 	while (x && (x->op >= F2I) && (x->op <= X2X))
 	    x = x->data.operand.left;
 	return x;
 }
 
-Exnode_t*
-excast(Expr_t* p, register Exnode_t* x, register int type, register Exnode_t* xref, int arg)
-{
-	register int	t2t;
+Exnode_t *excast(Expr_t *p, Exnode_t *x, long type, Exnode_t *xref, int arg) {
+	int	t2t;
 	char*		s;
 	char*		e;
 
@@ -468,10 +454,9 @@ excast(Expr_t* p, register Exnode_t* x, register int type, register Exnode_t* xr
 		if (EXTERNAL(t2t) && !p->disc->convertf)
 			exerror("cannot convert %s to %s", extypename(p, x->type), extypename(p, type));
 		if (x->op != CONSTANT) {
-			Exid_t *sym = (xref ? xref->data.variable.symbol : NiL);
+			Exid_t *sym = (xref ? xref->data.variable.symbol : NULL);
 			if (EXTERNAL(t2t)) {
-				int a = (arg ? arg : 1);
-		    	if ((*p->disc->convertf) (p, x, type, sym, a, p->disc) < 0) {
+		    	if (p->disc->convertf(x, type, 1) < 0) {
 					if (xref) {
 						if ((sym->lex == FUNCTION) && arg)
 							exerror ("%s: cannot use value of type %s as argument %d in function %s",
@@ -501,25 +486,25 @@ excast(Expr_t* p, register Exnode_t* x, register int type, register Exnode_t* xr
 		case X2X:
 			if (xref && xref->op == ID)
 			{
-				if ((*p->disc->convertf)(p, x, type, xref->data.variable.symbol, arg, p->disc) < 0)
+				if (p->disc->convertf(x, type, arg) < 0)
 					exerror("%s: cannot cast constant %s to %s", xref->data.variable.symbol->name, extypename(p, x->type), extypename(p, type));
 			}
-			else if ((*p->disc->convertf)(p, x, type, NiL, arg, p->disc) < 0)
+			else if (p->disc->convertf(x, type, arg) < 0)
 				exerror("cannot cast constant %s to %s", extypename(p, x->type), extypename(p, type));
 			break;
 		case F2I:
 			x->data.constant.value.integer = x->data.constant.value.floating;
 			break;
 		case F2S:
-			sfprintf(p->tmp, "%g", x->data.constant.value.floating);
-			x->data.constant.value.string = exstash(p->tmp, p->vm);
+			x->data.constant.value.string =
+			  exprintf(p->vm, "%g", x->data.constant.value.floating);
 			break;
 		case I2F:
 			x->data.constant.value.floating = x->data.constant.value.integer;
 			break;
 		case I2S:
-			sfprintf(p->tmp, "%I*d", sizeof(x->data.constant.value.integer), x->data.constant.value.integer);
-			x->data.constant.value.string = exstash(p->tmp, p->vm);
+			x->data.constant.value.string =
+			  exprintf(p->vm, "%lld", x->data.constant.value.integer);
 			break;
 		case S2F:
 			s =  x->data.constant.value.string;
@@ -542,125 +527,22 @@ excast(Expr_t* p, register Exnode_t* x, register int type, register Exnode_t* xr
 	return x;
 }
 
-#if 0
-
-/*
- * convert value v from type from to type to
- * string data placed in buf
- */
-
-Extype_t
-exconvert(Expr_t* p, Extype_t v, int from, int to, char* buf, size_t size)
-{
-	register int	t2t;
-	int		n;
-	Exnode_t	tmp;
-
-	if (from && (t2t = TYPECAST(from, to)))
-	{
-		if (EXTERNAL(t2t) && !p->disc->convertf)
-			exerror("cannot cast %s to %s", TYPENAME(from), TYPENAME(to));
-		switch (t2t)
-		{
-		case F2X:
-		case I2X:
-		case S2X:
-		case X2F:
-		case X2I:
-		case X2S:
-			tmp.type = from;
-			tmp.name = "*INTERNAL*";
-			tmp.data.constant.value = v;
-			if ((*p->disc->convertf)(p, &tmp, to, NiL, -1, p->disc) < 0)
-				exerror("cannot convert %s to %s", TYPENAME(from), TYPENAME(to));
-			if (t2t == X2S)
-			{
-				n = strlen(tmp.data.constant.value.string);
-				if (n >= size)
-					n = size - 1;
-				memcpy(buf, tmp.data.constant.value.string, n);
-				buf[n] = 0;
-				vmfree(p->vm, tmp.data.constant.value.string);
-				tmp.data.constant.value.string = buf;
-			}
-			return tmp.data.constant.value;
-		case F2I:
-			v.integer = (type == UNSIGNED) ? (Sfulong_t)v.floating : v.floating;
-			break;
-		case F2S:
-			sfsprintf(buf, size, "%g", v.floating);
-			v.string = buf;
-			break;
-		case I2F:
-			v.floating = (from == UNSIGNED) ? (Sfulong_t)v.integer : v.integer;
-			break;
-		case I2S:
-			sfsprintf(buf, size, "%I*d", sizeof(v.integer), v.integer);
-			v.string = buf;
-			break;
-		case S2F:
-			v.floating = *v.string != 0;
-			break;
-		case S2I:
-			v.integer = *v.string != 0;
-			break;
-		default:
-			exerror("internal error: %d: unknown conversion op", t2t);
-			break;
-		}
-	}
-	return v;
-}
-
-#endif
-
-/*
- * force ref . sym qualification
- */
-
-static Exid_t*
-qualify(register Exref_t* ref, register Exid_t* sym)
-{
-	register Exid_t*	x;
-	char*			s;
-
-	while (ref->next)
-		ref = ref->next;
-	sfprintf(expr.program->tmp, "%s.%s", ref->symbol->name, sym->name);
-	s = exstash(expr.program->tmp, NiL);
-	if (!(x = (Exid_t*)dtmatch(expr.program->symbols, s)))
-	{
-		if ((x = newof(0, Exid_t, 1, strlen(s) - EX_NAMELEN + 1)))
-		{
-			memcpy(x, sym, sizeof(Exid_t) - EX_NAMELEN);
-			strcpy(x->name, s);
-			dtinsert(expr.program->symbols, x);
-		}
-		else
-		{
-			exnospace();
-			x = sym;
-		}
-	}
-	return x;
-}
-
 /*
  * check function call arg types and count
  * return function identifier node
  */
 
 static Exnode_t*
-call(Exref_t* ref, register Exid_t* fun, register Exnode_t* args)
+call(Exref_t* ref, Exid_t* fun, Exnode_t* args)
 {
-	register int	t;
-	register int	type;
+	int	t;
+	int	type;
 	Exnode_t*	x;
 	int		num;
 
-	x = exnewnode(expr.program, ID, 0, 0, NiL, NiL);
+	x = exnewnode(expr.program, ID, 0, 0, NULL, NULL);
 	t = fun->type;
-	x->data.variable.symbol = fun = QUALIFY(ref, fun);
+	x->data.variable.symbol = fun;
 	x->data.variable.reference = ref;
 	num = 0;
 	N(t);
@@ -673,7 +555,7 @@ call(Exref_t* ref, register Exid_t* fun, register Exnode_t* args)
 		}
 		num++;
 		if (type != args->data.operand.left->type)
-			args->data.operand.left = excast(expr.program, args->data.operand.left, type, NiL, num);
+			args->data.operand.left = excast(expr.program, args->data.operand.left, type, NULL, num);
 		args = args->data.operand.right;
 		N(t);
 	}
@@ -687,11 +569,11 @@ call(Exref_t* ref, register Exid_t* fun, register Exnode_t* args)
  */
 
 static Print_t*
-preprint(register Exnode_t* args)
+preprint(Exnode_t* args)
 {
-	register Print_t*	x;
-	register char*		s;
-	register int		c;
+	Print_t*	x;
+	char*		s;
+	char		c;
 	int			t;
 	int			i;
 	int			n;
@@ -705,7 +587,7 @@ preprint(register Exnode_t* args)
 	if (args->data.operand.left->op != CONSTANT)
 	{
 		x = ALLOCATE(expr.program, Print_t);
-		memzero(x, sizeof(*x));
+		*x = (Print_t){0};
 		x->arg = args;
 		return x;
 	}
@@ -713,7 +595,7 @@ preprint(register Exnode_t* args)
 	args = args->data.operand.right;
 	for (s = f; *s; s++)
 	{
-		sfputc(expr.program->tmp, *s);
+		agxbputc(&expr.program->tmp, *s);
 		if (*s == '%')
 		{
 			if (!*++s)
@@ -721,7 +603,7 @@ preprint(register Exnode_t* args)
 			if (*s != '%')
 				break;
 			if (args)
-				sfputc(expr.program->tmp, '%');
+				agxbputc(&expr.program->tmp, '%');
 		}
 	}
 	x = 0;
@@ -733,7 +615,7 @@ preprint(register Exnode_t* args)
 		else
 			p = q;
 		x = q;
-		memzero(x, sizeof(*x));
+		*x = (Print_t){0};
 		if (*s)
 		{
 			i = 0;
@@ -765,7 +647,7 @@ preprint(register Exnode_t* args)
 					n = 1;
 					for (;;)
 					{
-						sfputc(expr.program->tmp, c);
+						agxbputc(&expr.program->tmp, c);
 						switch (c = *s++)
 						{
 						case 0:
@@ -809,14 +691,14 @@ preprint(register Exnode_t* args)
 					t = STRING;
 					goto specified;
 				default:
-					if (isalpha(c))
+					if (gv_isalpha(c))
 						goto specified;
 					break;
 				}
-				sfputc(expr.program->tmp, c);
+				agxbputc(&expr.program->tmp, c);
 			}
 		specified:
-			sfputc(expr.program->tmp, c);
+			agxbputc(&expr.program->tmp, c);
 			for (e = s; *s; s++)
 			{
 				if (*s == '%')
@@ -833,7 +715,7 @@ preprint(register Exnode_t* args)
 						break;
 					}
 				}
-				sfputc(expr.program->tmp, *s);
+				agxbputc(&expr.program->tmp, *s);
 			}
 			if (!args)
 			{
@@ -846,12 +728,12 @@ preprint(register Exnode_t* args)
 			{
 			case FLOATING:
 				if (x->arg->type != FLOATING)
-					x->arg = exnewnode(expr.program, x->arg->type == STRING ? S2F : INTEGRAL(x->arg->type) ? I2F : X2F, 0, FLOATING, x->arg, x->arg->op == ID ? x->arg : (Exnode_t*)0);
+					x->arg = exnewnode(expr.program, x->arg->type == STRING ? S2F : INTEGRAL(x->arg->type) ? I2F : X2F, 0, FLOATING, x->arg, x->arg->op == ID ? x->arg : NULL);
 				break;
 			case INTEGER:
 			case UNSIGNED:
 				if (!INTEGRAL(x->arg->type))
-					x->arg = exnewnode(expr.program, x->arg->type == STRING ? S2I : x->arg->type == FLOATING ? F2I : X2I, 0, INTEGER, x->arg, x->arg->op == ID ? x->arg : (Exnode_t*)0);
+					x->arg = exnewnode(expr.program, x->arg->type == STRING ? S2I : x->arg->type == FLOATING ? F2I : X2I, 0, INTEGER, x->arg, x->arg->op == ID ? x->arg : NULL);
 				x->arg->type = t;
 				break;
 			case STRING:
@@ -859,20 +741,23 @@ preprint(register Exnode_t* args)
 				{
 					if (x->arg->op == CONSTANT && x->arg->data.constant.reference && expr.program->disc->convertf)
 					{
-						if ((*expr.program->disc->convertf)(expr.program, x->arg, STRING, x->arg->data.constant.reference, 0, expr.program->disc) < 0)
+						if (expr.program->disc->convertf(x->arg, STRING, 0) < 0)
 							exerror("cannot convert string format argument");
 						else x->arg->data.constant.value.string = vmstrdup(expr.program->vm, x->arg->data.constant.value.string);
 					}
 					else if (!expr.program->disc->convertf || (x->arg->op != ID && x->arg->op != DYNAMIC && x->arg->op != F2X && x->arg->op != I2X && x->arg->op != S2X))
 						exerror("string format argument expected");
 					else
-						x->arg = exnewnode(expr.program, x->arg->type == FLOATING ? F2S : INTEGRAL(x->arg->type) ? I2S : X2S, 0, STRING, x->arg, x->arg->op == ID ? x->arg : (Exnode_t*)0);
+						x->arg = exnewnode(expr.program, x->arg->type == FLOATING ? F2S : INTEGRAL(x->arg->type) ? I2S : X2S, 0, STRING, x->arg, x->arg->op == ID ? x->arg : NULL);
 				}
 				break;
 			}
 			args = args->data.operand.right;
 		}
-		x->format = exstash(expr.program->tmp, expr.program->vm);
+		x->format = vmstrdup(expr.program->vm, agxbuse(&expr.program->tmp));
+		if (x->format == NULL) {
+			x->format = exnospace();
+		}
 		if (!*s)
 			break;
 		f = s;
@@ -880,7 +765,7 @@ preprint(register Exnode_t* args)
 	if (args)
 		exerror("too many format arguments");
  done:
-	sfstrseek(expr.program->tmp, 0, SEEK_SET);
+	agxbclear(&expr.program->tmp);
 	return p;
 }
 
@@ -888,49 +773,37 @@ preprint(register Exnode_t* args)
  * push a new input stream and program
  */
 
-int
-expush(Expr_t* p, const char* name, int line, const char* sp, Sfio_t* fp)
-{
-	register Exinput_t*	in;
-	register char*		s;
-	char			buf[PATH_MAX];
+int expush(Expr_t *p, const char *name, int line, FILE *fp) {
+	Exinput_t*	in;
+	char*		s;
 
-	if (!(in = newof(0, Exinput_t, 1, 0)))
+	if (!(in = calloc(1, sizeof(Exinput_t))))
 	{
 		exnospace();
 		return -1;
 	}
 	if (!p->input)
 		p->input = &expr.null;
-	if (!(in->bp = in->sp = (char*)sp))
+	if ((in->fp = fp))
+		in->close = 0;
+	else if (name)
 	{
-		if ((in->fp = fp))
-			in->close = 0;
-		else if (name)
+		if (!(s = pathfind(name, p->disc->lib, p->disc->type)) || !(in->fp = fopen(s, "r")))
 		{
-			if (!(s = pathfind(name, p->disc->lib, p->disc->type, buf, sizeof(buf))) || !(in->fp = sfopen(NiL, s, "r")))
-			{
-				exerror("%s: file not found", name);
-				in->bp = in->sp = "";
-			}
-			else
-			{
-				name = (const char*)vmstrdup(p->vm, s);
-				in->close = 1;
-			}
+			exerror("%s: file not found", name);
 		}
+		else
+		{
+			name = vmstrdup(p->vm, s);
+			in->close = 1;
+		}
+		free(s);
 	}
-	else in->fp = 0;
 	if (!(in->next = p->input)->next)
 	{
 		p->errors = 0;
-		if (!(p->disc->flags & EX_INTERACTIVE))
-		{
-			if (line >= 0)
-				error_info.line = line;
-		}
-		else if (!error_info.line)
-			error_info.line = 1;
+		if (line >= 0)
+			error_info.line = line;
 	}
 	else if (line >= 0)
 		error_info.line = line;
@@ -953,10 +826,10 @@ expush(Expr_t* p, const char* name, int line, const char* sp, Sfio_t* fp)
  */
 
 int
-expop(register Expr_t* p)
+expop(Expr_t* p)
 {
-	register int		c;
-	register Exinput_t*	in;
+	int		c;
+	Exinput_t*	in;
 
 	if (!(in = p->input) || !in->next || in->unit)
 		return -1;
@@ -968,19 +841,17 @@ expop(register Expr_t* p)
 	else
 	{
 		if (p->errors && in->fp && p->linep != p->line)
-			while ((c = sfgetc(in->fp)) != EOF)
+			while ((c = getc(in->fp)) != EOF)
 				if (c == '\n')
 				{
 					error_info.line++;
 					break;
 				}
-		if (!(p->disc->flags & EX_INTERACTIVE))
-			error_info.line = in->line;
+		error_info.line = in->line;
 	}
 	if (in->fp && in->close)
-		sfclose(in->fp);
-	if (in->pushback)
-		free(in->pushback);
+		fclose(in->fp);
+	free(in->pushback);
 	p->input = in->next;
 	free(in);
 	setcontext(p);
@@ -997,34 +868,23 @@ void exinit(void) {
 	memset (&expr, 0, sizeof(Exstate_t));
 }
 
-/*
- * compile the expression in [sf]p
- */
-
-int
-excomp(register Expr_t* p, const char* name, int line, const char* sp, Sfio_t* fp)
-{
+int excomp(Expr_t *p, const char *name, int line, FILE *fp, char *prefix) {
 	Exid_t*	v;
 	int	eof;
 
-	p->more = 0;
 	eof = p->eof;
-	if (!sp && !fp)
-	{
-		if (!p->input)
-			return -1;
-	}
-	else if (expush(p, name, line, sp, fp))
+	if (expush(p, name, line, fp))
 		return -1;
-	else
-		p->input->unit = line >= 0;
-	exparse();
+	p->input->unit = line >= 0;
+	// insert prefix as pre-loaded pushback
+	p->input->pushback = p->input->pp = prefix;
+	ex_parse();
 	p->input->unit = 0;
 	expop(p);
 	p->eof = eof;
 	if (expr.statics)
 	{
-		for (v = (Exid_t*)dtfirst(p->symbols); v; v = (Exid_t*)dtnext(p->symbols, v))
+		for (v = dtfirst(p->symbols); v; v = dtnext(p->symbols, v))
 			if (v->isstatic)
 			{
 				dtdelete(p->symbols, v);
@@ -1041,32 +901,30 @@ excomp(register Expr_t* p, const char* name, int line, const char* sp, Sfio_t* f
  */
 
 void
-exclose(register Expr_t* p, int all)
+exclose(Expr_t* p, int all)
 {
-	register int		i;
-	register Exinput_t*	in;
+	Exinput_t*	in;
 
 	if (p)
 	{
 		if (all)
 		{
+			size_t i;
 			for (i = 3; i < elementsof(p->file); i++)
 				if (p->file[i])
-					sfclose(p->file[i]);
+					fclose(p->file[i]);
 			if (p->vm)
 				vmclose(p->vm);
 			if (p->ve)
 				vmclose(p->ve);
 			if (p->symbols)
 				dtclose(p->symbols);
-			if (p->tmp)
-				sfclose(p->tmp);
+			agxbfree(&p->tmp);
 			while ((in = p->input))
 			{
-				if (in->pushback)
-					free(in->pushback);
+				free(in->pushback);
 				if (in->fp && in->close)
-					sfclose(in->fp);
+					fclose(in->fp);
 				if ((p->input = in->next))
 					free(in);
 			}
@@ -1088,7 +946,7 @@ exclose(register Expr_t* p, int all)
 static void
 checkBinary(Expr_t * p, Exnode_t * l, Exnode_t * ex, Exnode_t * r) 
 {
-	if ((*p->disc->binaryf) (p, l, ex, r, 1, p->disc) < 0) {
+	if (p->disc->binaryf(l, ex, r, 1) < 0) {
 	    if (r)
 		exerror
 		    ("cannot apply operator %s to expressions of types %s and %s",
@@ -1130,6 +988,9 @@ static void checkName(Exid_t * id)
 static int
 cmpKey(Dt_t * d, Extype_t * key1, Extype_t * key2, Dtdisc_t * disc) 
 {
+	(void)d;
+	(void)disc;
+
 	if (key1->integer < key2->integer)
 	    return -1;
 	else if (key1->integer > key2->integer)
@@ -1141,7 +1002,7 @@ cmpKey(Dt_t * d, Extype_t * key1, Extype_t * key2, Dtdisc_t * disc)
 int
 exisAssign(Exnode_t * n) 
 {
-	return ((n->op == '=') && (n->subop == '='));
+	return n->op == '=' && n->subop == '=';
 }
 
 #endif

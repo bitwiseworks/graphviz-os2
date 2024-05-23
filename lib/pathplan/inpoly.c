@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /* 
@@ -19,20 +16,19 @@
  */
 
 #include <stdlib.h>
-#include "vispath.h"
-#include "pathutil.h"
+#include <pathplan/vispath.h>
+#include <pathplan/pathutil.h>
+#include <stdbool.h>
+#include <stddef.h>
 
-int in_poly(Ppoly_t poly, Ppoint_t q)
-{
-    int i, i1;			/* point index; i1 = i-1 mod n */
-    int n;
+bool in_poly(Ppoly_t poly, Ppoint_t q) {
     Ppoint_t *P;
 
     P = poly.ps;
-    n = poly.pn;
-    for (i = 0; i < n; i++) {
-	i1 = (i + n - 1) % n;
-	if (wind(P[i1],P[i],q) == 1) return FALSE;
+    const size_t n = poly.pn;
+    for (size_t i = 0; i < n; i++) {
+	const size_t i1 = (i + n - 1) % n; // point index; i1 = i-1 mod n
+	if (wind(P[i1], P[i], q) == 1) return false;
     }
-    return TRUE;
+    return true;
 }

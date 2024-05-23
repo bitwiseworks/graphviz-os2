@@ -1,6 +1,3 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /** KempoApi: The Turloc Toolkit *****************************/
 /** *    *                                                  **/
 /** **  **  Filename: ArcBall.h                             **/
@@ -44,155 +41,154 @@
 /**                                                                                 **/
 /*************************************************************************************/
 
-#ifndef _ArcBall_h
-#define _ArcBall_h
+#pragma once
 
 // 8<--Snip here if you have your own math types/funcs-->8 
 
-# include "assert.h"
+# include <assert.h>
 
 //Math types derived from the KempoApi tMath library
-typedef union Tuple2f_t {
+typedef union {
     struct {
-	GLfloat X, Y;
+	float X, Y;
     } s;
 
-    GLfloat T[2];
+    float T[2];
 } Tuple2fT;			//A generic 2-element tuple that is represented by single-precision floating point x,y coordinates. 
 
-typedef union Tuple3f_t {
+typedef union {
     struct {
-	GLfloat X, Y, Z;
+	float X, Y, Z;
     } s;
 
-    GLfloat T[3];
+    float T[3];
 } Tuple3fT;			//A generic 3-element tuple that is represented by single precision-floating point x,y,z coordinates. 
 
-typedef union Tuple4f_t {
+typedef union {
     struct {
-	GLfloat X, Y, Z, W;
+	float X, Y, Z, W;
     } s;
 
-    GLfloat T[4];
+    float T[4];
 } Tuple4fT;			//A 4-element tuple represented by single-precision floating point x,y,z,w coordinates. 
 
-typedef union Matrix3f_t {
-    GLfloat M[9];
+typedef union {
+    float M[9];
     struct {
 	//column major
 	union {
-	    GLfloat M00;
-	    GLfloat XX;
-	    GLfloat SX;
+	    float M00;
+	    float XX;
+	    float SX;
 	};			//XAxis.X and Scale X
 	union {
-	    GLfloat M10;
-	    GLfloat XY;
+	    float M10;
+	    float XY;
 	};			//XAxis.Y
 	union {
-	    GLfloat M20;
-	    GLfloat XZ;
+	    float M20;
+	    float XZ;
 	};			//XAxis.Z
 	union {
-	    GLfloat M01;
-	    GLfloat YX;
+	    float M01;
+	    float YX;
 	};			//YAxis.X
 	union {
-	    GLfloat M11;
-	    GLfloat YY;
-	    GLfloat SY;
+	    float M11;
+	    float YY;
+	    float SY;
 	};			//YAxis.Y and Scale Y
 	union {
-	    GLfloat M21;
-	    GLfloat YZ;
+	    float M21;
+	    float YZ;
 	};			//YAxis.Z
 	union {
-	    GLfloat M02;
-	    GLfloat ZX;
+	    float M02;
+	    float ZX;
 	};			//ZAxis.X
 	union {
-	    GLfloat M12;
-	    GLfloat ZY;
+	    float M12;
+	    float ZY;
 	};			//ZAxis.Y
 	union {
-	    GLfloat M22;
-	    GLfloat ZZ;
-	    GLfloat SZ;
+	    float M22;
+	    float ZZ;
+	    float SZ;
 	};			//ZAxis.Z and Scale Z
     } s;
 } Matrix3fT;			//A single precision floating point 3 by 3 matrix. 
 
-typedef union Matrix4f_t {
-    GLfloat M[16];
+typedef union {
+    float M[16];
     struct {
 	//column major
 	union {
-	    GLfloat M00;
-	    GLfloat XX;
-	    GLfloat SX;
+	    float M00;
+	    float XX;
+	    float SX;
 	};			//XAxis.X and Scale X
 	union {
-	    GLfloat M10;
-	    GLfloat XY;
+	    float M10;
+	    float XY;
 	};			//XAxis.Y
 	union {
-	    GLfloat M20;
-	    GLfloat XZ;
+	    float M20;
+	    float XZ;
 	};			//XAxis.Z
 	union {
-	    GLfloat M30;
-	    GLfloat XW;
+	    float M30;
+	    float XW;
 	};			//XAxis.W
 	union {
-	    GLfloat M01;
-	    GLfloat YX;
+	    float M01;
+	    float YX;
 	};			//YAxis.X
 	union {
-	    GLfloat M11;
-	    GLfloat YY;
-	    GLfloat SY;
+	    float M11;
+	    float YY;
+	    float SY;
 	};			//YAxis.Y and Scale Y
 	union {
-	    GLfloat M21;
-	    GLfloat YZ;
+	    float M21;
+	    float YZ;
 	};			//YAxis.Z
 	union {
-	    GLfloat M31;
-	    GLfloat YW;
+	    float M31;
+	    float YW;
 	};			//YAxis.W
 	union {
-	    GLfloat M02;
-	    GLfloat ZX;
+	    float M02;
+	    float ZX;
 	};			//ZAxis.X
 	union {
-	    GLfloat M12;
-	    GLfloat ZY;
+	    float M12;
+	    float ZY;
 	};			//ZAxis.Y
 	union {
-	    GLfloat M22;
-	    GLfloat ZZ;
-	    GLfloat SZ;
+	    float M22;
+	    float ZZ;
+	    float SZ;
 	};			//ZAxis.Z and Scale Z
 	union {
-	    GLfloat M32;
-	    GLfloat ZW;
+	    float M32;
+	    float ZW;
 	};			//ZAxis.W
 	union {
-	    GLfloat M03;
-	    GLfloat TX;
+	    float M03;
+	    float TX;
 	};			//Trans.X
 	union {
-	    GLfloat M13;
-	    GLfloat TY;
+	    float M13;
+	    float TY;
 	};			//Trans.Y
 	union {
-	    GLfloat M23;
-	    GLfloat TZ;
+	    float M23;
+	    float TZ;
 	};			//Trans.Z
 	union {
-	    GLfloat M33;
-	    GLfloat TW;
-	    GLfloat SW;
+	    float M33;
+	    float TW;
+	    float SW;
 	};			//Trans.W and Scale W
     } s;
 } Matrix4fT;			//A single precision floating point 4 by 4 matrix. 
@@ -210,38 +206,12 @@ typedef union Matrix4f_t {
 #define FuncSqrt    sqrtf
 
 //utility macros
-//assuming IEEE-754(GLfloat), which i believe has max precision of 7 bits
+//assuming IEEE-754(float), which i believe has max precision of 7 bits
 # define Epsilon 1.0e-5
 
 //Math functions
 
 #ifdef ARCBALL_C
-#ifdef UNUSED
-    /**
-     * Sets the value of this tuple to the vector sum of itself and tuple t1.
-     * @param t1  the other tuple
-     */
-static void Point2fAdd(Point2fT * NewObj, const Tuple2fT * t1)
-{
-    assert(NewObj && t1);
-
-    NewObj->s.X += t1->s.X;
-    NewObj->s.Y += t1->s.Y;
-}
-
-    /**
-      * Sets the value of this tuple to the vector difference of itself and tuple t1 (this = this - t1).
-      * @param t1 the other tuple
-      */
-
-static void Point2fSub(Point2fT * NewObj, const Tuple2fT * t1)
-{
-    assert(NewObj && t1);
-
-    NewObj->s.X -= t1->s.X;
-    NewObj->s.Y -= t1->s.Y;
-}
-#endif
     /**
       * Sets this vector to be the vector cross product of vectors v1 and v2.
       * @param v1 the first vector
@@ -271,7 +241,7 @@ static void Vector3fCross(Vector3fT * NewObj, const Vector3fT * v1,
       * @param  v1 the other vector
       */
 
-static GLfloat Vector3fDot(const Vector3fT * NewObj, const Vector3fT * v1)
+static float Vector3fDot(const Vector3fT * NewObj, const Vector3fT * v1)
 {
     assert(NewObj && v1);
 
@@ -284,7 +254,7 @@ static GLfloat Vector3fDot(const Vector3fT * NewObj, const Vector3fT * v1)
       * @return the squared length of this vector
       */
 
-static GLfloat Vector3fLengthSquared(const Vector3fT * NewObj)
+static float Vector3fLengthSquared(const Vector3fT * NewObj)
 {
     assert(NewObj);
 
@@ -297,34 +267,12 @@ static GLfloat Vector3fLengthSquared(const Vector3fT * NewObj)
       * @return the length of this vector
       */
 
-static GLfloat Vector3fLength(const Vector3fT * NewObj)
+static float Vector3fLength(const Vector3fT * NewObj)
 {
     assert(NewObj);
 
     return FuncSqrt(Vector3fLengthSquared(NewObj));
 }
-
-
-#ifdef UNUSED
-static void Matrix3fSetZero(Matrix3fT * NewObj)
-{
-    NewObj->s.M00 = NewObj->s.M01 = NewObj->s.M02 =
-	NewObj->s.M10 = NewObj->s.M11 = NewObj->s.M12 =
-	NewObj->s.M20 = NewObj->s.M21 = NewObj->s.M22 = 0.0f;
-}
-
-    /**
-     * Sets this Matrix3 to identity.
-     */
-
-static void Matrix3fSetIdentity(Matrix3fT * NewObj)
-{
-    Matrix3fSetZero(NewObj);
-
-    //then set diagonal as 1
-    NewObj->s.M00 = NewObj->s.M11 = NewObj->s.M22 = 1.0f;
-}
-#endif
 
     /**
       * Sets the value of this matrix to the matrix conversion of the
@@ -336,11 +284,11 @@ static void Matrix3fSetIdentity(Matrix3fT * NewObj)
 static void Matrix3fSetRotationFromQuat4f(Matrix3fT * NewObj,
 					  const Quat4fT * q1)
 {
-    GLfloat n, s;
-    GLfloat xs, ys, zs;
-    GLfloat wx, wy, wz;
-    GLfloat xx, xy, xz;
-    GLfloat yy, yz, zz;
+    float n, s;
+    float xs, ys, zs;
+    float wx, wy, wz;
+    float xx, xy, xz;
+    float yy, yz, zz;
 
     assert(NewObj && q1);
 
@@ -444,10 +392,10 @@ static void Matrix4fSetRotationScaleFromMatrix4f(Matrix4fT * NewObj,
       * @return scale factor
       */
 
-static GLfloat Matrix4fSVD(const Matrix4fT * NewObj, Matrix3fT * rot3,
+static float Matrix4fSVD(const Matrix4fT * NewObj, Matrix3fT * rot3,
 			   Matrix4fT * rot4)
 {
-    GLfloat s, n;
+    float s, n;
 
     assert(NewObj);
 
@@ -467,7 +415,6 @@ static GLfloat Matrix4fSVD(const Matrix4fT * NewObj, Matrix3fT * rot3,
 
     if (rot3)			//if pointer not null
     {
-	//this->getRotationScale(rot3);
 	rot3->s.XX = NewObj->s.XX;
 	rot3->s.XY = NewObj->s.XY;
 	rot3->s.XZ = NewObj->s.XZ;
@@ -552,7 +499,7 @@ static void Matrix4fSetRotationScaleFromMatrix3f(Matrix4fT * NewObj,
 }
 
 
-static void Matrix4fMulRotationScale(Matrix4fT * NewObj, GLfloat scale)
+static void Matrix4fMulRotationScale(Matrix4fT * NewObj, float scale)
 {
     assert(NewObj);
 
@@ -581,7 +528,7 @@ static void Matrix4fMulRotationScale(Matrix4fT * NewObj, GLfloat scale)
 static void Matrix4fSetRotationFromMatrix3f(Matrix4fT * NewObj,
 					    const Matrix3fT * m1)
 {
-    GLfloat scale;
+    float scale;
 
     assert(NewObj && m1);
 
@@ -596,8 +543,8 @@ static void Matrix4fSetRotationFromMatrix3f(Matrix4fT * NewObj,
 struct _ArcBall_t {
     Vector3fT StVec;
     Vector3fT EnVec;
-    GLfloat AdjustWidth;
-    GLfloat AdjustHeight;
+    float AdjustWidth;
+    float AdjustHeight;
     Matrix4fT Transform;
     Matrix3fT LastRot;
     Matrix3fT ThisRot;
@@ -608,8 +555,6 @@ struct _ArcBall_t {
 };
 
 
-void init_arcBall(ArcBall_t * a, GLfloat NewWidth, GLfloat NewHeight);
-void arcmouseClick(ViewInfo * v);
-void arcmouseDrag(ViewInfo * v);
-
-#endif
+void init_arcBall(ArcBall_t * a, float NewWidth, float NewHeight);
+void arcmouseClick(void);
+void arcmouseDrag(void);

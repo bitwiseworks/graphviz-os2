@@ -1,22 +1,19 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief DOT-<a href=https://en.wikipedia.org/wiki/GXL>GXL</a> converter API for gxl2gv.c and gv2gxl.c
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#ifndef CONVERT_H
-#define CONVERT_H
+#pragma once
 
 #include "config.h"
 
@@ -24,20 +21,10 @@ extern "C" {
 #include <stdlib.h>
 #include <string.h>
 
-#include "cgraph.h"
-#include "cghdr.h"
-
-#ifdef _WIN32
-#define strdup(x) _strdup(x)
-#endif
+#include <cgraph/cgraph.h>
+#include <cgraph/cghdr.h>
 
     extern void gv_to_gxl(Agraph_t *, FILE *);
 #ifdef HAVE_EXPAT
     extern Agraph_t *gxl_to_gv(FILE *);
-#endif
-
-#endif
-
-#ifdef __cplusplus
-}
 #endif

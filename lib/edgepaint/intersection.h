@@ -3,14 +3,11 @@
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef INTERSECTION_H
-#define INTERSECTION_H
+#pragma once
 
-real intersection_angle(real *p1, real *p2, real *q1, real *q2);
-
-#endif
+double intersection_angle(double *p1, double *p2, double *q1, double *q2);

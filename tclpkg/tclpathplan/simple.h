@@ -1,26 +1,18 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <stddef.h>
 
 #define MAXINTS  10000		/* modify this line to reflect the max no. of 
 				   intersections you want reported -- 50000 seems to break the program */
 
-#define NIL 0
-
-#define ABS(x) (((x) > 0) ? (x) : (-x))
 #define SLOPE(p,q) ( ( ( p.y ) - ( q.y ) ) / ( ( p.x ) - ( q.x ) ) )
 #define MAX(a,b) ( ( a ) > ( b ) ? ( a ) : ( b ) )
 
@@ -57,9 +49,9 @@ extern "C" {
 	int number;
     };
     struct data {
-	int nvertices, npolygons, ninters;
+	size_t nvertices;
+	int ninters;
     };
 
-#ifdef __cplusplus
-}
-#endif
+void find_ints(struct vertex vertex_list[], struct data *input,
+               struct intersection ilist[]);

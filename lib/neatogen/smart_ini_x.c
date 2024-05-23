@@ -1,21 +1,22 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#include "digcola.h"
+#include <cgraph/alloc.h>
+#include <float.h>
+#include <math.h>
+#include <neatogen/digcola.h>
 #ifdef DIGCOLA
-#include "kkutils.h"
-#include "matrix_ops.h"
-#include "conjgrad.h"
+#include <neatogen/kkutils.h>
+#include <neatogen/matrix_ops.h>
+#include <neatogen/conjgrad.h>
+#include <stdbool.h>
 
 static void
 standardize(double* orthog, int nvtxs) 
@@ -31,8 +32,14 @@ standardize(double* orthog, int nvtxs)
 		orthog[i]-=avg;
 	
 	/* normalize: */
-	len = norm(orthog, 0, nvtxs-1);
-	vecscale(orthog, 0, nvtxs-1, 1.0 / len, orthog);
+	len = norm(orthog, nvtxs-1);
+
+	// if we have a degenerate length, do not attempt to scale by it
+	if (fabs(len) < DBL_EPSILON) {
+		return;
+	}
+
+	vectors_scalar_mult(nvtxs, orthog, 1.0 / len, orthog);
 }
 
 static void
@@ -50,10 +57,9 @@ mat_mult_vec_orthog(float** mat, int dim1, int dim2, double* vec,
 		}
 		result[i]=sum;
 	}
-	if (orthog!=NULL) {
-		double alpha=-dot(result,0,dim1-1,orthog);
-		scadd(result, 0, dim1-1, alpha, orthog);	
-	}		
+	assert(orthog != NULL);
+	double alpha = -vectors_inner_product(dim1, result, orthog);
+	scadd(result, dim1 - 1, alpha, orthog);	
 }
 
 static void
@@ -65,8 +71,8 @@ power_iteration_orthog(float** square_mat, int n, int neigs,
      */
 
 	int i,j;
-	double *tmp_vec = N_GNEW(n, double);
-	double *last_vec = N_GNEW(n, double);
+	double *tmp_vec = gv_calloc(n, sizeof(double));
+	double *last_vec = gv_calloc(n, sizeof(double));
 	double *curr_vector;
 	double len;
 	double angle;
@@ -89,35 +95,34 @@ choose:
 			curr_vector[j] = rand()%100;
 		}
 
-		if (orthog!=NULL) {
-			alpha=-dot(orthog,0,n-1,curr_vector);
-			scadd(curr_vector, 0, n-1, alpha, orthog);	
-		}
+		assert(orthog != NULL);
+		alpha = -vectors_inner_product(n, orthog, curr_vector);
+		scadd(curr_vector, n - 1, alpha, orthog);	
 			// orthogonalize against higher eigenvectors
 		for (j=0; j<i; j++) {
-			alpha = -dot(eigs[j], 0, n-1, curr_vector);
-			scadd(curr_vector, 0, n-1, alpha, eigs[j]);
+			alpha = -vectors_inner_product(n, eigs[j], curr_vector);
+			scadd(curr_vector, n-1, alpha, eigs[j]);
 	    }
-		len = norm(curr_vector, 0, n-1);
+		len = norm(curr_vector, n-1);
 		if (len<1e-10) {
 			/* We have chosen a vector colinear with prvious ones */
 			goto choose;
 		}
-		vecscale(curr_vector, 0, n-1, 1.0 / len, curr_vector);	
+		vectors_scalar_mult(n, curr_vector, 1.0 / len, curr_vector);	
 		iteration=0;
 		do {
 			iteration++;
-			cpvec(last_vec,0,n-1,curr_vector);
+			copy_vector(n, curr_vector, last_vec);
 			
 			mat_mult_vec_orthog(square_mat,n,n,curr_vector,tmp_vec,orthog);
-			cpvec(curr_vector,0,n-1,tmp_vec);
+			copy_vector(n, tmp_vec, curr_vector);
 						
 			/* orthogonalize against higher eigenvectors */
 			for (j=0; j<i; j++) {
-				alpha = -dot(eigs[j], 0, n-1, curr_vector);
-				scadd(curr_vector, 0, n-1, alpha, eigs[j]);
+				alpha = -vectors_inner_product(n, eigs[j], curr_vector);
+				scadd(curr_vector, n-1, alpha, eigs[j]);
 			}
-			len = norm(curr_vector, 0, n-1);
+			len = norm(curr_vector, n-1);
 			if (len<1e-10) {
 			    /* We have reached the null space (e.vec. associated 
                  * with e.val. 0)
@@ -125,8 +130,8 @@ choose:
 				goto exit;
 			}
 
-			vecscale(curr_vector, 0, n-1, 1.0 / len, curr_vector);
-			angle = dot(curr_vector, 0, n-1, last_vec);
+			vectors_scalar_mult(n, curr_vector, 1.0 / len, curr_vector);
+			angle = vectors_inner_product(n, curr_vector, last_vec);
 		} while (fabs(angle)<tol);
         /* the Rayleigh quotient (up to errors due to orthogonalization):
          * u*(A*u)/||A*u||)*||A*u||, where u=last_vec, and ||u||=1
@@ -145,11 +150,11 @@ exit:
 			curr_vector[j] = rand()%100;
 		/* orthogonalize against higher eigenvectors */
 		for (j=0; j<i; j++) {
-			alpha = -dot(eigs[j], 0, n-1, curr_vector);
-			scadd(curr_vector, 0, n-1, alpha, eigs[j]);
+			alpha = -vectors_inner_product(n, eigs[j], curr_vector);
+			scadd(curr_vector, n-1, alpha, eigs[j]);
 	    }
-		len = norm(curr_vector, 0, n-1);
-		vecscale(curr_vector, 0, n-1, 1.0 / len, curr_vector);
+		len = norm(curr_vector, n-1);
+		vectors_scalar_mult(n, curr_vector, 1.0 / len, curr_vector);
 		evals[i]=0;
 		
 	}
@@ -165,9 +170,9 @@ exit:
 			}
 		}
 		if (largest_index!=i) { // exchange eigenvectors:
-			cpvec(tmp_vec,0,n-1,eigs[i]);
-			cpvec(eigs[i],0,n-1,eigs[largest_index]);
-			cpvec(eigs[largest_index],0,n-1,tmp_vec);
+			copy_vector(n, eigs[i], tmp_vec);
+			copy_vector(n, eigs[largest_index], eigs[i]);
+			copy_vector(n, tmp_vec, eigs[largest_index]);
 
 			evals[largest_index]=evals[i];
 			evals[i]=largest_eval;
@@ -181,7 +186,7 @@ exit:
 static float* 
 compute_avgs(DistType** Dij, int n, float* all_avg) 
 {
-	float* row_avg = N_GNEW(n, float);
+	float* row_avg = gv_calloc(n, sizeof(float));
 	int i,j;
 	double sum=0, sum_row;
 
@@ -201,8 +206,8 @@ static float**
 compute_Bij(DistType** Dij, int n)
 {
 	int i,j;
-	float* storage = N_GNEW(n*n,float);
-	float** Bij = N_GNEW(n, float*);
+	float *storage = gv_calloc(n * n, sizeof(float));
+	float **Bij = gv_calloc(n, sizeof(float *));
 	float* row_avg; 
     float all_avg;
 
@@ -221,21 +226,19 @@ compute_Bij(DistType** Dij, int n)
 }
 
 static void
-CMDS_orthog(vtx_data* graph, int n, int dim, double** eigs, double tol, 
+CMDS_orthog(int n, int dim, double** eigs, double tol,
             double* orthog, DistType** Dij)
 {
 	int i,j;
 	float** Bij = compute_Bij(Dij, n);
-	double* evals= N_GNEW(dim, double);
+	double *evals = gv_calloc(dim, sizeof(double));
 	
-	double * orthog_aux = NULL;
-	if (orthog!=NULL) {
-		orthog_aux = N_GNEW(n, double);
-		for (i=0; i<n; i++) {
-			orthog_aux[i]=orthog[i];
-		}
-		standardize(orthog_aux,n);
+	assert(orthog != NULL);
+	double *orthog_aux = gv_calloc(n, sizeof(double));
+	for (i=0; i<n; i++) {
+		orthog_aux[i]=orthog[i];
 	}
+	standardize(orthog_aux,n);
     power_iteration_orthog(Bij, n, dim, eigs, evals, orthog_aux, tol);
 	
 	for (i=0; i<dim; i++) {
@@ -255,21 +258,15 @@ int IMDS_given_dim(vtx_data* graph, int n, double* given_coords,
 	int iterations2;
 	int i,j, rv = 0;
 	DistType** Dij;
-	float* f_storage = NULL;	
 	double* x = given_coords;	
 	double uniLength;
-	double* orthog_aux = NULL;
 	double* y = new_coords;
-	float** lap = N_GNEW(n, float*);
+	float **lap = gv_calloc(n, sizeof(float *));
 	float degree;
 	double pos_i;
-	double* balance = N_GNEW(n, double);
+	double *balance = gv_calloc(n, sizeof(double));
 	double b;
-	boolean converged;
-
-#if 0
-	iterations1=mat_mult_count1=0; /* We don't compute the x-axis at all. */
-#endif
+	bool converged;
 
 	Dij = compute_apsp(graph, n);
 	
@@ -283,12 +280,6 @@ int IMDS_given_dim(vtx_data* graph, int n, double* given_coords,
 	assert(x!=NULL);
 	{
 		double sum1, sum2;
-		/* scale x (given axis) to minimize the stress */
-		orthog_aux = N_GNEW(n, double);
-		for (i=0; i<n; i++) {
-			orthog_aux[i]=x[i];
-		}
-		standardize(orthog_aux,n);
 	
 		for (sum1=sum2=0,i=1; i<n; i++) {
 			for (j=0; j<i; j++) {		
@@ -296,16 +287,16 @@ int IMDS_given_dim(vtx_data* graph, int n, double* given_coords,
 				sum2+=1.0/(Dij[i][j]*Dij[i][j])*fabs(x[i]-x[j])*fabs(x[i]-x[j]);
 			}
 		}
-		uniLength=sum1/sum2;
+		uniLength = isinf(sum2) ? 0 : sum1 / sum2;
 		for (i=0; i<n; i++)
 			x[i]*=uniLength;
 	}
 
 	/* smart ini: */
-	CMDS_orthog(graph, n, 1, &y, conj_tol, x, Dij);
+	CMDS_orthog(n, 1, &y, conj_tol, x, Dij);
 	
 	/* Compute Laplacian: */
-	f_storage = N_GNEW(n*n, float);
+	float *f_storage = gv_calloc(n * n, sizeof(float));
 	
 	for (i=0; i<n; i++) {
 		lap[i]=f_storage+i*n;
@@ -349,12 +340,12 @@ int IMDS_given_dim(vtx_data* graph, int n, double* given_coords,
 		}
 	}
 
-	for (converged=FALSE,iterations2=0; iterations2<200 && !converged; iterations2++) {
-		if (conjugate_gradient_f(lap, y, balance, n, conj_tol, n, TRUE) < 0) {
+	for (converged=false,iterations2=0; iterations2<200 && !converged; iterations2++) {
+		if (conjugate_gradient_f(lap, y, balance, n, conj_tol, n, true) < 0) {
 		    rv = 1;
 		    goto cleanup;
 		}
-		converged=TRUE;
+		converged = true;
 		for (i=0; i<n; i++) {
 			pos_i=y[i];
 			b=0;
@@ -371,13 +362,13 @@ int IMDS_given_dim(vtx_data* graph, int n, double* given_coords,
 				}
 			}
 			if ((b != balance[i]) && (fabs(1-b/balance[i])>1e-5)) {
-				converged=FALSE;
+				converged = false;
 				balance[i]=b;
 			}
 		}
 	}
 	
-	for (i=0; i<n; i++) {
+	for (i = 0; !(fabs(uniLength) < DBL_EPSILON) && i < n; i++) {
 		x[i] /= uniLength;
 		y[i] /= uniLength;
 	}
@@ -386,7 +377,7 @@ cleanup:
 
 	free (Dij[0]); free (Dij);	
 	free (lap[0]); free (lap);	
-	free (orthog_aux); free (balance);	
+	free (balance);	
 	return rv;
 }
 

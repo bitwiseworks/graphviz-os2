@@ -1,27 +1,27 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup plugin_api
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef GVPLUGIN_RENDER_H
-#define GVPLUGIN_RENDER_H
+#pragma once
 
 #include "types.h"
 #include "gvplugin.h"
 #include "gvcjob.h"
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+    /// @ingroup plugin_api
     struct gvrender_engine_s {
 	void (*begin_job) (GVJ_t * job);
 	void (*end_job) (GVJ_t * job);
@@ -50,15 +50,13 @@ extern "C" {
 	void (*textspan) (GVJ_t * job, pointf p, textspan_t * span);
 	void (*resolve_color) (GVJ_t * job, gvcolor_t * color);
 	void (*ellipse) (GVJ_t * job, pointf * A, int filled);
-	void (*polygon) (GVJ_t * job, pointf * A, int n, int filled);
-	void (*beziercurve) (GVJ_t * job, pointf * A, int n,
-			     int arrow_at_start, int arrow_at_end, int);
-	void (*polyline) (GVJ_t * job, pointf * A, int n);
+	void (*polygon)(GVJ_t *job, pointf *A, size_t n, int filled);
+	void (*beziercurve)(GVJ_t *job, pointf *A, size_t n, int);
+	void (*polyline)(GVJ_t *job, pointf *A, size_t n);
 	void (*comment) (GVJ_t * job, char *comment);
-	void (*library_shape) (GVJ_t * job, char *name, pointf * A, int n, int filled);
+	void (*library_shape)(GVJ_t *job, char *name, pointf *A, size_t n, int filled);
     };
 
 #ifdef __cplusplus
 }
 #endif
-#endif				/* GVPLUGIN_RENDER_H */

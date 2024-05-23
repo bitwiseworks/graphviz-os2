@@ -1,19 +1,16 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
+#include <memory>
 #include <QtWidgets>
-
+#include <QtGlobal>
 #include "mdichild.h"
 #include "mainwindow.h"
 
@@ -25,7 +22,6 @@ MdiChild::MdiChild()
     renderIdx = 0;
     preview = true;
     applyCairo = false;
-    previewFrm = NULL;
     settingsSet = false;
 }
 
@@ -97,9 +93,9 @@ bool MdiChild::saveFile(const QString & fileName)
 
     QTextStream out(&file);
     QApplication::setOverrideCursor(Qt::WaitCursor);
-//    out << toPlainText();
-//    out << toPlainText().toUtf8().constData();
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     out.setCodec("UTF-8");
+#endif
     out << toPlainText();
     out.flush();
     QApplication::restoreOverrideCursor();
@@ -161,10 +157,10 @@ QString MdiChild::strippedName(const QString & fullFileName)
 
 bool MdiChild::loadPreview(QString fileName)
 {
-    if (!this->previewFrm) {
-	previewFrm = new ImageViewer();
+    if (previewFrm == nullptr) {
+	previewFrm = std::unique_ptr<ImageViewer>(new ImageViewer());
 	previewFrm->graphWindow = this;
-	QMdiSubWindow *s = parentFrm->mdiArea->addSubWindow(previewFrm);
+	QMdiSubWindow *s = parentFrm->mdiArea->addSubWindow(previewFrm.get());
 
 	s->resize(600, 400);
 	s->move(parentFrm->mdiArea->subWindowList().count() * 5,

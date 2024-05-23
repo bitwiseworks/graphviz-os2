@@ -1,21 +1,25 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
+#include <assert.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <cgraph/streq.h>
+#include <limits.h>
 #include <time.h>
-#include "dot.h"
-#include "pack.h"
-#include "aspect.h"
+#include <dotgen/dot.h>
+#include <pack/pack.h>
+#include <dotgen/aspect.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 static void
 dot_init_subg(graph_t * g, graph_t* droot)
@@ -23,7 +27,7 @@ dot_init_subg(graph_t * g, graph_t* droot)
     graph_t* subg;
 
     if ((g != agroot(g)))
-	agbindrec(g, "Agraphinfo_t", sizeof(Agraphinfo_t), TRUE);
+	agbindrec(g, "Agraphinfo_t", sizeof(Agraphinfo_t), true);
     if (g == droot)
 	GD_dotroot(agroot(g)) = droot;
 	
@@ -36,7 +40,7 @@ dot_init_subg(graph_t * g, graph_t* droot)
 static void 
 dot_init_node(node_t * n)
 {
-    agbindrec(n, "Agnodeinfo_t", sizeof(Agnodeinfo_t), TRUE);	//graph custom data
+    agbindrec(n, "Agnodeinfo_t", sizeof(Agnodeinfo_t), true);	//graph custom data
     common_init_node(n);
     gv_nodesize(n, GD_flip(agraphof(n)));
     alloc_elist(4, ND_in(n));
@@ -51,7 +55,7 @@ static void
 dot_init_edge(edge_t * e)
 {
     char *tailgroup, *headgroup;
-    agbindrec(e, "Agedgeinfo_t", sizeof(Agedgeinfo_t), TRUE);	//graph custom data
+    agbindrec(e, "Agedgeinfo_t", sizeof(Agedgeinfo_t), true);	//graph custom data
     common_init_edge(e);
 
     ED_weight(e) = late_int(e, E_weight, 1, 0);
@@ -67,7 +71,13 @@ dot_init_edge(edge_t * e)
 	ED_weight(e) = 0;
     }
 
-    ED_showboxes(e) = late_int(e, E_showboxes, 0, 0);
+    {
+	int showboxes = late_int(e, E_showboxes, 0, 0);
+	if (showboxes > UCHAR_MAX) {
+	    showboxes = UCHAR_MAX;
+	}
+	ED_showboxes(e) = (unsigned char)showboxes;
+    }
     ED_minlen(e) = late_int(e, E_minlen, 1, 0);
 }
 
@@ -84,19 +94,6 @@ dot_init_node_edge(graph_t * g)
 	    dot_init_edge(e);
     }
 }
-
-#if 0				/* not used */
-static void free_edge_list(elist L)
-{
-    edge_t *e;
-    int i;
-
-    for (i = 0; i < L.size; i++) {
-	e = L.list[i];
-	free(e);
-    }
-}
-#endif
 
 static void 
 dot_cleanup_node(node_t * n)
@@ -116,15 +113,14 @@ dot_cleanup_node(node_t * n)
 static void free_virtual_edge_list(node_t * n)
 {
     edge_t *e;
-    int i;
 
-    for (i = ND_in(n).size - 1; i >= 0; i--) {
+    for (size_t i = ND_in(n).size - 1; i != SIZE_MAX; i--) {
 	e = ND_in(n).list[i];
 	delete_fast_edge(e);
 	free(e->base.data);
 	free(e);
     }
-    for (i = ND_out(n).size - 1; i >= 0; i--) {
+    for (size_t i = ND_out(n).size - 1; i != SIZE_MAX; i--) {
 	e = ND_out(n).list[i];
 	delete_fast_edge(e);
 	free(e->base.data);
@@ -157,9 +153,9 @@ dot_cleanup_graph(graph_t * g)
     for (subg = agfstsubg(g); subg; subg = agnxtsubg(subg)) {
 	dot_cleanup_graph(subg);
     }
-    if (! agbindrec(g, "Agraphinfo_t", 0, TRUE)) return;
-    if (GD_clust(g)) free (GD_clust(g));
-    if (GD_rankleader(g)) free (GD_rankleader(g));
+    if (! agbindrec(g, "Agraphinfo_t", 0, true)) return;
+    free (GD_clust(g));
+    free (GD_rankleader(g));
 
     free_list(GD_comp(g));
     if (GD_rank(g)) {
@@ -172,7 +168,6 @@ dot_cleanup_graph(graph_t * g)
     }
     if (g != agroot(g)) {
 	free_label (GD_label(g));
-	agdelrec(g,"Agraphinfo_t");
     }
 }
 
@@ -272,7 +267,6 @@ removeFill (Agraph_t * g)
 
 }
 
-#define ag_xset(x,a,v) agxset(x,a,v)
 #define agnodeattr(g,n,v) agattr(g,AGNODE,n,v)
 
 static void
@@ -281,55 +275,46 @@ attach_phase_attrs (Agraph_t * g, int maxphase)
     Agsym_t* rk = agnodeattr(g,"rank","");
     Agsym_t* order = agnodeattr(g,"order","");
     Agnode_t* n;
-    char buf[BUFSIZ];
+    agxbuf buf = {0};
 
     for (n = agfstnode(g); n; n = agnxtnode(g,n)) {
 	if (maxphase >= 1) {
-	    sprintf(buf, "%d", ND_rank(n));
-	    ag_xset(n,rk,buf);
+	    agxbprint(&buf, "%d", ND_rank(n));
+	    agxset(n, rk, agxbuse(&buf));
 	}
 	if (maxphase >= 2) {
-	    sprintf(buf, "%d", ND_order(n));
-	    ag_xset(n,order,buf);
+	    agxbprint(&buf, "%d", ND_order(n));
+	    agxset(n, order, agxbuse(&buf));
 	}
     }
+    agxbfree(&buf);
 }
 
 static void dotLayout(Agraph_t * g)
 {
-    aspect_t aspect;
-    aspect_t* asp;
     int maxphase = late_int(g, agfindgraphattr(g,"phase"), -1, 1);
 
-    setEdgeType (g, ET_SPLINE);
-    asp = setAspect (g, &aspect);
+    setEdgeType (g, EDGETYPE_SPLINE);
+    setAspect(g);
 
     dot_init_subg(g,g);
     dot_init_node_edge(g);
 
-    do {
-        dot_rank(g, asp);
-	if (maxphase == 1) {
-	    attach_phase_attrs (g, 1);
-	    return;
-	}
-	if (aspect.badGraph) {
-	    agerr(AGWARN, "dot does not support the aspect attribute for disconnected graphs or graphs with clusters\n");
-	    asp = NULL;
-	    aspect.nextIter = 0;
-	}
-        dot_mincross(g, (asp != NULL));
-	if (maxphase == 2) {
-	    attach_phase_attrs (g, 2);
-	    return;
-	}
-        dot_position(g, asp);
-	if (maxphase == 3) {
-	    attach_phase_attrs (g, 2);  /* positions will be attached on output */
-	    return;
-	}
-	aspect.nPasses--;
-    } while (aspect.nextIter && aspect.nPasses);
+    dot_rank(g);
+    if (maxphase == 1) {
+        attach_phase_attrs (g, 1);
+        return;
+    }
+    dot_mincross(g);
+    if (maxphase == 2) {
+        attach_phase_attrs (g, 2);
+        return;
+    }
+    dot_position(g);
+    if (maxphase == 3) {
+        attach_phase_attrs (g, 2);  /* positions will be attached on output */
+        return;
+    }
     if (GD_flags(g) & NEW_RANK)
 	removeFill (g);
     dot_sameports(g);
@@ -341,8 +326,8 @@ static void dotLayout(Agraph_t * g)
 static void
 initSubg (Agraph_t* sg, Agraph_t* g)
 {
-    agbindrec(sg, "Agraphinfo_t", sizeof(Agraphinfo_t), TRUE);
-    GD_drawing(sg) = NEW(layout_t);
+    agbindrec(sg, "Agraphinfo_t", sizeof(Agraphinfo_t), true);
+    GD_drawing(sg) = gv_alloc(sizeof(layout_t));
     GD_drawing(sg)->quantum = GD_drawing(g)->quantum; 
     GD_drawing(sg)->dpi = GD_drawing(g)->dpi;
     GD_gvc(sg) = GD_gvc (g);
@@ -361,7 +346,7 @@ static void
 attachPos (Agraph_t* g)
 {
     node_t* np;
-    double* ps = N_NEW(2*agnnodes(g), double);
+    double* ps = gv_calloc(2 * agnnodes(g), sizeof(double));
 
     for (np = agfstnode(g); np; np = agnxtnode(g, np)) {
 	ND_pos(np) = ps;
@@ -391,20 +376,18 @@ resetCoord (Agraph_t* g)
     free (sp);
 }
 
-/* copyCluster:
- */
 static void
 copyCluster (Agraph_t* scl, Agraph_t* cl)
 {
     int nclust, j;
     Agraph_t* cg;
 
-    agbindrec(cl, "Agraphinfo_t", sizeof(Agraphinfo_t), TRUE);
+    agbindrec(cl, "Agraphinfo_t", sizeof(Agraphinfo_t), true);
     GD_bb(cl) = GD_bb(scl);
     GD_label_pos(cl) = GD_label_pos(scl);
     memcpy(GD_border(cl), GD_border(scl), 4*sizeof(pointf));
     nclust = GD_n_cluster(cl) = GD_n_cluster(scl);
-    GD_clust(cl) = N_NEW(nclust+1,Agraph_t*);
+    GD_clust(cl) = gv_calloc(nclust + 1, sizeof(Agraph_t*));
     for (j = 1; j <= nclust; j++) {
 	cg = mapClust(GD_clust(scl)[j]);
 	GD_clust(cl)[j] = cg;
@@ -419,20 +402,18 @@ copyCluster (Agraph_t* scl, Agraph_t* cl)
  * Copy cluster tree and info from components to main graph.
  * Note that the original clusters have no Agraphinfo_t at this time.
  */
-static void
-copyClusterInfo (int ncc, Agraph_t** ccs, Agraph_t* root)
-{
-    int j, i, nclust = 0;
+static void copyClusterInfo(size_t ncc, Agraph_t **ccs, Agraph_t *root) {
+    int j, nclust = 0;
     Agraph_t* sg;
     Agraph_t* cg;
 
-    for (i = 0; i < ncc; i++) 
+    for (size_t i = 0; i < ncc; i++)
 	nclust += GD_n_cluster(ccs[i]);
 
     GD_n_cluster(root) = nclust;
-    GD_clust(root) = N_NEW(nclust+1,Agraph_t*);
+    GD_clust(root) = gv_calloc(nclust + 1, sizeof(Agraph_t*));
     nclust = 1;
-    for (i = 0; i < ncc; i++) {
+    for (size_t i = 0; i < ncc; i++) {
 	sg = ccs[i];
 	for (j = 1; j <= GD_n_cluster(sg); j++) {
 	    cg = mapClust(GD_clust(sg)[j]);
@@ -449,14 +430,12 @@ static void doDot (Agraph_t* g)
 {
     Agraph_t **ccs;
     Agraph_t *sg;
-    int ncc;
-    int i;
     pack_info pinfo;
     int Pack = getPack(g, -1, CL_OFFSET);
     pack_mode mode = getPackModeInfo (g, l_undef, &pinfo);
     getPackInfo(g, l_node, CL_OFFSET, &pinfo);
 
-    if ((mode == l_undef) && (Pack < 0)) {
+    if (mode == l_undef && Pack < 0) {
 	/* No pack information; use old dot with components
          * handled during layout
          */
@@ -467,17 +446,19 @@ static void doDot (Agraph_t* g)
 	    pinfo.mode = l_graph;
 	else if (Pack < 0)
 	    Pack = CL_OFFSET;
-	pinfo.margin = Pack;
-	pinfo.fixed = 0;
+	assert(Pack >= 0);
+	pinfo.margin = (unsigned)Pack;
+	pinfo.fixed = NULL;
 
           /* components using clusters */
+	size_t ncc;
 	ccs = cccomps(g, &ncc, 0);
 	if (ncc == 1) {
 	    dotLayout(g);
 	} else if (GD_drawing(g)->ratio_kind == R_NONE) {
-	    pinfo.doSplines = 1;
+	    pinfo.doSplines = true;
 
-	    for (i = 0; i < ncc; i++) {
+	    for (size_t i = 0; i < ncc; i++) {
 		sg = ccs[i];
 		initSubg (sg, g);
 		dotLayout (sg);
@@ -495,7 +476,7 @@ static void doDot (Agraph_t* g)
 	    dotLayout(g);
 	}
 
-	for (i = 0; i < ncc; i++) {
+	for (size_t i = 0; i < ncc; i++) {
 	    free (GD_drawing(ccs[i]));
 	    dot_cleanup_graph(ccs[i]);
 	    agdelete(g, ccs[i]);
@@ -515,3 +496,14 @@ Agraph_t * dot_root (void* p)
     return GD_dotroot(agroot(p));
 }
 
+/**
+ * @defgroup engines Graphviz layout engines
+ * @{
+ * @dir lib/dotgen
+ * @brief [hierarchical or layered](https://en.wikipedia.org/wiki/Layered_graph_drawing) layout engine, API dotgen/dotprocs.h
+ *
+ * [Dot layout user manual](https://graphviz.org/docs/layouts/dot/)
+ *
+ * Other @ref engines
+ * @}
+ */

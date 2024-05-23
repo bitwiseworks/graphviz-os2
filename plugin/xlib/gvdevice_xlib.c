@@ -1,18 +1,19 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
 
+#include <assert.h>
+#include <limits.h>
+#include <math.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,17 +33,20 @@
 #endif
 #ifdef HAVE_SYS_INOTIFY_H
 #include <sys/inotify.h>
+#ifdef __sun
+#include <sys/filio.h>
+#endif
 #endif
 #include <errno.h>
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
 
-#if 0
-#include <poll.h>
-#endif
-
-#include "gvplugin_device.h"
+#include <cgraph/agxbuf.h>
+#include <cgraph/gv_math.h>
+#include <cgraph/prisize_t.h>
+#include <cgraph/exit.h>
+#include <gvc/gvplugin_device.h>
 
 #include <cairo.h>
 #ifdef CAIRO_HAS_XLIB_SURFACE
@@ -69,47 +73,54 @@ static void handle_configure_notify(GVJ_t * job, XConfigureEvent * cev)
 /*	plugin/xlib/gvdevice_xlib.c */
 /*	lib/gvc/gvevent.c */
 
-    job->zoom *= 1 + MIN(
-	((double) cev->width - (double) job->width) / (double) job->width,
-	((double) cev->height - (double) job->height) / (double) job->height);
-    if (cev->width > job->width || cev->height > job->height)
-        job->has_grown = 1;
-    job->width = cev->width;
-    job->height = cev->height;
-    job->needs_refresh = 1;
+    assert(cev->width >= 0 && "Xlib returned an event with negative width");
+    assert(cev->height >= 0 && "Xlib returned an event with negative height");
+
+    job->zoom *= 1 + fmin(
+	((double)cev->width - job->width) / job->width,
+	((double)cev->height - job->height) / job->height);
+    if ((unsigned)cev->width > job->width ||
+        (unsigned)cev->height > job->height)
+        job->has_grown = true;
+    job->width = (unsigned)cev->width;
+    job->height = (unsigned)cev->height;
+    job->needs_refresh = true;
 }
 
 static void handle_expose(GVJ_t * job, XExposeEvent * eev)
 {
     window_t *window;
 
-    window = (window_t *)job->window;
+    window = job->window;
+    assert(eev->width >= 0 &&
+           "Xlib returned an expose event with negative width");
+    assert(eev->height >= 0 &&
+           "Xlib returned an expose event with negative height");
     XCopyArea(eev->display, window->pix, eev->window, window->gc,
-              eev->x, eev->y, eev->width, eev->height, eev->x, eev->y);
+              eev->x, eev->y, (unsigned)eev->width, (unsigned)eev->height,
+              eev->x, eev->y);
 }
 
 static void handle_client_message(GVJ_t * job, XClientMessageEvent * cmev)
 {
     window_t *window;
 
-    window = (window_t *)job->window;
+    window = job->window;
     if (cmev->format == 32
         && (Atom) cmev->data.l[0] == window->wm_delete_window_atom)
-        exit(0);
+        graphviz_exit(0);
 }
 
-static boolean handle_keypress(GVJ_t *job, XKeyEvent *kev)
+static bool handle_keypress(GVJ_t *job, XKeyEvent *kev)
 {
-    
-    int i;
     KeyCode *keycodes;
 
-    keycodes = (KeyCode *)job->keycodes;
-    for (i=0; i < job->numkeys; i++) {
+    keycodes = job->keycodes;
+    for (size_t i = 0; i < job->numkeys; i++) {
 	if (kev->keycode == keycodes[i])
-	    return (job->keybindings[i].callback)(job);
+	    return job->keybindings[i].callback(job) != 0;
     }
-    return FALSE;
+    return false;
 }
 
 static Visual *find_argb_visual(Display * dpy, int scr)
@@ -145,10 +156,9 @@ static Visual *find_argb_visual(Display * dpy, int scr)
 
 static void browser_show(GVJ_t *job)
 {
-#if defined HAVE_SYS_TYPES_H && defined HAVE_UNISTD_H
+#ifdef HAVE_SYS_TYPES_H
    char *exec_argv[3] = {BROWSER, NULL, NULL};
    pid_t pid;
-   int err;
 
    exec_argv[1] = job->selected_href;
 
@@ -157,7 +167,7 @@ static void browser_show(GVJ_t *job)
        fprintf(stderr,"fork failed: %s\n", strerror(errno));
    }
    else if (pid == 0) {
-       err = execvp(exec_argv[0], exec_argv);
+       execvp(exec_argv[0], exec_argv);
        fprintf(stderr,"error starting %s: %s\n", exec_argv[0], strerror(errno));
    }
 #else
@@ -177,27 +187,33 @@ static int handle_xlib_events (GVJ_t *firstjob, Display *dpy)
         XNextEvent(dpy, &xev);
 
         for (job = firstjob; job; job = job->next_active) {
-	    window = (window_t *)job->window;
+	    window = job->window;
 	    if (xev.xany.window == window->win) {
                 switch (xev.xany.type) {
                 case ButtonPress:
 		    pointer.x = (double)xev.xbutton.x;
 		    pointer.y = (double)xev.xbutton.y;
-                    (job->callbacks->button_press)(job, xev.xbutton.button, pointer);
+                    assert(xev.xbutton.button <= (unsigned)INT_MAX &&
+                           "Xlib returned invalid button event");
+                    job->callbacks->button_press(job, (int)xev.xbutton.button,
+                                                 pointer);
 		    rc++;
                     break;
                 case MotionNotify:
 		    if (job->button) { /* only interested while a button is pressed */
 		        pointer.x = (double)xev.xbutton.x;
 		        pointer.y = (double)xev.xbutton.y;
-                        (job->callbacks->motion)(job, pointer);
+                        job->callbacks->motion(job, pointer);
 		        rc++;
 		    }
                     break;
                 case ButtonRelease:
 		    pointer.x = (double)xev.xbutton.x;
 		    pointer.y = (double)xev.xbutton.y;
-                    (job->callbacks->button_release)(job, xev.xbutton.button, pointer);
+                    assert(xev.xbutton.button <= (unsigned)INT_MAX &&
+                           "Xlib returned invalid button event");
+                    job->callbacks->button_release(job, (int)xev.xbutton.button,
+                                                   pointer);
 		    if (job->selected_href && job->selected_href[0] && xev.xbutton.button == 1)
 		        browser_show(job);
 		    rc++;
@@ -219,6 +235,8 @@ static int handle_xlib_events (GVJ_t *firstjob, Display *dpy)
                     handle_client_message(job, &xev.xclient);
 		    rc++;
                     break;
+                default:
+                    break;
                 }
 	        break;
 	    }
@@ -232,28 +250,34 @@ static void update_display(GVJ_t *job, Display *dpy)
     window_t *window;
     cairo_surface_t *surface;
 
-    window = (window_t *)job->window;
+    window = job->window;
+
+    // window geometry is set to fixed values
+    assert(job->width <= (unsigned)INT_MAX && "out of range width");
+    assert(job->height <= (unsigned)INT_MAX && "out of range height");
 
     if (job->has_grown) {
 	XFreePixmap(dpy, window->pix);
+	assert(window->depth >= 0 && "Xlib returned invalid window depth");
 	window->pix = XCreatePixmap(dpy, window->win,
-			job->width, job->height, window->depth);
-	job->has_grown = 0;
-	job->needs_refresh = 1;
+	                            job->width, job->height,
+	                            (unsigned)window->depth);
+	job->has_grown = false;
+	job->needs_refresh = true;
     }
     if (job->needs_refresh) {
 	XFillRectangle(dpy, window->pix, window->gc, 0, 0,
                 	job->width, job->height);
 	surface = cairo_xlib_surface_create(dpy,
 			window->pix, window->visual,
-			job->width, job->height);
-    	job->context = (void *)cairo_create(surface);
-	job->external_context = TRUE;
-        (job->callbacks->refresh)(job);
+			(int)job->width, (int)job->height);
+    	job->context = cairo_create(surface);
+	job->external_context = true;
+        job->callbacks->refresh(job);
 	cairo_surface_destroy(surface);
 	XCopyArea(dpy, window->pix, window->win, window->gc,
 			0, 0, job->width, job->height, 0, 0);
-        job->needs_refresh = 0;
+        job->needs_refresh = false;
     }
 }
 
@@ -267,31 +291,28 @@ static void init_window(GVJ_t *job, Display *dpy, int scr)
     XSizeHints *normalhints;
     XClassHint *classhint;
     uint64_t attributemask = 0;
-    char *name;
     window_t *window;
-    int w, h;
     double zoom_to_fit;
 
-    window = (window_t *)malloc(sizeof(window_t));
+    window = malloc(sizeof(window_t));
     if (window == NULL) {
 	fprintf(stderr, "Failed to malloc window_t\n");
 	return;
     }
 
-    w = 480;    /* FIXME - w,h should be set by a --geometry commandline option */
-    h = 325;
+    unsigned w = 480;    /* FIXME - w,h should be set by a --geometry commandline option */
+    unsigned h = 325;
     
-    zoom_to_fit = MIN((double) w / (double) job->width,
-			(double) h / (double) job->height);
+    zoom_to_fit = fmin((double)w / job->width, (double)h / job->height);
     if (zoom_to_fit < 1.0) /* don't make bigger */
 	job->zoom *= zoom_to_fit;
 
     job->width  = w;    /* use window geometry */
     job->height = h;
 
-    job->window = (void *)window;
-    job->fit_mode = 0;
-    job->needs_refresh = 1;
+    job->window = window;
+    job->fit_mode = false;
+    job->needs_refresh = true;
 
     if (argb && (window->visual = find_argb_visual(dpy, scr))) {
         window->cmap = XCreateColormap(dpy, RootWindow(dpy, scr),
@@ -319,16 +340,17 @@ static void init_window(GVJ_t *job, Display *dpy, int scr)
                              InputOutput, window->visual,
                              attributemask, &attributes);
 
-    name = malloc(strlen("graphviz: ") + strlen(base) + 1);
-    strcpy(name, "graphviz: ");
-    strcat(name, base);
+    agxbuf name = {0};
+    agxbprint(&name, "graphviz: %s", base);
 
     normalhints = XAllocSizeHints();
     normalhints->flags = 0;
     normalhints->x = 0;
     normalhints->y = 0;
-    normalhints->width = job->width;
-    normalhints->height = job->height;
+    assert(job->width <= (unsigned)INT_MAX && "out of range width");
+    normalhints->width = (int)job->width;
+    assert(job->height <= (unsigned)INT_MAX && "out of range height");
+    normalhints->height = (int)job->height;
 
     classhint = XAllocClassHint();
     classhint->res_name = "graphviz";
@@ -338,15 +360,16 @@ static void init_window(GVJ_t *job, Display *dpy, int scr)
     wmhints->flags = InputHint;
     wmhints->input = True;
 
-    Xutf8SetWMProperties(dpy, window->win, name, base, 0, 0,
+    Xutf8SetWMProperties(dpy, window->win, agxbuse(&name), base, 0, 0,
                          normalhints, wmhints, classhint);
     XFree(wmhints);
     XFree(classhint);
     XFree(normalhints);
-    free(name);
+    agxbfree(&name);
 
+    assert(window->depth >= 0 && "Xlib returned invalid window depth");
     window->pix = XCreatePixmap(dpy, window->win, job->width, job->height,
-		window->depth);
+                                (unsigned)window->depth);
     if (argb)
         gcv.foreground = 0;
     else
@@ -361,20 +384,20 @@ static void init_window(GVJ_t *job, Display *dpy, int scr)
         | KeyPressMask
         | StructureNotifyMask
         | ExposureMask);
-    XSelectInput(dpy, window->win, window->event_mask);
+    XSelectInput(dpy, window->win, (long)window->event_mask);
     window->wm_delete_window_atom =
         XInternAtom(dpy, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(dpy, window->win, &window->wm_delete_window_atom, 1);
     XMapWindow(dpy, window->win);
 }
 
-static int handle_stdin_events(GVJ_t *job, int stdin_fd)
+static int handle_stdin_events(GVJ_t *job)
 {
     int rc=0;
 
     if (feof(stdin))
 	return -1;
-    (job->callbacks->read)(job, job->input_filename, job->layout_type);
+    job->callbacks->read(job, job->input_filename, job->layout_type);
     
     rc++;
     return rc;
@@ -383,8 +406,7 @@ static int handle_stdin_events(GVJ_t *job, int stdin_fd)
 #ifdef HAVE_SYS_INOTIFY_H
 static int handle_file_events(GVJ_t *job, int inotify_fd)
 {
-    int avail, ret, len, ln, rc = 0;
-    static char *buf;
+    int avail, ret, len, rc = 0;
     char *bf, *p;
     struct inotify_event *event;
 
@@ -395,54 +417,39 @@ static int handle_file_events(GVJ_t *job, int inotify_fd)
     }
 
     if (avail) {
-        buf = realloc(buf, avail);
+        assert(avail > 0 && "invalid value from FIONREAD");
+        void *buf = malloc((size_t)avail);
         if (!buf) {
-            fprintf(stderr,"problem with realloc(%d)\n", avail);
+            fprintf(stderr, "out of memory (could not allocate %d bytes)\n",
+                    avail);
             return -1;
         }
-        len = read(inotify_fd, buf, avail);
+        len = (int)read(inotify_fd, buf, (size_t)avail);
         if (len != avail) {
-            fprintf(stderr,"avail = %u, len = %u\n", avail, len);
+            fprintf(stderr,"avail = %d, len = %d\n", avail, len);
+            free(buf);
             return -1;
         }
         bf = buf;
         while (len > 0) {
     	    event = (struct inotify_event *)bf;
-	    switch (event->mask) {
-	    case IN_MODIFY:
+	    if (event->mask == IN_MODIFY) {
 		p = strrchr(job->input_filename, '/');
 		if (p)
 		    p++;
 		else 
 		    p = job->input_filename;
-		if (strcmp((char*)(&(event->name)), p) == 0) {
-		    (job->callbacks->read)(job, job->input_filename, job->layout_type);
+		if (strcmp(event->name, p) == 0) {
+		    job->callbacks->read(job, job->input_filename, job->layout_type);
 		    rc++;
 		}
-		break;
-
-            case IN_ACCESS:
-            case IN_ATTRIB:
-            case IN_CLOSE_WRITE:
-            case IN_CLOSE_NOWRITE:
-            case IN_OPEN:
-            case IN_MOVED_FROM:
-            case IN_MOVED_TO:
-            case IN_CREATE:
-            case IN_DELETE:
-            case IN_DELETE_SELF:
-            case IN_MOVE_SELF:
-            case IN_UNMOUNT:
-            case IN_Q_OVERFLOW:
-            case IN_IGNORED:
-            case IN_ISDIR:
-            case IN_ONESHOT:
-		break;
     	    }
-	    ln = event->len + sizeof(struct inotify_event);
+	    size_t ln = event->len + sizeof(struct inotify_event);
+            assert(ln <= (size_t)len);
             bf += ln;
-            len -= ln;
+            len -= (int)ln;
         }
+        free(buf);
         if (len != 0) {
             fprintf(stderr,"length miscalculation, len = %d\n", len);
             return -1;
@@ -452,13 +459,15 @@ static int handle_file_events(GVJ_t *job, int inotify_fd)
 }
 #endif
 
+static bool initialized;
+
 static void xlib_initialize(GVJ_t *firstjob)
 {
     Display *dpy;
     KeySym keysym;
     KeyCode *keycodes;
     const char *display_name = NULL;
-    int i, scr;
+    int scr;
 
     dpy = XOpenDisplay(display_name);
     if (dpy == NULL) {
@@ -468,15 +477,16 @@ static void xlib_initialize(GVJ_t *firstjob)
     }
     scr = DefaultScreen(dpy);
 
-    firstjob->display = (void*)dpy;
+    firstjob->display = dpy;
     firstjob->screen = scr;
 
-    keycodes = (KeyCode *)malloc(firstjob->numkeys * sizeof(KeyCode));
+    keycodes = malloc(firstjob->numkeys * sizeof(KeyCode));
     if (keycodes == NULL) {
-        fprintf(stderr, "Failed to malloc %d*KeyCode\n", firstjob->numkeys);
+        fprintf(stderr, "Failed to malloc %" PRISIZE_T "*KeyCode\n",
+                firstjob->numkeys);
         return;
     }
-    for (i = 0; i < firstjob->numkeys; i++) {
+    for (size_t i = 0; i < firstjob->numkeys; i++) {
         keysym = XStringToKeysym(firstjob->keybindings[i].keystring);
         if (keysym == NoSymbol)
             fprintf(stderr, "ERROR: No keysym for \"%s\"\n",
@@ -484,27 +494,28 @@ static void xlib_initialize(GVJ_t *firstjob)
         else
             keycodes[i] = XKeysymToKeycode(dpy, keysym);
     }
-    firstjob->keycodes = (void*)keycodes;
+    firstjob->keycodes = keycodes;
 
     firstjob->device_dpi.x = DisplayWidth(dpy, scr) * 25.4 / DisplayWidthMM(dpy, scr);
     firstjob->device_dpi.y = DisplayHeight(dpy, scr) * 25.4 / DisplayHeightMM(dpy, scr);
-    firstjob->device_sets_dpi = TRUE;
+    firstjob->device_sets_dpi = true;
+
+    initialized = true;
 }
 
 static void xlib_finalize(GVJ_t *firstjob)
 {
     GVJ_t *job;
-    Display *dpy = (Display *)(firstjob->display);
+    Display *dpy = firstjob->display;
     int scr = firstjob->screen;
     KeyCode *keycodes= firstjob->keycodes;
     int numfds, stdin_fd=0, xlib_fd, ret, events;
     fd_set rfds;
-    boolean watching_stdin_p = FALSE;
+    bool watching_stdin_p = false;
 #ifdef HAVE_SYS_INOTIFY_H
     int wd=0;
     int inotify_fd=0;
-    boolean watching_file_p = FALSE;
-    static char *dir;
+    bool watching_file_p = false;
     char *p, *cwd = NULL;
 
     inotify_fd = inotify_init();
@@ -514,38 +525,42 @@ static void xlib_finalize(GVJ_t *firstjob)
     }
 #endif
 
+    /* skip if initialization previously failed */
+    if (!initialized) {
+        return;
+    }
+
     numfds = xlib_fd = XConnectionNumber(dpy);
 
     if (firstjob->input_filename) {
         if (firstjob->graph_index == 0) {
 #ifdef HAVE_SYS_INOTIFY_H
-	    watching_file_p = TRUE;
+	    watching_file_p = true;
 
+	    agxbuf dir = {0};
 	    if (firstjob->input_filename[0] != '/') {
     	        cwd = getcwd(NULL, 0);
-	        dir = realloc(dir, strlen(cwd) + 1 + strlen(firstjob->input_filename) + 1);
-	        strcpy(dir, cwd);
-	        strcat(dir, "/");
-	        strcat(dir, firstjob->input_filename);
+	        agxbprint(&dir, "%s/%s", cwd, firstjob->input_filename);
 	        free(cwd);
 	    }
 	    else {
-	        dir = realloc(dir, strlen(firstjob->input_filename) + 1);
-	        strcpy(dir, firstjob->input_filename);
+	        agxbput(&dir, firstjob->input_filename);
 	    }
-	    p = strrchr(dir,'/');
+	    char *dirstr = agxbuse(&dir);
+	    p = strrchr(dirstr,'/');
 	    *p = '\0';
     
-    	    wd = inotify_add_watch(inotify_fd, dir, IN_MODIFY );
+    	    wd = inotify_add_watch(inotify_fd, dirstr, IN_MODIFY);
+	    agxbfree(&dir);
 
-            numfds = MAX(inotify_fd, numfds);
+            numfds = imax(inotify_fd, numfds);
 #endif
 	}
     }
     else {
-	watching_stdin_p = TRUE;
+	watching_stdin_p = true;
 	stdin_fd = fcntl(STDIN_FILENO, F_DUPFD, 0);
-	numfds = MAX(stdin_fd, numfds);
+	numfds = imax(stdin_fd, numfds);
     }
 
     for (job = firstjob; job; job = job->next_active)
@@ -570,9 +585,9 @@ static void xlib_finalize(GVJ_t *firstjob)
 
 	if (watching_stdin_p) {
 	    if (FD_ISSET(stdin_fd, &rfds)) {
-                ret = handle_stdin_events(firstjob, stdin_fd);
+                ret = handle_stdin_events(firstjob);
 	        if (ret < 0) {
-	            watching_stdin_p = FALSE;
+	            watching_stdin_p = false;
                     FD_CLR(stdin_fd, &rfds);
                 }
 	        events += ret;

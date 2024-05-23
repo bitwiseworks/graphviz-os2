@@ -1,25 +1,39 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup common_utils
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include "render.h"
-#include "htmltable.h"
+#include <assert.h>
+#include <common/render.h>
+#include <common/htmltable.h>
 #include "htmlparse.h"
-#include "htmllex.h"
-#include "cdt.h"
-#include <ctype.h>
+#include <common/htmllex.h>
+#include <cdt/cdt.h>
+#include <cgraph/alloc.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/startswith.h>
+#include <cgraph/strcasecmp.h>
+#include <cgraph/strview.h>
+#include <cgraph/tokenize.h>
+#include <cgraph/unused.h>
+#include <limits.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef HAVE_EXPAT
+#ifdef _WIN32
+// ensure that the expat functions get the correct storage class
+// declarations also on MinGW
+#define XML_USE_MSC_EXTENSIONS 1
+#endif
 #include <expat.h>
 #endif
 
@@ -31,18 +45,18 @@ typedef struct {
 #ifdef HAVE_EXPAT
     XML_Parser parser;
 #endif
-    char* ptr;			/* input source */
-    int tok;			/* token type   */
-    agxbuf* xb;			/* buffer to gather T_string data */
-    agxbuf  lb;			/* buffer for translating lexical data */
-    char warn;			/* set if warning given */
-    char error;			/* set if error given */
-    char inCell;		/* set if in TD to allow T_string */
-    char mode;			/* for handling artificial <HTML>..</HTML> */
-    char *currtok;		/* for error reporting */
-    char *prevtok;		/* for error reporting */
-    int currtoklen;
-    int prevtoklen;
+    char* ptr;         // input source
+    int tok;           // token type
+    agxbuf* xb;        // buffer to gather T_string data
+    agxbuf lb;         // buffer for translating lexical data
+    int warn;          // set if warning given
+    int error;         // set if error given
+    char inCell;       // set if in TD to allow T_string
+    char mode;         // for handling artificial <HTML>..</HTML>
+    char *currtok;     // for error reporting
+    char *prevtok;     // for error reporting
+    size_t currtoklen;
+    size_t prevtoklen;
 } lexstate_t;
 static lexstate_t state;
 
@@ -66,7 +80,7 @@ void htmlerror(const char *msg)
     if (state.error)
 	return;
     state.error = 1;
-    agerr(AGERR, "%s in line %d \n", msg, htmllineno());
+    agerrorf("%s in line %lu \n", msg, htmllineno());
     error_context();
 }
 
@@ -78,17 +92,11 @@ static void lexerror(const char *name)
 {
     state.tok = T_error;
     state.error = 1;
-    agerr(AGERR, "Unknown HTML element <%s> on line %d \n",
-	  name, htmllineno());
+    agerrorf("Unknown HTML element <%s> on line %lu \n", name, htmllineno());
 }
 
 typedef int (*attrFn) (void *, char *);
 typedef int (*bcmpfn) (const void *, const void *);
-
-#define MAX_CHAR    (((unsigned char)(~0)) >> 1)
-#define MIN_CHAR    ((signed char)(~MAX_CHAR))
-#define MAX_UCHAR   ((unsigned char)(~0))
-#define MAX_USHORT  ((unsigned short)(~0))
 
 /* Mechanism for automatically processing attributes */
 typedef struct {
@@ -99,11 +107,11 @@ typedef struct {
 #define ISIZE (sizeof(attr_item))
 
 /* icmp:
- * Compare two attr_item. Used in bsearch
+ * Compare an attr_item. Used in bsearch
  */
-static int icmp(attr_item * i, attr_item * j)
-{
-    return strcasecmp(i->name, j->name);
+static int icmp(const void *name, const void *item) {
+  const attr_item *j = item;
+  return strcasecmp(name, j->name);
 }
 
 static int bgcolorfn(htmldata_t * p, char *v)
@@ -130,7 +138,7 @@ static int sidesfn(htmldata_t * p, char *v)
     char c;
 
     while ((c = *v++)) {
-	switch (tolower(c)) {
+	switch (gv_tolower(c)) {
 	case 'l' :
 	    flags |= BORDER_LEFT;
 	    break;
@@ -144,7 +152,7 @@ static int sidesfn(htmldata_t * p, char *v)
 	    flags |= BORDER_BOTTOM;
 	    break;
 	default :
-	    agerr(AGWARN, "Unrecognized character '%c' (%d) in sides attribute\n", c, c);
+	    agwarningf("Unrecognized character '%c' (%d) in sides attribute\n", c, c);
 	    break;
 	}
     }
@@ -170,29 +178,21 @@ static int portfn(htmldata_t * p, char *v)
 static int stylefn(htmldata_t * p, char *v)
 {
     int rv = 0;
-    char c;
-    char* tk;
-    char* buf = strdup (v);
-    for (tk = strtok (buf, DELIM); tk; tk = strtok (NULL, DELIM)) {
-	c = (char) toupper(*tk);
-	if (c == 'R') {
-	    if (!strcasecmp(tk + 1, "OUNDED")) p->style |= ROUNDED;
-	    else if (!strcasecmp(tk + 1, "ADIAL")) p->style |= RADIAL;
-	    else {
-		agerr(AGWARN, "Illegal value %s for STYLE - ignored\n", tk);
-		rv = 1;
-	    }
-	}
-	else if(!strcasecmp(tk,"SOLID")) p->style &= ~(DOTTED|DASHED);
-	else if(!strcasecmp(tk,"INVISIBLE") || !strcasecmp(tk,"INVIS")) p->style |= INVISIBLE;
-	else if(!strcasecmp(tk,"DOTTED")) p->style |= DOTTED;
-	else if(!strcasecmp(tk,"DASHED")) p->style |= DASHED;
+    for (tok_t t = tok(v, DELIM); !tok_end(&t); tok_next(&t)) {
+	strview_t tk = tok_get(&t);
+	if (strview_case_str_eq(tk, "ROUNDED")) p->style |= ROUNDED;
+	else if (strview_case_str_eq(tk, "RADIAL")) p->style |= RADIAL;
+	else if (strview_case_str_eq(tk,"SOLID")) p->style &= (unsigned short)~(DOTTED|DASHED);
+	else if (strview_case_str_eq(tk,"INVISIBLE") ||
+	         strview_case_str_eq(tk,"INVIS")) p->style |= INVISIBLE;
+	else if (strview_case_str_eq(tk,"DOTTED")) p->style |= DOTTED;
+	else if (strview_case_str_eq(tk,"DASHED")) p->style |= DASHED;
 	else {
-	    agerr(AGWARN, "Illegal value %s for STYLE - ignored\n", tk);
+	    agwarningf("Illegal value %.*s for STYLE - ignored\n", (int)tk.size,
+	          tk.data);
 	    rv = 1;
 	}
     }
-    free (buf);
     return rv;
 }
 
@@ -222,13 +222,13 @@ static int doInt(char *v, char *s, int min, int max, long *ul)
     long b = strtol(v, &ep, 10);
 
     if (ep == v) {
-	agerr(AGWARN, "Improper %s value %s - ignored", s, v);
+	agwarningf("Improper %s value %s - ignored", s, v);
 	rv = 1;
     } else if (b > max) {
-	agerr(AGWARN, "%s value %s > %d - too large - ignored", s, v, max);
+	agwarningf("%s value %s > %d - too large - ignored", s, v, max);
 	rv = 1;
     } else if (b < min) {
-	agerr(AGWARN, "%s value %s < %d - too small - ignored", s, v, min);
+	agwarningf("%s value %s < %d - too small - ignored", s, v, min);
 	rv = 1;
     } else
 	*ul = b;
@@ -251,7 +251,7 @@ static int borderfn(htmldata_t * p, char *v)
 {
     long u;
 
-    if (doInt(v, "BORDER", 0, MAX_UCHAR, &u))
+    if (doInt(v, "BORDER", 0, UCHAR_MAX, &u))
 	return 1;
     p->border = (unsigned char) u;
     p->flags |= BORDER_SET;
@@ -262,7 +262,7 @@ static int cellpaddingfn(htmldata_t * p, char *v)
 {
     long u;
 
-    if (doInt(v, "CELLPADDING", 0, MAX_UCHAR, &u))
+    if (doInt(v, "CELLPADDING", 0, UCHAR_MAX, &u))
 	return 1;
     p->pad = (unsigned char) u;
     p->flags |= PAD_SET;
@@ -273,7 +273,7 @@ static int cellspacingfn(htmldata_t * p, char *v)
 {
     long u;
 
-    if (doInt(v, "CELLSPACING", MIN_CHAR, MAX_CHAR, &u))
+    if (doInt(v, "CELLSPACING", SCHAR_MIN, SCHAR_MAX, &u))
 	return 1;
     p->space = (signed char) u;
     p->flags |= SPACE_SET;
@@ -284,40 +284,39 @@ static int cellborderfn(htmltbl_t * p, char *v)
 {
     long u;
 
-    if (doInt(v, "CELLSBORDER", 0, MAX_CHAR, &u))
+    if (doInt(v, "CELLBORDER", 0, INT8_MAX, &u))
 	return 1;
-    p->cb = (unsigned char) u;
+    p->cellborder = (int8_t)u;
     return 0;
 }
 
 static int columnsfn(htmltbl_t * p, char *v)
 {
     if (*v != '*') {
-	agerr(AGWARN, "Unknown value %s for COLUMNS - ignored\n", v);
+	agwarningf("Unknown value %s for COLUMNS - ignored\n", v);
 	return 1;
     }
-    p->flags |= HTML_VRULE;
+    p->vrule = true;
     return 0;
 }
 
 static int rowsfn(htmltbl_t * p, char *v)
 {
     if (*v != '*') {
-	agerr(AGWARN, "Unknown value %s for ROWS - ignored\n", v);
+	agwarningf("Unknown value %s for ROWS - ignored\n", v);
 	return 1;
     }
-    p->flags |= HTML_HRULE;
+    p->hrule = true;
     return 0;
 }
 
 static int fixedsizefn(htmldata_t * p, char *v)
 {
     int rv = 0;
-    char c = (char) toupper(*(unsigned char *) v);
-    if ((c == 'T') && !strcasecmp(v + 1, "RUE"))
+    if (!strcasecmp(v, "TRUE"))
 	p->flags |= FIXED_FLAG;
-    else if ((c != 'F') || strcasecmp(v + 1, "ALSE")) {
-	agerr(AGWARN, "Illegal value %s for FIXEDSIZE - ignored\n", v);
+    else if (strcasecmp(v, "FALSE")) {
+	agwarningf("Illegal value %s for FIXEDSIZE - ignored\n", v);
 	rv = 1;
     }
     return rv;
@@ -326,13 +325,12 @@ static int fixedsizefn(htmldata_t * p, char *v)
 static int valignfn(htmldata_t * p, char *v)
 {
     int rv = 0;
-    char c = (char) toupper(*v);
-    if ((c == 'B') && !strcasecmp(v + 1, "OTTOM"))
+    if (!strcasecmp(v, "BOTTOM"))
 	p->flags |= VALIGN_BOTTOM;
-    else if ((c == 'T') && !strcasecmp(v + 1, "OP"))
+    else if (!strcasecmp(v, "TOP"))
 	p->flags |= VALIGN_TOP;
-    else if ((c != 'M') || strcasecmp(v + 1, "IDDLE")) {
-	agerr(AGWARN, "Illegal value %s for VALIGN - ignored\n", v);
+    else if (strcasecmp(v, "MIDDLE")) {
+	agwarningf("Illegal value %s for VALIGN - ignored\n", v);
 	rv = 1;
     }
     return rv;
@@ -341,13 +339,12 @@ static int valignfn(htmldata_t * p, char *v)
 static int halignfn(htmldata_t * p, char *v)
 {
     int rv = 0;
-    char c = (char) toupper(*v);
-    if ((c == 'L') && !strcasecmp(v + 1, "EFT"))
+    if (!strcasecmp(v, "LEFT"))
 	p->flags |= HALIGN_LEFT;
-    else if ((c == 'R') && !strcasecmp(v + 1, "IGHT"))
+    else if (!strcasecmp(v, "RIGHT"))
 	p->flags |= HALIGN_RIGHT;
-    else if ((c != 'C') || strcasecmp(v + 1, "ENTER")) {
-	agerr(AGWARN, "Illegal value %s for ALIGN - ignored\n", v);
+    else if (strcasecmp(v, "CENTER")) {
+	agwarningf("Illegal value %s for ALIGN - ignored\n", v);
 	rv = 1;
     }
     return rv;
@@ -356,32 +353,30 @@ static int halignfn(htmldata_t * p, char *v)
 static int cell_halignfn(htmldata_t * p, char *v)
 {
     int rv = 0;
-    char c = (char) toupper(*v);
-    if ((c == 'L') && !strcasecmp(v + 1, "EFT"))
+    if (!strcasecmp(v, "LEFT"))
 	p->flags |= HALIGN_LEFT;
-    else if ((c == 'R') && !strcasecmp(v + 1, "IGHT"))
+    else if (!strcasecmp(v, "RIGHT"))
 	p->flags |= HALIGN_RIGHT;
-    else if ((c == 'T') && !strcasecmp(v + 1, "EXT"))
+    else if (!strcasecmp(v, "TEXT"))
 	p->flags |= HALIGN_TEXT;
-    else if ((c != 'C') || strcasecmp(v + 1, "ENTER"))
+    else if (strcasecmp(v, "CENTER"))
 	rv = 1;
     if (rv)
-	agerr(AGWARN, "Illegal value %s for ALIGN in TD - ignored\n", v);
+	agwarningf("Illegal value %s for ALIGN in TD - ignored\n", v);
     return rv;
 }
 
 static int balignfn(htmldata_t * p, char *v)
 {
     int rv = 0;
-    char c = (char) toupper(*v);
-    if ((c == 'L') && !strcasecmp(v + 1, "EFT"))
+    if (!strcasecmp(v, "LEFT"))
 	p->flags |= BALIGN_LEFT;
-    else if ((c == 'R') && !strcasecmp(v + 1, "IGHT"))
+    else if (!strcasecmp(v, "RIGHT"))
 	p->flags |= BALIGN_RIGHT;
-    else if ((c != 'C') || strcasecmp(v + 1, "ENTER"))
+    else if (strcasecmp(v, "CENTER"))
 	rv = 1;
     if (rv)
-	agerr(AGWARN, "Illegal value %s for BALIGN in TD - ignored\n", v);
+	agwarningf("Illegal value %s for BALIGN in TD - ignored\n", v);
     return rv;
 }
 
@@ -389,7 +384,7 @@ static int heightfn(htmldata_t * p, char *v)
 {
     long u;
 
-    if (doInt(v, "HEIGHT", 0, MAX_USHORT, &u))
+    if (doInt(v, "HEIGHT", 0, USHRT_MAX, &u))
 	return 1;
     p->height = (unsigned short) u;
     return 0;
@@ -399,7 +394,7 @@ static int widthfn(htmldata_t * p, char *v)
 {
     long u;
 
-    if (doInt(v, "WIDTH", 0, MAX_USHORT, &u))
+    if (doInt(v, "WIDTH", 0, USHRT_MAX, &u))
 	return 1;
     p->width = (unsigned short) u;
     return 0;
@@ -409,13 +404,13 @@ static int rowspanfn(htmlcell_t * p, char *v)
 {
     long u;
 
-    if (doInt(v, "ROWSPAN", 0, MAX_USHORT, &u))
+    if (doInt(v, "ROWSPAN", 0, UINT16_MAX, &u))
 	return 1;
     if (u == 0) {
-	agerr(AGWARN, "ROWSPAN value cannot be 0 - ignored\n");
+	agwarningf("ROWSPAN value cannot be 0 - ignored\n");
 	return 1;
     }
-    p->rspan = (unsigned short) u;
+    p->rowspan = (uint16_t)u;
     return 0;
 }
 
@@ -423,13 +418,13 @@ static int colspanfn(htmlcell_t * p, char *v)
 {
     long u;
 
-    if (doInt(v, "COLSPAN", 0, MAX_USHORT, &u))
+    if (doInt(v, "COLSPAN", 0, UINT16_MAX, &u))
 	return 1;
     if (u == 0) {
-	agerr(AGWARN, "COLSPAN value cannot be 0 - ignored\n");
+	agwarningf("COLSPAN value cannot be 0 - ignored\n");
 	return 1;
     }
-    p->cspan = (unsigned short) u;
+    p->colspan = (uint16_t)u;
     return 0;
 }
 
@@ -449,7 +444,7 @@ static int ptsizefn(textfont_t * p, char *v)
 {
     long u;
 
-    if (doInt(v, "POINT-SIZE", 0, MAX_UCHAR, &u))
+    if (doInt(v, "POINT-SIZE", 0, UCHAR_MAX, &u))
 	return 1;
     p->size = (double) u;
     return 0;
@@ -470,15 +465,14 @@ static int scalefn(htmlimg_t * p, char *v)
 static int alignfn(int *p, char *v)
 {
     int rv = 0;
-    char c = (char) toupper(*v);
-    if ((c == 'R') && !strcasecmp(v + 1, "IGHT"))
+    if (!strcasecmp(v, "RIGHT"))
 	*p = 'r';
-    else if ((c == 'L') || !strcasecmp(v + 1, "EFT"))
+    else if (!strcasecmp(v, "LEFT"))
 	*p = 'l';
-    else if ((c == 'C') || strcasecmp(v + 1, "ENTER")) 
+    else if (!strcasecmp(v, "CENTER"))
 	*p = 'n';
     else {
-	agerr(AGWARN, "Illegal value %s for ALIGN - ignored\n", v);
+	agwarningf("Illegal value %s for ALIGN - ignored\n", v);
 	rv = 1;
     }
     return rv;
@@ -558,22 +552,19 @@ static attr_item br_items[] = {
  * Name/value pairs are in array atts, which is null terminated.
  * s is the name of the HTML element being processed.
  */
-static void
-doAttrs(void *tp, attr_item * items, int nel, char **atts, char *s)
-{
+static void doAttrs(void *tp, attr_item *items, size_t nel, char **atts,
+                    char *s) {
     char *name;
     char *val;
     attr_item *ip;
-    attr_item key;
 
     while ((name = *atts++) != NULL) {
 	val = *atts++;
-	key.name = name;
-	ip = (attr_item *) bsearch(&key, items, nel, ISIZE, (bcmpfn) icmp);
+	ip = bsearch(name, items, nel, ISIZE, icmp);
 	if (ip)
 	    state.warn |= ip->action(tp, val);
 	else {
-	    agerr(AGWARN, "Illegal attribute %s in %s - ignored\n", name,
+	    agwarningf("Illegal attribute %s in %s - ignored\n", name,
 		  s);
 	    state.warn = 1;
 	}
@@ -588,19 +579,20 @@ static void mkBR(char **atts)
 
 static htmlimg_t *mkImg(char **atts)
 {
-    htmlimg_t *img = NEW(htmlimg_t);
+    htmlimg_t *img = gv_alloc(sizeof(htmlimg_t));
 
     doAttrs(img, img_items, sizeof(img_items) / ISIZE, atts, "<IMG>");
 
     return img;
 }
 
-static textfont_t *mkFont(GVC_t *gvc, char **atts, int flags, int ul)
-{
+static textfont_t *mkFont(GVC_t *gvc, char **atts, unsigned char flags) {
     textfont_t tf = {NULL,NULL,NULL,0.0,0,0};
 
     tf.size = -1.0;		/* unassigned */
-    tf.flags = flags;
+    enum { FLAGS_MAX = (1 << GV_TEXTFONT_FLAGS_WIDTH) - 1  };
+    assert(flags <= FLAGS_MAX);
+    tf.flags = (unsigned char)(flags & FLAGS_MAX);
     if (atts)
 	doAttrs(&tf, font_items, sizeof(font_items) / ISIZE, atts, "<FONT>");
 
@@ -609,10 +601,10 @@ static textfont_t *mkFont(GVC_t *gvc, char **atts, int flags, int ul)
 
 static htmlcell_t *mkCell(char **atts)
 {
-    htmlcell_t *cell = NEW(htmlcell_t);
+    htmlcell_t *cell = gv_alloc(sizeof(htmlcell_t));
 
-    cell->cspan = 1;
-    cell->rspan = 1;
+    cell->colspan = 1;
+    cell->rowspan = 1;
     doAttrs(cell, cell_items, sizeof(cell_items) / ISIZE, atts, "<TD>");
 
     return cell;
@@ -620,10 +612,10 @@ static htmlcell_t *mkCell(char **atts)
 
 static htmltbl_t *mkTbl(char **atts)
 {
-    htmltbl_t *tbl = NEW(htmltbl_t);
+    htmltbl_t *tbl = gv_alloc(sizeof(htmltbl_t));
 
-    tbl->rc = -1;		/* flag that table is a raw, parsed table */
-    tbl->cb = -1;		/* unset cell border attribute */
+    tbl->row_count = SIZE_MAX; // flag that table is a raw, parsed table
+    tbl->cellborder = -1; // unset cell border attribute
     doAttrs(tbl, tbl_items, sizeof(tbl_items) / ISIZE, atts, "<TABLE>");
 
     return tbl;
@@ -631,14 +623,13 @@ static htmltbl_t *mkTbl(char **atts)
 
 static void startElement(void *user, const char *name, char **atts)
 {
-    GVC_t *gvc = (GVC_t*)user;
+    GVC_t *gvc = user;
 
     if (strcasecmp(name, "TABLE") == 0) {
 	htmllval.tbl = mkTbl(atts);
 	state.inCell = 0;
 	state.tok = T_table;
-    } else if ((strcasecmp(name, "TR") == 0)
-	       || (strcasecmp(name, "TH") == 0)) {
+    } else if (strcasecmp(name, "TR") == 0 || strcasecmp(name, "TH") == 0) {
 	state.inCell = 0;
 	state.tok = T_row;
     } else if (strcasecmp(name, "TD") == 0) {
@@ -646,28 +637,28 @@ static void startElement(void *user, const char *name, char **atts)
 	htmllval.cell = mkCell(atts);
 	state.tok = T_cell;
     } else if (strcasecmp(name, "FONT") == 0) {
-	htmllval.font = mkFont(gvc, atts, 0, 0);
+	htmllval.font = mkFont(gvc, atts, 0);
 	state.tok = T_font;
     } else if (strcasecmp(name, "B") == 0) {
-	htmllval.font = mkFont(gvc, 0, HTML_BF, 0);
+	htmllval.font = mkFont(gvc, 0, HTML_BF);
 	state.tok = T_bold;
     } else if (strcasecmp(name, "S") == 0) {
-	htmllval.font = mkFont(gvc, 0, HTML_S, 0);
+	htmllval.font = mkFont(gvc, 0, HTML_S);
 	state.tok = T_s;
     } else if (strcasecmp(name, "U") == 0) {
-	htmllval.font = mkFont(gvc, 0, HTML_UL, 1);
+	htmllval.font = mkFont(gvc, 0, HTML_UL);
 	state.tok = T_underline;
     } else if (strcasecmp(name, "O") == 0) {
-	htmllval.font = mkFont(gvc, 0, HTML_OL, 1);
+	htmllval.font = mkFont(gvc, 0, HTML_OL);
 	state.tok = T_overline;
     } else if (strcasecmp(name, "I") == 0) {
-	htmllval.font = mkFont(gvc, 0, HTML_IF, 0);
+	htmllval.font = mkFont(gvc, 0, HTML_IF);
 	state.tok = T_italic;
     } else if (strcasecmp(name, "SUP") == 0) {
-	htmllval.font = mkFont(gvc, 0, HTML_SUP, 0);
+	htmllval.font = mkFont(gvc, 0, HTML_SUP);
 	state.tok = T_sup;
     } else if (strcasecmp(name, "SUB") == 0) {
-	htmllval.font = mkFont(gvc, 0, HTML_SUB, 0);
+	htmllval.font = mkFont(gvc, 0, HTML_SUB);
 	state.tok = T_sub;
     } else if (strcasecmp(name, "BR") == 0) {
 	mkBR(atts);
@@ -688,11 +679,12 @@ static void startElement(void *user, const char *name, char **atts)
 
 static void endElement(void *user, const char *name)
 {
+    (void)user;
+
     if (strcasecmp(name, "TABLE") == 0) {
 	state.tok = T_end_table;
 	state.inCell = 1;
-    } else if ((strcasecmp(name, "TR") == 0)
-	       || (strcasecmp(name, "TH") == 0)) {
+    } else if (strcasecmp(name, "TR") == 0 || strcasecmp(name, "TH") == 0) {
 	state.tok = T_end_row;
     } else if (strcasecmp(name, "TD") == 0) {
 	state.tok = T_end_cell;
@@ -749,6 +741,8 @@ static void endElement(void *user, const char *name)
  */
 static void characterData(void *user, const char *s, int length)
 {
+    (void)user;
+
     int i, cnt = 0;
     unsigned char c;
 
@@ -757,7 +751,7 @@ static void characterData(void *user, const char *s, int length)
 	    c = *s++;
 	    if (c >= ' ') {
 		cnt++;
-		agxbputc(state.xb, c);
+		agxbputc(state.xb, (char)c);
 	    }
 	}
 	if (cnt) state.tok = T_string;
@@ -769,7 +763,7 @@ int initHTMLlexer(char *src, agxbuf * xb, htmlenv_t *env)
 {
 #ifdef HAVE_EXPAT
     state.xb = xb;
-    agxbinit (&state.lb, SMALLBUF, NULL);
+    state.lb = (agxbuf){0};
     state.ptr = src;
     state.mode = 0;
     state.warn = 0;
@@ -787,7 +781,7 @@ int initHTMLlexer(char *src, agxbuf * xb, htmlenv_t *env)
 #else
     static int first;
     if (!first) {
-	agerr(AGWARN,
+	agwarningf(
 	      "Not built with libexpat. Table formatting is not available.\n");
 	first++;
     }
@@ -795,16 +789,25 @@ int initHTMLlexer(char *src, agxbuf * xb, htmlenv_t *env)
 #endif
 }
 
-int clearHTMLlexer()
+int clearHTMLlexer(void)
 {
 #ifdef HAVE_EXPAT
-    int rv = state.warn | state.error;
+    int rv = state.error ? 3 : state.warn;
     XML_ParserFree(state.parser);
     agxbfree (&state.lb);
     return rv;
 #else
     return 1;
 #endif
+}
+
+/// \p agxbput, but assume that source and destination may overlap
+static UNUSED void agxbput_move(agxbuf *dst, const char *src) {
+  // we cannot call `agxbput` itself because it calls `memcpy`, thereby
+  // implicitly assuming that source and destination do not overlap
+  char *src_copy = gv_strdup(src);
+  agxbput(dst, src_copy);
+  free(src_copy);
 }
 
 #ifdef HAVE_EXPAT
@@ -829,8 +832,8 @@ static char *eatComment(char *p)
     s--;			/* move back to '\0' or '>' */
     if (*s) {
 	char *t = s - 2;
-	if ((t < p) || strncmp(t, "--", 2)) {
-	    agerr(AGWARN, "Unclosed comment\n");
+	if (t < p || !startswith(t, "--")) {
+	    agwarningf("Unclosed comment\n");
 	    state.warn = 1;
 	}
     }
@@ -847,20 +850,20 @@ static char *findNext(char *s, agxbuf* xb)
     char c;
 
     if (*s == '<') {
-	if ((*t == '!') && !strncmp(t + 1, "--", 2))
+	if (startswith(t, "!--"))
 	    t = eatComment(t + 3);
 	else
-	    while (*t && (*t != '>'))
+	    while (*t && *t != '>')
 		t++;
 	if (*t != '>') {
-	    agerr(AGWARN, "Label closed before end of HTML element\n");
+	    agwarningf("Label closed before end of HTML element\n");
 	    state.warn = 1;
 	} else
 	    t++;
     } else {
 	t = s;
-	while ((c = *t) && (c != '<')) {
-	    if ((c == '&') && (*(t+1) != '#')) {
+	while ((c = *t) && c != '<') {
+	    if (c == '&' && *(t+1) != '#') {
 		t = scanEntity(t + 1, xb);
 	    }
 	    else {
@@ -871,10 +874,49 @@ static char *findNext(char *s, agxbuf* xb)
     }
     return t;
 }
+
+/** guard a trailing right square bracket (]) from misinterpretation
+ *
+ * When parsing in incremental mode, expat tries to recognize malformed CDATA
+ * section terminators. See XML_TOK_TRAILING_RSQB in the expat source. As a
+ * result, when seeing text that ends in a ']' expat buffers this internally and
+ * returns truncated text for the current parse. The ']' is flushed as part of
+ * the next parsing call when expat learns it is not a CDATA section terminator.
+ *
+ * To prevent this situation from occurring, this function turns any trailing
+ * ']' into its XML escape sequence. This causes expat to realize immediately it
+ * is not part of a CDATA section terminator and flush it in the first parsing
+ * call. This has no effect on the final output, because expat handles the
+ * translation back from this escape sequence to ']'.
+ *
+ * @param xb Buffer containing content to protect
+ */
+static void protect_rsqb(agxbuf *xb) {
+
+  // if the buffer is empty, we have nothing to do
+  if (agxblen(xb) == 0) {
+    return;
+  }
+
+  // check the last character and if it is not ], we have nothing to do
+  char *data = agxbuse(xb);
+  size_t size = strlen(data);
+  assert(size > 0);
+  if (data[size - 1] != ']') {
+    agxbput_move(xb, data);
+    return;
+  }
+
+  // truncate ] and write back the remaining prefix
+  data[size - 1] = '\0';
+  agxbput_move(xb, data);
+
+  // write an XML-escaped version of ] as a replacement
+  agxbput(xb, "&#93;");
+}
 #endif
 
-int htmllineno()
-{
+unsigned long htmllineno(void) {
 #ifdef HAVE_EXPAT
     return XML_GetCurrentLineNumber(state.parser);
 #else
@@ -1006,16 +1048,16 @@ static void printTok(int tok)
 	s = "<unknown>";
     }
     if (tok == T_string) {
-	fprintf(stderr, "%s \"", s);
-	fwrite(agxbstart(state.xb), 1, agxblen(state.xb), stderr);
-	fprintf(stderr, "\"\n");
+	const char *token_text = agxbuse(state.xb);
+	fprintf(stderr, "%s \"%s\"\n", s, token_text);
+	agxbput_move(state.xb, token_text);
     } else
 	fprintf(stderr, "%s\n", s);
 }
 
 #endif
 
-int htmllex()
+int htmllex(void)
 {
 #ifdef HAVE_EXPAT
     static char *begin_html = "<HTML>";
@@ -1023,7 +1065,7 @@ int htmllex()
 
     char *s;
     char *endp = 0;
-    int len, llen;
+    size_t len, llen;
     int rv;
 
     state.tok = 0;
@@ -1043,22 +1085,27 @@ int htmllex()
 		len = strlen(s);
 	    } else {
 		endp = findNext(s,&state.lb);
-		len = endp - s;
+		len = (size_t)(endp - s);
 	    }
 	}
+
+	protect_rsqb(&state.lb);
+
 	state.prevtok = state.currtok;
 	state.prevtoklen = state.currtoklen;
 	state.currtok = s;
 	state.currtoklen = len;
-	if ((llen = agxblen(&state.lb)))
-	    rv = XML_Parse(state.parser, agxbuse(&state.lb),llen, 0);
-	else
-	    rv = XML_Parse(state.parser, s, len, (len ? 0 : 1));
+	if ((llen = (size_t)agxblen(&state.lb))) {
+	    assert(llen <= (size_t)INT_MAX && "XML token too long for expat API");
+	    rv = XML_Parse(state.parser, agxbuse(&state.lb), (int)llen, 0);
+	} else {
+	    assert(len <= (size_t)INT_MAX && "XML token too long for expat API");
+	    rv = XML_Parse(state.parser, s, (int)len, len ? 0 : 1);
+	}
 	if (rv == XML_STATUS_ERROR) {
 	    if (!state.error) {
-		agerr(AGERR, "%s in line %d \n",
-		      XML_ErrorString(XML_GetErrorCode(state.parser)),
-		      htmllineno());
+		agerrorf("%s in line %lu \n",
+		      XML_ErrorString(XML_GetErrorCode(state.parser)), htmllineno());
 		error_context();
 		state.error = 1;
 		state.tok = T_error;
@@ -1067,7 +1114,7 @@ int htmllex()
 	if (endp)
 	    state.ptr = endp;
     } while (state.tok == 0);
-#if DEBUG
+#ifdef DEBUG
     printTok (state.tok);
 #endif
     return state.tok;

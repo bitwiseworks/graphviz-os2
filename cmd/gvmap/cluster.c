@@ -1,51 +1,33 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
-
+#include "../tools/openFile.h"
+#include <cgraph/unreachable.h>
 #include <stdio.h>
 #include <stdlib.h>
 #define STANDALONE
-#include "general.h"
-#include "QuadTree.h"
+#include <sparse/general.h>
+#include <sparse/QuadTree.h>
 #include <time.h>
-#include "SparseMatrix.h"
+#include <sparse/SparseMatrix.h>
 #include <getopt.h>
-#include "string.h"
+#include <string.h>
 #include "make_map.h"
-#include "spring_electrical.h"
-#include "post_process.h"
-#include "overlap.h"
-#include "clustering.h"
-#include "ingraphs.h"
-#include "DotIO.h"
-#include "colorutil.h"
-
-#ifdef _WIN32 /*dependencies*/
-    #pragma comment( lib, "cgraph.lib" )
-    #pragma comment( lib, "gvc.lib" )
-    #pragma comment( lib, "ingraphs.lib" )
-    #pragma comment( lib, "sparse.lib" )
-    #pragma comment( lib, "sfdp.lib" )
-    #pragma comment( lib, "edgepaintlib.lib" )
-    #pragma comment( lib, "neatogen.lib" )
-    #pragma comment( lib, "rbtree.lib" )
-    #pragma comment( lib, "cdt.lib" )
-#endif   /* not _WIN32 */
-
-enum {POINTS_ALL = 1, POINTS_LABEL, POINTS_RANDOM};
-enum {maxlen = 10000000};
-enum {MAX_GRPS = 10000};
+#include <sfdpgen/spring_electrical.h>
+#include <sfdpgen/post_process.h>
+#include <neatogen/overlap.h>
+#include <sparse/clustering.h>
+#include <cgraph/ingraphs.h>
+#include <sparse/DotIO.h>
+#include <sparse/colorutil.h>
 
 typedef struct {
   FILE* outfp;
@@ -54,7 +36,7 @@ typedef struct {
   int clustering_method;
 } opts_t;
 
-static char* usestr =
+static const char usestr[] =
 "    -C k - generate no more than k clusters (0)\n\
        0 : no limit\n\
     -c k - use clustering method k (0)\n\
@@ -68,30 +50,12 @@ static void usage(char* cmd, int eval)
 {
     fprintf(stderr, "Usage: %s <options> graphfile\n", cmd);
     fputs (usestr, stderr);
-    exit(eval);
-}
-
-static FILE *openFile(char *name, char *mode, char* cmd)
-{
-    FILE *fp;
-    char *modestr;
-
-    fp = fopen(name, mode);
-    if (!fp) {
-	if (*mode == 'r')
-	    modestr = "reading";
-	else
-	    modestr = "writing";
-	fprintf(stderr, "%s: could not open file %s for %s\n",
-		cmd, name, modestr);
-	exit(-1);
-    }
-    return (fp);
+    graphviz_exit(eval);
 }
 
 static void init(int argc, char *argv[], opts_t* opts) {
   char* cmd = argv[0];
-  unsigned int c;
+  int c;
   int v;
 
   opts->maxcluster = 0;
@@ -99,35 +63,37 @@ static void init(int argc, char *argv[], opts_t* opts) {
   Verbose = 0;
 
   opts->clustering_method =  CLUSTERING_MODULARITY;
-  while ((c = getopt(argc, argv, ":vC:c:o:")) != -1) {
+  while ((c = getopt(argc, argv, ":vC:c:o:?")) != -1) {
     switch (c) {
     case 'c':
-      if ((sscanf(optarg,"%d", &v) == 0) || (v < 0)) {
+      if (sscanf(optarg, "%d", &v) == 0 || v < 0) {
 	usage(cmd,1);
       }
       else opts->clustering_method = v;
       break;
     case 'C':
-      if ((sscanf(optarg,"%d",&v) == 0) || (v < 0)) {
+      if (sscanf(optarg, "%d", &v) == 0 || v < 0) {
 	usage(cmd,1);
       }
       else opts->maxcluster = v;
       break;
     case 'o':
-      opts->outfp = openFile(optarg, "w", cmd);
+      opts->outfp = openFile(cmd, optarg, "w");
       break;
     case 'v':
       Verbose = 1;
       break;
     case '?':
-      if (optopt == '?')
+      if (optopt == '\0' || optopt == '?')
 	usage(cmd, 0);
       else {
-	fprintf(stderr, " option -%c unrecognized - ignored\n",
+	fprintf(stderr, " option -%c unrecognized\n",
 		optopt);
-	usage(cmd, 0);
+	usage(cmd, 1);
       }
       break;
+    default:
+      UNREACHABLE();
     }
   }
 
@@ -139,16 +105,9 @@ static void init(int argc, char *argv[], opts_t* opts) {
     opts->infiles = NULL;
 }
 
-static Agraph_t *gread(FILE * fp)
-{
-    return agread(fp, (Agdisc_t *) 0);
-}
-
-void clusterGraph (Agraph_t* g, int maxcluster, int clustering_method){
+static void clusterGraph (Agraph_t* g, int maxcluster, int clustering_method){
   initDotIO(g);
   attached_clustering(g, maxcluster, clustering_method);
-  return;
-
 }
 
 int main(int argc, char *argv[])
@@ -159,7 +118,7 @@ int main(int argc, char *argv[])
 
   init(argc, argv, &opts);
 
-  newIngraph (&ig, opts.infiles, gread);
+  newIngraph(&ig, opts.infiles);
 
   while ((g = nextGraph (&ig)) != 0) {
     if (prevg) agclose (prevg);
@@ -168,5 +127,5 @@ int main(int argc, char *argv[])
     prevg = g;
   }
 
-  return 0; 
+  graphviz_exit(0);
 }

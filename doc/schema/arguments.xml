@@ -20,13 +20,11 @@
 			<xsd:enumeration value="dot" />
 			<xsd:enumeration value="xdot" />
 			<xsd:enumeration value="cmap" />
-			<xsd:enumeration value="dia" />
 			<xsd:enumeration value="fig" />
 			<xsd:enumeration value="gd" />
 			<xsd:enumeration value="gd2" />
 			<xsd:enumeration value="gif" />
 			<xsd:enumeration value="gtk" />
-			<xsd:enumeration value="hpgl" />
 			<xsd:enumeration value="ico" />
 			<xsd:enumeration value="imap" />
 			<xsd:enumeration value="cmapx" />

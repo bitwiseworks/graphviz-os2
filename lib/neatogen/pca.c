@@ -1,20 +1,18 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include "matrix_ops.h"
-#include "pca.h"
-#include "closest.h"
+#include <cgraph/alloc.h>
+#include <neatogen/matrix_ops.h>
+#include <neatogen/pca.h>
+#include <neatogen/closest.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -25,20 +23,16 @@ void
 PCA_alloc(DistType ** coords, int dim, int n, double **new_coords,
 	  int new_dim)
 {
-    double **DD = NULL;		/* dim*dim matrix: coords*coords^T */
     double sum;
     int i, j, k;
-    double **eigs = NULL;
-    double *evals = NULL;
-    double *storage_ptr;
 
-    eigs = N_GNEW(new_dim, double *);
+    double **eigs = gv_calloc(new_dim, sizeof(double *));
     for (i = 0; i < new_dim; i++)
-	eigs[i] = N_GNEW(dim, double);
-    evals = N_GNEW(new_dim, double);
+	eigs[i] = gv_calloc(dim, sizeof(double));
+    double *evals = gv_calloc(new_dim, sizeof(double));
 
-    DD = N_GNEW(dim, double *);
-    storage_ptr = N_GNEW(dim * dim, double);
+    double **DD = gv_calloc(dim, sizeof(double *)); // dim×dim matrix: coords×coordsᵀ
+    double *storage_ptr = gv_calloc(dim * dim, sizeof(double));
     for (i = 0; i < dim; i++) {
 	DD[i] = storage_ptr;
 	storage_ptr += dim;
@@ -55,7 +49,7 @@ PCA_alloc(DistType ** coords, int dim, int n, double **new_coords,
 	}
     }
 
-    power_iteration(DD, dim, new_dim, eigs, evals, TRUE);
+    power_iteration(DD, dim, new_dim, eigs, evals);
 
     for (j = 0; j < new_dim; j++) {
 	for (i = 0; i < n; i++) {
@@ -75,9 +69,7 @@ PCA_alloc(DistType ** coords, int dim, int n, double **new_coords,
     free(DD);
 }
 
-boolean
-iterativePCA_1D(double **coords, int dim, int n, double *new_direction)
-{
+bool iterativePCA_1D(double **coords, int dim, int n, double *new_direction) {
     vtx_data *laplacian;
     float **mat1 = NULL;
     double **mat = NULL;
@@ -99,42 +91,6 @@ iterativePCA_1D(double **coords, int dim, int n, double *new_direction)
     free(mat1);
 
     /* Compute direction */
-    return power_iteration(mat, dim, 1, &new_direction, &eval, TRUE);
+    return power_iteration(mat, dim, 1, &new_direction, &eval);
 /* ?? When is mat freed? */
 }
-
-#ifdef UNUSED
-
-double dist(double **coords, int dim, int p1, int p2)
-{
-    int i;
-    double sum = 0;
-
-    for (i = 0; i < dim; i++) {
-	sum +=
-	    (coords[i][p1] - coords[i][p2]) * (coords[i][p1] -
-					       coords[i][p2]);
-    }
-    return sqrt(sum);
-}
-
-
-void weight_laplacian(double **X, int n, int dim, vtx_data * laplacian)
-{
-    int i, j, neighbor;
-
-    int *edges;
-    float *ewgts;
-    for (i = 0; i < n; i++) {
-	edges = laplacian[i].edges;
-	ewgts = laplacian[i].ewgts;
-	*ewgts = 0;
-	for (j = 1; j < laplacian[i].nedges; j++) {
-	    neighbor = edges[j];
-	    *ewgts -= ewgts[j] =
-		float (-1.0 / (dist(X, dim, i, neighbor) + 1e-10));
-	}
-    }
-}
-
-#endif

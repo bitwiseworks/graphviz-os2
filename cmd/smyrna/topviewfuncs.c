@@ -1,32 +1,35 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
+#include <assert.h>
 #include "topviewfuncs.h"
-#include "cgraph.h"
+#include <cgraph/alloc.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/cgraph.h>
 #include "smyrna_utils.h"
-#include "colorprocs.h"
+#include <common/colorprocs.h>
 #include "draw.h"
 #include "frmobjectui.h"
-#include "xdot.h"
-#include "glutils.h"
+#include <xdot/xdot.h>
+#include <glcomp/glutils.h>
 #include "selectionfuncs.h"
-#include "memory.h"
-#include <ctype.h>
+#include <common/types.h>
+#include <common/utils.h>
+#include <limits.h>
+#include <float.h>
+#include <math.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
 static xdot *parseXdotwithattrs(void *e)
 {
-	
-    int cnt=0;
     xdot* xDot=NULL;
     xDot=parseXDotFOn (agget(e,"_draw_" ), OpFns,sizeof(sdot_op), xDot);
     if (agobjkind(e) == AGRAPH)
@@ -38,7 +41,7 @@ static xdot *parseXdotwithattrs(void *e)
     xDot=parseXDotFOn (agget(e,"_tldraw_" ), OpFns,sizeof(sdot_op), xDot);
     if(xDot)
     {
-	for (cnt=0;cnt < xDot->cnt ; cnt++)
+	for (size_t cnt = 0; cnt < xDot->cnt; cnt++)
 	{
 	    ((sdot_op*)(xDot->ops))[cnt].obj=e;
         }
@@ -47,70 +50,30 @@ static xdot *parseXdotwithattrs(void *e)
 
 }
 
-static void set_boundaries(Agraph_t * g, topview * t)
+static void set_boundaries(Agraph_t * g)
 {
     Agnode_t *v;
     Agsym_t* pos_attr = GN_pos(g);
     glCompPoint pos;
-    float left, right, top, bottom;
-    int id=0;
+    float left = FLT_MAX, right = -FLT_MAX, top = -FLT_MAX, bottom = FLT_MAX;
 
     for (v = agfstnode(g); v; v = agnxtnode(g, v)) 
     {
 	pos=getPointFromStr(agxget(v, pos_attr));
-	if(id==0)
-	{
-	    left=pos.x;
-	    right=pos.x;
-	    top=pos.y;
-	    bottom=pos.y;
-	}
-	if (left > pos.x)
-	    left = pos.x;
-	if (right < pos.x)
-	    right = pos.x;
-	if (bottom > pos.y)
-	    bottom = pos.y;
-	if (top < pos.y)
-	    top = pos.y;
-	id++;
+
+	left = fminf(left, pos.x);
+	right = fmaxf(right, pos.x);
+	top = fmaxf(top, pos.y);
+	bottom = fminf(bottom, pos.y);
     }
     view->bdxLeft = left;
     view->bdyTop = top;
     view->bdxRight = right;
     view->bdyBottom = bottom;
-
-    view->bdzTop = 0;
-    view->bdzBottom = 0;
 }
 
-#if UNUSED
-static float init_node_size(Agraph_t * g, topview * t)
+static void draw_xdot(xdot* x, double base_z)
 {
-    float vsize;
-    int percent;
-    float sz;
-    percent = atoi(agget(g, "nodesize"));
-    if (percent == 0)
-	percent = 0.000001;
-    vsize =
-	0.05 * sqrt((view->bdxRight - view->bdxLeft) *
-		    (view->bdyTop - view->bdyBottom));
-    sz =	vsize * 2  * percent / 100.0 /
-	sqrt(t->Nodecount);
-/*    if (t->init_node_size < 1)
-	t->init_node_size=1;*/
-//    t->init_zoom = view->zoom;
-    t->init_zoom = -20;
-    return  sz;
-
-}
-#endif
-
-
-static void draw_xdot(xdot* x,float base_z)
-{
-	int i;
 	sdot_op *op;
 	if (!x)
 		return;
@@ -118,7 +81,7 @@ static void draw_xdot(xdot* x,float base_z)
 	view->Topview->global_z=base_z;
 
 	op=(sdot_op*)x->ops;
-	for (i=0; i < x->cnt; i++,op++)
+	for (size_t i = 0; i < x->cnt; i++, op++)
 	{
 		if(op->op.drawfunc)
 			op->op.drawfunc(&op->op,0);
@@ -137,14 +100,13 @@ static glCompPoint getEdgeTail(Agedge_t *  edge)
 {
     return getPointFromStr(agget(agtail(edge),"pos"));
 }
-static GLfloat getEdgeLength(Agedge_t *  edge)
-{
-    GLfloat rv=0;	
+
+static float getEdgeLength(Agedge_t *edge) {
     glCompPoint A,B;
     A=getEdgeTail(edge);
     B=getEdgeHead(edge);
-    rv=(A.x-B.x)*(A.x-B.x) + (A.y-B.y)*(A.y-B.y) +(A.z-B.z)*(A.z-B.z);
-    rv=sqrt(rv);
+    float rv = (A.x - B.x) * (A.x - B.x) + (A.y - B.y) * (A.y - B.y) + (A.z - B.z) * (A.z - B.z);
+    rv=sqrtf(rv);
     return rv;
 }
 static void glCompColorxlate(glCompColor* c,char* str)
@@ -189,14 +151,15 @@ static int object_color(void* obj,glCompColor* c)
 	Alpha=getAttrFloat(g,objg,"defaultedgealpha",1);
 	vis = GE_visible (objg);
     }
-    else if(objType==AGNODE) {
+    else {
+	assert(objType == AGNODE);
 	Alpha=getAttrFloat(g,objg,"defaultnodealpha",1);
 	vis = GN_visible (objg);
     }
     if (!visible(vis,obj))
 	return 0;
 
-    setColorScheme (agget (obj, "colorscheme"));
+    char *previous_color_scheme = setColorScheme(agget (obj, "colorscheme"));
     /*get objects's color attribute */
     bf = getAttrStr(g,obj,"color",NULL);
     if(bf && (*bf)) {
@@ -218,9 +181,14 @@ static int object_color(void* obj,glCompColor* c)
 	    c->B = cl.u.RGBA[2];
 	    c->A = cl.u.RGBA[3];
 	}
-	c->A = c->A*Alpha;
+	c->A *= Alpha;
 
     }
+
+    char *color_scheme = setColorScheme(previous_color_scheme);
+    free(color_scheme);
+    free(previous_color_scheme);
+
     return return_value;
 }
 
@@ -229,8 +197,8 @@ static int object_color(void* obj,glCompColor* c)
 	draws multi edges , single edges
 	this function assumes     glBegin(GL_LINES) has been called 
 */
-static void draw_edge(glCompPoint* posT,glCompPoint* posH, GLfloat length,int deg)
-{
+static void draw_edge(glCompPoint *posT, glCompPoint *posH, float length,
+                      int deg) {
     double alpha, R, ITERANGLE;
     double X1, Y1, X2, Y2;
 
@@ -290,7 +258,7 @@ static void renderSelectedNodes(Agraph_t * g)
     Agsym_t* l_color_attr = GG_nodelabelcolor(g);
     glCompColor c;
     int defaultNodeShape;
-    GLfloat nodeSize;
+    float nodeSize;
 
     glCompColorxlate(&c,agxget(g,l_color_attr));
 
@@ -300,7 +268,7 @@ static void renderSelectedNodes(Agraph_t * g)
 
     for (v = agfstnode(g); v; v = agnxtnode(g, v)) 
     {
-	if(!ND_selected(v));
+	if(!ND_selected(v))
 	    continue;
 	x=parseXdotwithattrs(v);
 	draw_xdot(x,-1);
@@ -317,9 +285,9 @@ static void renderSelectedNodes(Agraph_t * g)
 	nodeSize = ND_size(v);
 
 	if (defaultNodeShape == 0) 
-	    glVertex3f(pos.x,pos.y,pos.z+0.001);
+	    glVertex3f(pos.x, pos.y, pos.z + 0.001f);
 	else if (defaultNodeShape == 1) 
-	    drawCircle(pos.x,pos.y,nodeSize,pos.z+0.001);
+	    drawCircle(pos.x, pos.y, nodeSize, pos.z + 0.001f);
     }
     if(defaultNodeShape==0)
 	glEnd();
@@ -331,7 +299,7 @@ static void renderSelectedNodes(Agraph_t * g)
 	{
 	    pos = ND_A(v);
 	    glColor4f(c.R, c.G,c.B, c.A);
-            glprintfglut(view->glutfont,pos.x,pos.y,pos.z+0.002,labelOf(g,v));
+	    glprintfglut(view->glutfont, pos.x, pos.y, pos.z + 0.002f, labelOf(g, v));
 	}
     }
 }
@@ -346,7 +314,7 @@ static void renderNodes(Agraph_t * g)
     Agsym_t* size_attr = GN_size(g);
     Agsym_t* selected_attr = GN_selected(g);
     int defaultNodeShape;
-    GLfloat nodeSize;
+    float nodeSize;
     glCompColor c;
     xdot * x;
     int ind;
@@ -355,7 +323,7 @@ static void renderNodes(Agraph_t * g)
 
     x=parseXdotwithattrs(g);
     if (x) {
-	draw_xdot(x,-0.2);
+	draw_xdot(x, -0.2);
 	freeXDot (x);
     }
     for (v = agfstnode(g); v; v = agnxtnode(g, v)) 
@@ -363,7 +331,7 @@ static void renderNodes(Agraph_t * g)
 	    if(!object_color(v,&c))
 		continue;
 	    x=parseXdotwithattrs(v);
-	    draw_xdot(x,-0.1);
+	    draw_xdot(x, -0.1);
 
 	    if(x)
 		freeXDot (x);
@@ -391,7 +359,7 @@ static void renderNodes(Agraph_t * g)
 	}
 	glColor4f(c.R,c.G,c.B,c.A);	    
 	pos=getPointFromStr(agxget(v, pos_attr));
-	nodeSize=(GLfloat)l_float(v, size_attr,0);
+	nodeSize = l_float(v, size_attr, 0);
 
 	ND_A(v) = pos;
 
@@ -453,8 +421,8 @@ static void renderSelectedEdges(Agraph_t * g)
 	    glColor4f(1,0,0,1);	    
 	    posT = ED_posTail(e);
 	    posH = ED_posHead(e);
-	    posT.z +=0.01;
-	    posH.z +=0.01;
+	    posT.z +=0.01f;
+	    posH.z +=0.01f;
 	    draw_edge(&posT,&posH,getEdgeLength(e),0);
 	}
     }
@@ -466,7 +434,7 @@ static void renderSelectedEdges(Agraph_t * g)
  */
 static char* skipWS (char* p)
 {
-    while (isspace(*p)) p++;
+    while (gv_isspace(*p)) p++;
     return p;
 }
 
@@ -475,7 +443,7 @@ static char* skipWS (char* p)
  */
 static char* skipNWS (char* p)
 {
-    while (*p && !isspace(*p)) p++;
+    while (*p && !gv_isspace(*p)) p++;
     return p;
 }
 
@@ -524,9 +492,9 @@ static char* readPoint (char* p, xdot_point* pt)
  * return start of point list (skip over e and s points).
  * return NULL on failure
  */
-static char* countPoints (char* pos, int* have_sp, xdot_point* sp, int* have_ep, xdot_point* ep, int* cntp)
-{
-    int cnt = 0;
+static char *countPoints(char *pos, int *have_sp, xdot_point *sp, int *have_ep,
+                         xdot_point *ep, size_t *cntp) {
+    size_t cnt = 0;
     char* p;
 
     pos = skipWS (pos);
@@ -591,18 +559,16 @@ static int storePoints (char* pos, xdot_point* ps)
 static xdot* makeXDotSpline (char* pos)
 {
     xdot_point s, e;
-    int v, have_s, have_e, cnt;
-    int sz = sizeof(sdot_op);
-    xdot* xd;
-    xdot_op* op;
-    xdot_point* pts;
+    int v, have_s, have_e;
+    size_t cnt;
+    static const size_t sz = sizeof(sdot_op);
 
     if (*pos == '\0') return NULL;
 
     pos = countPoints (pos, &have_s, &s, &have_e, &e, &cnt);
     if (pos == 0) return NULL;
 
-    pts = N_NEW(cnt,xdot_point);
+    xdot_point* pts = gv_calloc(cnt, sizeof(xdot_point));
     if (have_s) {
 	v = storePoints (pos, pts+3);
 	pts[0] = pts[1] = s;
@@ -620,13 +586,13 @@ static xdot* makeXDotSpline (char* pos)
 	pts[cnt-3] = pts[cnt-4];
     }
 
-    op = (xdot_op*)N_NEW(sz,char);
+    xdot_op* op = gv_calloc(sz, sizeof(char));
     op->kind = xd_unfilled_bezier;
     op->drawfunc = OpFns[xop_bezier];
     op->u.bezier.cnt = cnt; 
     op->u.bezier.pts = pts; 
 
-    xd = NEW(xdot);
+    xdot* xd = gv_alloc(sizeof(xdot));
     xd->cnt = 1;
     xd->sz = sz;
     xd->ops = op;
@@ -650,11 +616,8 @@ static void renderEdgesFn (Agraph_t * g, edgefn ef, int skipSelected)
 		continue;
 
 	    if(!object_color(e,&c)) {
-		ED_visible(e) = 0;
 		continue;
 	    }
-	    else
-		ED_visible(e) = 1;
 	    if (ED_selected(e) && skipSelected)
 		continue;
 
@@ -665,6 +628,9 @@ static void renderEdgesFn (Agraph_t * g, edgefn ef, int skipSelected)
 
 static void edge_xdot (Agraph_t* g, Agedge_t* e, glCompColor c)
 {
+    (void)g;
+    (void)c;
+
     xdot * x;
     x=parseXdotwithattrs(e);
     draw_xdot(x,0);
@@ -722,7 +688,6 @@ static void renderNodeLabels(Agraph_t * g)
     glCompPoint pos;
     Agsym_t* data_attr = GN_labelattribute(g);
     Agsym_t* l_color_attr = GG_nodelabelcolor(g);
-    GLfloat nodeSize;
     glCompColor c;
 
     glCompColorxlate(&c,agxget(g,l_color_attr));
@@ -735,7 +700,6 @@ static void renderNodeLabels(Agraph_t * g)
 	    continue;
 
 	pos = ND_A(v);
-	nodeSize = ND_size(v);
 	glColor4f(c.R,c.G,c.B,c.A);
 	if(!data_attr)
             glprintfglut(view->glutfont,pos.x,pos.y,pos.z,agnameof(v));
@@ -753,7 +717,6 @@ static void renderEdgeLabels(Agraph_t * g)
     Agsym_t* data_attr = GE_labelattribute(g);
     Agsym_t* l_color_attr = GG_edgelabelcolor(g);
     glCompColor c;
-    GLfloat x,y,z;
 
     glCompColorxlate(&c,agxget(g,l_color_attr));
 
@@ -771,9 +734,9 @@ static void renderEdgeLabels(Agraph_t * g)
 	    posT = ED_posTail(e);
 	    posH = ED_posHead(e);
 	    glColor4f(c.R,c.G,c.B,c.A);
-	    x=posH.x+(posT.x-posH.x)/2;
-	    y=posH.y+(posT.y-posH.y)/2;
-	    z=posH.z+(posT.z-posH.z)/2;
+	    float x = posH.x + (posT.x - posH.x) / 2;
+	    float y = posH.y + (posT.y - posH.y) / 2;
+	    float z = posH.z + (posT.z - posH.z) / 2;
 	    glprintfglut(view->glutfont,x,y,z,agxget(e,data_attr));
 
 	}
@@ -786,7 +749,7 @@ static void renderEdgeLabels(Agraph_t * g)
 
 static void cacheNodes(Agraph_t * g,topview* t)
 {
-    if(t->cache.node_id!=-1)	/*clean existing cache*/
+    if (t->cache.node_id != UINT_MAX) // clean existing cache
 	glDeleteLists(t->cache.node_id,1);
     t->cache.node_id=glGenLists(1);
     glNewList(t->cache.node_id,GL_COMPILE);
@@ -799,7 +762,7 @@ static void cacheNodes(Agraph_t * g,topview* t)
 }
 static void cacheEdges(Agraph_t * g,topview* t)
 {
-    if(t->cache.edge_id!=-1)	/*clean existing cache*/
+    if (t->cache.edge_id != UINT_MAX) // clean existing cache
 	glDeleteLists(t->cache.edge_id,1);
     t->cache.edge_id=glGenLists(1);
     glNewList(t->cache.edge_id,GL_COMPILE);
@@ -810,7 +773,7 @@ static void cacheEdges(Agraph_t * g,topview* t)
 }
 void cacheSelectedEdges(Agraph_t * g,topview* t)
 {
-    if(t->cache.seledge_id!=-1)	/*clean existing cache*/
+    if (t->cache.seledge_id != UINT_MAX) // clean existing cache
 	glDeleteLists(t->cache.seledge_id,1);
     t->cache.seledge_id=glGenLists(1);
     glNewList(t->cache.seledge_id,GL_COMPILE);
@@ -821,7 +784,7 @@ void cacheSelectedEdges(Agraph_t * g,topview* t)
 }
 void cacheSelectedNodes(Agraph_t * g,topview* t)
 {
-    if(t->cache.selnode_id!=-1)	/*clean existing cache*/
+    if (t->cache.selnode_id != UINT_MAX) // clean existing cache
 	glDeleteLists(t->cache.selnode_id,1);
     t->cache.selnode_id=glGenLists(1);
     glNewList(t->cache.selnode_id,GL_COMPILE);
@@ -830,7 +793,7 @@ void cacheSelectedNodes(Agraph_t * g,topview* t)
 }
 static void cacheNodeLabels(Agraph_t * g,topview* t)
 {
-    if(t->cache.nodelabel_id!=-1)	/*clean existing cache*/
+    if (t->cache.nodelabel_id != UINT_MAX) // clean existing cache
 	glDeleteLists(t->cache.nodelabel_id,1);
     t->cache.nodelabel_id=glGenLists(1);
     glNewList(t->cache.nodelabel_id,GL_COMPILE);
@@ -839,7 +802,7 @@ static void cacheNodeLabels(Agraph_t * g,topview* t)
 }
 static void cacheEdgeLabels(Agraph_t * g,topview* t)
 {
-    if(t->cache.edgelabel_id!=-1)	/*clean existing cache*/
+    if (t->cache.edgelabel_id != UINT_MAX) // clean existing cache
 	glDeleteLists(t->cache.edgelabel_id,1);
     t->cache.edgelabel_id=glGenLists(1);
     glNewList(t->cache.edgelabel_id,GL_COMPILE);
@@ -855,15 +818,9 @@ void updateSmGraph(Agraph_t * g,topview* t)
     float totalELength=0;
 
     t->Nodecount=0;
-    t->Edgecount=0;
-    t->avgedgelength=0;
     t->maxedgelen=0;
     t->minedgelen=-1;
 
-    t->picked_node_count = 0;
-    t->picked_nodes = '\0';
-    t->picked_edge_count = 0;
-    t->picked_edges = '\0';
     t->global_z=0;
     t->sel.selPoly.cnt=0;
     t->sel.selPoly.pts=NULL;
@@ -874,7 +831,6 @@ void updateSmGraph(Agraph_t * g,topview* t)
     for (v = agfstnode(g); v; v = agnxtnode(g, v)) {
 	for (e = agfstout(g, v); e; e = agnxtout(g, e)) 
 	{
-	    t->Edgecount++;
 	    eLength=getEdgeLength(e);
 	    if((t->minedgelen == -1) || (t->minedgelen > eLength))
 		t->minedgelen=eLength;
@@ -885,12 +841,10 @@ void updateSmGraph(Agraph_t * g,topview* t)
 	t->Nodecount++;
 
     }
-    aginit(g, AGNODE, "nodeRec", sizeof(nodeRec), 0);
-    aginit(g, AGEDGE, "edgeRec", sizeof(edgeRec), 0);
+    aginit(g, AGNODE, "nodeRec", sizeof(nodeRec), false);
+    aginit(g, AGEDGE, "edgeRec", sizeof(edgeRec), false);
 
-    set_boundaries(g,t);
-    t->avgedgelength = totalELength / t->Edgecount;
-//    t->init_node_size=init_node_size(g, t);
+    set_boundaries(g);
     view->Topview=t;
 
 
@@ -905,32 +859,24 @@ void updateSmGraph(Agraph_t * g,topview* t)
 }
 void initSmGraph(Agraph_t * g,topview* rv)
 {
-    rv->maxnodedegree = 1;
-
-        
-
     /*create attribute list*/
     rv->attributes=load_attr_list(view->g[view->activeGraph]);
-    rv->filtered_attr_list=NULL;
 
-    /*set topologilca fisheye to NULL */
-    rv->fisheyeParams.h = '\0';
+    // set topological fisheye to NULL
+    rv->fisheyeParams.h = NULL;
 
-    if (view->dfltViewType == VT_TOPFISH)
-	rv->fisheyeParams.active = 1;
-    else
-	rv->fisheyeParams.active = 0;
-    rv->cache.node_id=-1;
-    rv->cache.selnode_id=-1;
-    rv->cache.edge_id=-1;
-    rv->cache.seledge_id=-1;
+    rv->fisheyeParams.active = 0;
+    rv->cache.node_id = UINT_MAX;
+    rv->cache.selnode_id = UINT_MAX;
+    rv->cache.edge_id = UINT_MAX;
+    rv->cache.seledge_id = UINT_MAX;
     rv->sel.selectEdges=0;
     rv->sel.selectNodes=1;
 
     updateSmGraph(g,rv);
 }
 
-void renderSmGraph(Agraph_t * g,topview* t)
+void renderSmGraph(topview* t)
 {
     /*
 	we like to have blending affect where node and edge  overlap
@@ -939,9 +885,7 @@ void renderSmGraph(Agraph_t * g,topview* t)
 
     glEnable(GL_POINT_SMOOTH);
     glEnable(GL_DEPTH_TEST);
-    /* glDepthFunc (GL_ALWAYS); */
     glEnable(GL_DEPTH);
-//    glDepthMask(0);
 
     if(view->drawedges)
     {
@@ -967,10 +911,3 @@ void renderSmGraph(Agraph_t * g,topview* t)
     }
 
 }
-
-void freeSmGraph(Agraph_t * g,topview* t)
-{
-    return ;
-}
-
-

@@ -1,13 +1,10 @@
-/* $Id$Revision: */
-/* vim:set shiftwidth=4 ts=8: */
-
 /**********************************************************
 *      See the LICENSE file for copyright information.     *
 **********************************************************/
 
 #include "config.h"
 
-#include"red_black_tree.h"
+#include<rbtree/red_black_tree.h>
 #include<stdio.h>
 #include<ctype.h>
 
@@ -15,7 +12,7 @@
 /*  this file has functions to test a red-black tree of integers */
 
 void IntDest(void* a) {
-  free((int*)a);
+  free(a);
 }
 
 
@@ -26,32 +23,23 @@ int IntComp(const void* a,const void* b) {
   return(0);
 }
 
-void IntPrint(const void* a) {
-  printf("%i",*(int*)a);
-}
-
-static void InfoPrint(void* a) {
-  ;
-}
-
 static void InfoDest(void *a){
   ;
 }
 
 int main() {
-  stk_stack* enumResult;
   int option=0;
   int newKey,newKey2;
   int* newInt;
   rb_red_blk_node* newNode;
   rb_red_blk_tree* tree;
 
-  tree=RBTreeCreate(IntComp,IntDest,InfoDest,IntPrint,InfoPrint);
-  while(option!=8) {
+  tree=RBTreeCreate(IntComp, IntDest, InfoDest);
+  while (option != 6) {
     printf("choose one of the following:\n");
     printf("(1) add to tree\n(2) delete from tree\n(3) query\n");
-    printf("(4) find predecessor\n(5) find successor\n(6) enumerate\n");
-    printf("(7) print tree\n(8) quit\n");
+    printf("(4) find predecessor\n(5) find successor\n");
+    printf("(6) quit\n");
     do option=fgetc(stdin); while(-1 != option && isspace(option));
     option-='0';
     switch(option)
@@ -60,7 +48,7 @@ int main() {
 	{
 	  printf("type key for new node\n");
 	  scanf("%i",&newKey);
-	  newInt=(int*) malloc(sizeof(int));
+	  newInt= malloc(sizeof(int));
 	  *newInt=newKey;
 	  RBTreeInsert(tree,newInt,0);
 	}
@@ -120,23 +108,6 @@ int main() {
 	break;
       case 6:
 	{
-	  printf("type low and high keys to see all keys between them\n");
-	  scanf("%i %i",&newKey,&newKey2);
-	  enumResult=RBEnumerate(tree,&newKey,&newKey2);	  
-	  while ( (newNode = StackPop(enumResult)) ) {
-	    tree->PrintKey(newNode->key);
-	    printf("\n");
-	  }
-	  free(enumResult);
-	}
-	break;
-      case 7:
-	{
-	  RBTreePrint(tree);
-	}
-	break;
-      case 8:
-	{
 	  RBTreeDestroy(tree);
 	  return 0;
 	}
@@ -147,7 +118,3 @@ int main() {
   }
   return 0;
 }
-
-
-
-

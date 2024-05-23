@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
- * Copyright (c) 2011 AT&T Intellectual Property 
+ * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /*
@@ -18,77 +15,78 @@
  * include style search support
  */
 
-#include "config.h"
-#include <ast.h>
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#else
-#include <compat_unistd.h>
-#endif
-#ifdef HAVE_STRINGS_H
-#include <strings.h>
-#endif
+#include <ast/ast.h>
+#include <cgraph/agxbuf.h>
+#include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
-typedef struct Dir_s {		/* directory list element */
-    struct Dir_s *next;		/* next in list                 */
-    char dir[1];		/* directory path               */
+typedef struct Dir_s { /* directory list element */
+  struct Dir_s *next;  /* next in list                 */
+  char dir[1];         /* directory path               */
 } Dir_t;
 
-static struct {			/* directory list state           */
-    Dir_t *head;		/* directory list head          */
-    Dir_t *tail;		/* directory list tail          */
+static struct { /* directory list state           */
+  Dir_t *head;  /* directory list head          */
+  Dir_t *tail;  /* directory list tail          */
 } state;
 
 /*
  * return path to name using pathinclude() list
- * path placed in <buf,size>
  * if lib!=0 then pathpath() attempted after include search
  * if type!=0 and name has no '.' then file.type also attempted
  * any *: prefix in lib is ignored (discipline library dictionary support)
  */
 
-char *pathfind(const char *name, const char *lib, const char *type,
-	       char *buf, size_t size)
-{
-    register Dir_t *dp;
-    register char *s;
-    char tmp[PATH_MAX];
+char *pathfind(const char *name, const char *lib, const char *type) {
+  Dir_t *dp;
+  char *s;
+  agxbuf tmp = {0};
+  char *buf;
 
-    if (access(name, R_OK) >= 0)
-	return strncpy(buf, name, size);
-    if (type) {
-	sfsprintf(buf, size, "%s.%s", name, type);
-	if (access(buf, R_OK) >= 0)
-	    return buf;
+  if (access(name, R_OK) >= 0)
+    return strdup(name);
+  if (type) {
+    agxbprint(&tmp, "%s.%s", name, type);
+    char *tmp_path = agxbdisown(&tmp);
+    if (access(tmp_path, R_OK) >= 0)
+      return tmp_path;
+    free(tmp_path);
+  }
+  if (*name != '/') {
+    if (strchr(name, '.'))
+      type = 0;
+    for (dp = state.head; dp; dp = dp->next) {
+      agxbprint(&tmp, "%s/%s", dp->dir, name);
+      if ((buf = pathpath(agxbuse(&tmp)))) {
+        agxbfree(&tmp);
+        return buf;
+      }
+      if (type) {
+        agxbprint(&tmp, "%s/%s.%s", dp->dir, name, type);
+        if ((buf = pathpath(agxbuse(&tmp)))) {
+          agxbfree(&tmp);
+          return buf;
+        }
+      }
     }
-    if (*name != '/') {
-	if (strchr(name, '.'))
-	    type = 0;
-	for (dp = state.head; dp; dp = dp->next) {
-	    sfsprintf(tmp, sizeof(tmp), "%s/%s", dp->dir, name);
-	    if (pathpath(buf, tmp, "", PATH_REGULAR))
-		return buf;
-	    if (type) {
-		sfsprintf(tmp, sizeof(tmp), "%s/%s.%s", dp->dir, name,
-			  type);
-		if (pathpath(buf, tmp, "", PATH_REGULAR))
-		    return buf;
-	    }
-	}
-	if (lib) {
-	    if ((s = strrchr((char *) lib, ':')))
-		lib = (const char *) s + 1;
-	    sfsprintf(tmp, sizeof(tmp), "lib/%s/%s", lib, name);
-	    if (pathpath(buf, tmp, "", PATH_REGULAR))
-		return buf;
-	    if (type) {
-		sfsprintf(tmp, sizeof(tmp), "lib/%s/%s.%s", lib, name,
-			  type);
-		if (pathpath(buf, tmp, "", PATH_REGULAR))
-		    return buf;
-	    }
-	}
+    if (lib) {
+      if ((s = strrchr(lib, ':')))
+        lib = s + 1;
+      agxbprint(&tmp, "lib/%s/%s", lib, name);
+      if ((buf = pathpath(agxbuse(&tmp)))) {
+        agxbfree(&tmp);
+        return buf;
+      }
+      if (type) {
+        agxbprint(&tmp, "lib/%s/%s.%s", lib, name, type);
+        if ((buf = pathpath(agxbuse(&tmp)))) {
+          agxbfree(&tmp);
+          return buf;
+        }
+      }
     }
-    return 0;
+  }
+  agxbfree(&tmp);
+  return 0;
 }

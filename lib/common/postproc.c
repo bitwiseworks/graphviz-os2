@@ -1,22 +1,26 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
+/// @file
+/// @ingroup common_render
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-
-#include "render.h"
-#include "xlabels.h"
+#include <cgraph/alloc.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/prisize_t.h>
+#include <cgraph/unreachable.h>
+#include <common/render.h>
+#include <label/xlabels.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 static int Rankdir;
-static boolean Flip;
+static bool Flip;
 static pointf Offset;
 
 static void place_flip_graph_label(graph_t * g);
@@ -89,18 +93,17 @@ static pointf map_point(pointf p)
 
 static void map_edge(edge_t * e)
 {
-    int j, k;
     bezier bz;
 
     if (ED_spl(e) == NULL) {
-	if ((Concentrate == FALSE) && (ED_edge_type(e) != IGNORED))
-	    agerr(AGERR, "lost %s %s edge\n", agnameof(agtail(e)),
+	if (!Concentrate && ED_edge_type(e) != IGNORED)
+	    agerrorf("lost %s %s edge\n", agnameof(agtail(e)),
 		  agnameof(aghead(e)));
 	return;
     }
-    for (j = 0; j < ED_spl(e)->size; j++) {
+    for (size_t j = 0; j < ED_spl(e)->size; j++) {
 	bz = ED_spl(e)->list[j];
-	for (k = 0; k < bz.size; k++)
+	for (size_t k = 0; k < bz.size; k++)
 	    bz.list[k] = map_point(bz.list[k]);
 	if (bz.sflag)
 	    ED_spl(e)->list[j].sp = map_point(ED_spl(e)->list[j].sp);
@@ -111,7 +114,6 @@ static void map_edge(edge_t * e)
 	ED_label(e)->pos = map_point(ED_label(e)->pos);
     if (ED_xlabel(e))
 	ED_xlabel(e)->pos = map_point(ED_xlabel(e)->pos);
-    /* vladimir */
     if (ED_head_label(e))
 	ED_head_label(e)->pos = map_point(ED_head_label(e)->pos);
     if (ED_tail_label(e))
@@ -125,11 +127,11 @@ void translate_bb(graph_t * g, int rankdir)
 
     bb = GD_bb(g);
     if (rankdir == RANKDIR_LR || rankdir == RANKDIR_BT) {
-	new_bb.LL = map_point(pointfof(bb.LL.x, bb.UR.y));
-	new_bb.UR = map_point(pointfof(bb.UR.x, bb.LL.y));
+	new_bb.LL = map_point((pointf){bb.LL.x, bb.UR.y});
+	new_bb.UR = map_point((pointf){bb.UR.x, bb.LL.y});
     } else {
-	new_bb.LL = map_point(pointfof(bb.LL.x, bb.LL.y));
-	new_bb.UR = map_point(pointfof(bb.UR.x, bb.UR.y));
+	new_bb.LL = map_point((pointf){bb.LL.x, bb.LL.y});
+	new_bb.UR = map_point((pointf){bb.UR.x, bb.UR.y});
     }
     GD_bb(g) = new_bb;
     if (GD_label(g)) {
@@ -148,13 +150,13 @@ static void translate_drawing(graph_t * g)
 {
     node_t *v;
     edge_t *e;
-    int shift = (Offset.x || Offset.y);
+    bool shift = Offset.x || Offset.y;
 
     if (!shift && !Rankdir)
 	return;
     for (v = agfstnode(g); v; v = agnxtnode(g, v)) {
 	if (Rankdir)
-	    gv_nodesize(v, FALSE);
+	    gv_nodesize(v, false);
 	ND_coord(v) = map_point(ND_coord(v));
 	if (ND_xlabel(v))
 	    ND_xlabel(v)->pos = map_point(ND_xlabel(v)->pos);
@@ -190,7 +192,7 @@ static void place_root_label(graph_t * g, pointf d)
     }
 
     GD_label(g)->pos = p;
-    GD_label(g)->set = TRUE;
+    GD_label(g)->set = true;
 }
 
 /* centerPt:
@@ -202,36 +204,35 @@ centerPt (xlabel_t* xlp) {
   pointf p;
 
   p = xlp->pos;
-  p.x += (xlp->sz.x)/2.0;
-  p.y += (xlp->sz.y)/2.0;
+  p.x += xlp->sz.x / 2.0;
+  p.y += xlp->sz.y / 2.0;
 
   return p;
 }
 
-static int
-printData (object_t* objs, int n_objs, xlabel_t* lbls, int n_lbls,
-	   label_params_t* params) {
-  int i;
+static void printData(object_t *objs, size_t n_objs, xlabel_t *lbls,
+                      size_t n_lbls, label_params_t *params) {
   xlabel_t* xp;
-  fprintf (stderr, "%d objs %d xlabels force=%d bb=(%.02f,%.02f) (%.02f,%.02f)\n",
+  fprintf (stderr, "%" PRISIZE_T " objs %" PRISIZE_T
+	   " xlabels force=%d bb=(%.02f,%.02f) (%.02f,%.02f)\n",
 	   n_objs, n_lbls, params->force, params->bb.LL.x, params->bb.LL.y,
 	   params->bb.UR.x, params->bb.UR.y);
-  if (Verbose < 2) return 0;
+  if (Verbose < 2) return;
   fprintf(stderr, "objects\n");
-  for (i = 0; i < n_objs; i++) {
+  for (size_t i = 0; i < n_objs; i++) {
     xp = objs->lbl;
-    fprintf (stderr, " [%d] (%.02f,%.02f) (%.02f,%.02f) %p \"%s\"\n",
-	    i, objs->pos.x,objs->pos.y,objs->sz.x,objs->sz.y, objs->lbl, 
-	    (xp?((textlabel_t*)(xp->lbl))->text:""));
+    fprintf(stderr, " [%" PRISIZE_T "] (%.02f,%.02f) (%.02f,%.02f) %p \"%s\"\n",
+            i, objs->pos.x, objs->pos.y, objs->sz.x, objs->sz.y, objs->lbl,
+            xp ? ((textlabel_t*)xp->lbl)->text : "");
     objs++;
   }
   fprintf(stderr, "xlabels\n");
-  for (i = 0; i < n_lbls; i++) {
-    fprintf (stderr, " [%d] %p set %d (%.02f,%.02f) (%.02f,%.02f) %s\n",
-	     i, lbls,  lbls->set, lbls->pos.x,lbls->pos.y, lbls->sz.x,lbls->sz.y, ((textlabel_t*)lbls->lbl)->text);  
+  for (size_t i = 0; i < n_lbls; i++) {
+    fprintf(stderr, " [%" PRISIZE_T "] %p set %d (%.02f,%.02f) (%.02f,%.02f) %s\n",
+            i, lbls, lbls->set, lbls->pos.x, lbls->pos.y, lbls->sz.x,
+            lbls->sz.y, ((textlabel_t*)lbls->lbl)->text);
     lbls++;
   }
-  return 0;
 }
 
 static pointf
@@ -333,8 +334,8 @@ addLabelObj (textlabel_t* lp, object_t* objp, boxf bb)
 	objp->sz.y = lp->dimen.y;
     }
     objp->pos = lp->pos;
-    objp->pos.x -= (objp->sz.x) / 2.0;
-    objp->pos.y -= (objp->sz.y) / 2.0;
+    objp->pos.x -= objp->sz.x / 2.0;
+    objp->pos.y -= objp->sz.y / 2.0;
 
     return adjustBB(objp, bb);
 }
@@ -356,8 +357,8 @@ addNodeObj (node_t* np, object_t* objp, boxf bb)
 	objp->sz.y = INCH2PS(ND_height(np));
     }
     objp->pos = ND_coord(np);
-    objp->pos.x -= (objp->sz.x) / 2.0;
-    objp->pos.y -= (objp->sz.y) / 2.0;
+    objp->pos.x -= objp->sz.x / 2.0;
+    objp->pos.y -= objp->sz.y / 2.0;
 
     return adjustBB(objp, bb);
 }
@@ -374,7 +375,7 @@ addClusterObj (Agraph_t* g, cinfo_t info)
 
     for (c = 1; c <= GD_n_cluster(g); c++)
 	info = addClusterObj (GD_clust(g)[c], info);
-    if ((g != agroot(g)) && (GD_label(g)) && GD_label(g)->set) {
+    if (g != agroot(g) && GD_label(g) && GD_label(g)->set) {
 	object_t* objp = info.objp;
 	info.bb = addLabelObj (GD_label(g), objp, info.bb);
 	info.objp++;
@@ -383,13 +384,11 @@ addClusterObj (Agraph_t* g, cinfo_t info)
     return info;
 }
 
-static int
-countClusterLabels (Agraph_t* g)
-{
-    int c, i = 0;
-    if ((g != agroot(g)) && (GD_label(g)) && GD_label(g)->set)
+static size_t countClusterLabels(Agraph_t *g) {
+    size_t i = 0;
+    if (g != agroot(g) && GD_label(g) && GD_label(g)->set)
 	i++;
-    for (c = 1; c <= GD_n_cluster(g); c++)
+    for (int c = 1; c <= GD_n_cluster(g); c++)
 	i += countClusterLabels (GD_clust(g)[c]);
     return i;
 }
@@ -401,25 +400,21 @@ countClusterLabels (Agraph_t* g)
  * TODO: interaction with spline=ortho
  */
   /* True if edges geometries were computed and this edge has a geometry */
-#define HAVE_EDGE(ep) ((et != ET_NONE) && (ED_spl(ep) != NULL))
+#define HAVE_EDGE(ep) ((et != EDGETYPE_NONE) && (ED_spl(ep) != NULL))
 
 static void addXLabels(Agraph_t * gp)
 {
     Agnode_t *np;
     Agedge_t *ep;
-    int cnt, i, n_objs, n_lbls;
-    int n_nlbls = 0;		/* # of unset node xlabels */
-    int n_elbls = 0;		/* # of unset edge labels or xlabels */
-    int n_set_lbls = 0;		/* # of set xlabels and edge labels */
-    int n_clbls = 0;		/* # of set cluster labels */
+    size_t n_nlbls = 0; // # of unset node xlabels
+    size_t n_elbls = 0; // # of unset edge labels or xlabels
+    size_t n_set_lbls = 0; // # of set xlabels and edge labels
+    size_t n_clbls = 0; // # of set cluster labels
     boxf bb;
-    pointf ur;
     textlabel_t* lp;
     label_params_t params;
     object_t* objs;
     xlabel_t* lbls;
-    object_t* objp;
-    xlabel_t* xlp;
     Agsym_t* force;
     int et = EDGE_TYPE(gp);
 
@@ -468,17 +463,17 @@ static void addXLabels(Agraph_t * gp)
 	n_clbls = countClusterLabels (gp);
 
     /* A label for each unpositioned external label */
-    n_lbls = n_nlbls + n_elbls;
+    size_t n_lbls = n_nlbls + n_elbls;
     if (n_lbls == 0) return;
 
     /* An object for each node, each positioned external label, any cluster label, 
      * and all unset edge labels and xlabels.
      */
-    n_objs = agnnodes(gp) + n_set_lbls + n_clbls + n_elbls;
-    objp = objs = N_NEW(n_objs, object_t);
-    xlp = lbls = N_NEW(n_lbls, xlabel_t);
-    bb.LL = pointfof(INT_MAX, INT_MAX);
-    bb.UR = pointfof(-INT_MAX, -INT_MAX);
+    size_t n_objs = (size_t)agnnodes(gp) + n_set_lbls + n_clbls + n_elbls;
+    object_t* objp = objs = gv_calloc(n_objs, sizeof(object_t));
+    xlabel_t* xlp = lbls = gv_calloc(n_lbls, sizeof(xlabel_t));
+    bb.LL = (pointf){INT_MAX, INT_MAX};
+    bb.UR = (pointf){-INT_MAX, -INT_MAX};
 
     for (np = agfstnode(gp); np; np = agnxtnode(gp, np)) {
 
@@ -489,7 +484,8 @@ static void addXLabels(Agraph_t * gp)
 		bb = addLabelObj (lp, objp, bb);
 	    }
 	    else {
-		addXLabel (lp, objp, xlp, 0, ur); 
+		pointf ignored = { 0.0, 0.0 };
+		addXLabel (lp, objp, xlp, 0, ignored);
 		xlp++;
 	    }
 	}
@@ -504,7 +500,7 @@ static void addXLabels(Agraph_t * gp)
 		    xlp++;
 		}
 		else {
-		    agerr(AGWARN, "no position for edge with label %s\n",
+		    agwarningf("no position for edge with label %s\n",
 			    ED_label(ep)->text);
 		    continue;
 		}
@@ -519,7 +515,7 @@ static void addXLabels(Agraph_t * gp)
 		    xlp++;
 		}
 		else {
-		    agerr(AGWARN, "no position for edge with tail label %s\n",
+		    agwarningf("no position for edge with tail label %s\n",
 			    ED_tail_label(ep)->text);
 		    continue;
 		}
@@ -534,7 +530,7 @@ static void addXLabels(Agraph_t * gp)
 		    xlp++;
 		}
 		else {
-		    agerr(AGWARN, "no position for edge with head label %s\n",
+		    agwarningf("no position for edge with head label %s\n",
 			    ED_head_label(ep)->text);
 		    continue;
 		}
@@ -549,7 +545,7 @@ static void addXLabels(Agraph_t * gp)
 		    xlp++;
 		}
 		else {
-		    agerr(AGWARN, "no position for edge with xlabel %s\n",
+		    agwarningf("no position for edge with xlabel %s\n",
 			    ED_xlabel(ep)->text);
 		    continue;
 		}
@@ -567,18 +563,18 @@ static void addXLabels(Agraph_t * gp)
 
     force = agfindgraphattr(gp, "forcelabels");
 
-    params.force = late_bool(gp, force, TRUE);
+    params.force = late_bool(gp, force, true);
     params.bb = bb;
     placeLabels(objs, n_objs, lbls, n_lbls, &params);
     if (Verbose)
 	printData(objs, n_objs, lbls, n_lbls, &params);
 
     xlp = lbls;
-    cnt = 0;
-    for (i = 0; i < n_lbls; i++) {
+    size_t cnt = 0;
+    for (size_t i = 0; i < n_lbls; i++) {
 	if (xlp->set) {
 	    cnt++;
-	    lp = (textlabel_t *) (xlp->lbl);
+	    lp = (textlabel_t *)xlp->lbl;
 	    lp->set = 1;
 	    lp->pos = centerPt(xlp);
 	    updateBB (gp, lp);
@@ -586,9 +582,11 @@ static void addXLabels(Agraph_t * gp)
 	xlp++;
     }
     if (Verbose)
-	fprintf (stderr, "%d out of %d labels positioned.\n", cnt, n_lbls);
+	fprintf(stderr, "%" PRISIZE_T " out of %" PRISIZE_T " labels positioned.\n",
+	        cnt, n_lbls);
     else if (cnt != n_lbls)
-	agerr(AGWARN, "%d out of %d exterior labels positioned.\n", cnt, n_lbls);
+	agwarningf("%" PRISIZE_T " out of %" PRISIZE_T " exterior labels positioned.\n",
+	      cnt, n_lbls);
     free(objs);
     free(lbls);
 }
@@ -630,7 +628,7 @@ void gv_postprocess(Agraph_t * g, int allowTranslation)
 		GD_bb(g).LL.x -= dimen.y;
 	    }
 
-	    if (dimen.x > (GD_bb(g).UR.y - GD_bb(g).LL.y)) {
+	    if (dimen.x > GD_bb(g).UR.y - GD_bb(g).LL.y) {
 		diff = dimen.x - (GD_bb(g).UR.y - GD_bb(g).LL.y);
 		diff = diff / 2.;
 		GD_bb(g).LL.y -= diff;
@@ -649,7 +647,7 @@ void gv_postprocess(Agraph_t * g, int allowTranslation)
 		    GD_bb(g).UR.y += dimen.y;
 	    }
 
-	    if (dimen.x > (GD_bb(g).UR.x - GD_bb(g).LL.x)) {
+	    if (dimen.x > GD_bb(g).UR.x - GD_bb(g).LL.x) {
 		diff = dimen.x - (GD_bb(g).UR.x - GD_bb(g).LL.x);
 		diff = diff / 2.;
 		GD_bb(g).LL.x -= diff;
@@ -663,28 +661,30 @@ void gv_postprocess(Agraph_t * g, int allowTranslation)
 	    Offset = GD_bb(g).LL;
 	    break;
 	case RANKDIR_LR:
-	    Offset = pointfof(-GD_bb(g).UR.y, GD_bb(g).LL.x);
+	    Offset = (pointf){-GD_bb(g).UR.y, GD_bb(g).LL.x};
 	    break;
 	case RANKDIR_BT:
-	    Offset = pointfof(GD_bb(g).LL.x, -GD_bb(g).UR.y);
+	    Offset = (pointf){GD_bb(g).LL.x, -GD_bb(g).UR.y};
 	    break;
 	case RANKDIR_RL:
-	    Offset = pointfof(GD_bb(g).LL.y, GD_bb(g).LL.x);
+	    Offset = (pointf){GD_bb(g).LL.y, GD_bb(g).LL.x};
 	    break;
+	default:
+	    UNREACHABLE();
 	}
 	translate_drawing(g);
     }
     if (GD_label(g) && !GD_label(g)->set)
 	place_root_label(g, dimen);
 
-    if (Show_boxes) {
-	char buf[BUFSIZ];
+    if (!show_boxes_is_empty(&Show_boxes)) {
+	agxbuf buf = {0};
 	if (Flip)
-	    sprintf(buf, M2, Offset.x, Offset.y, Offset.x, Offset.y);
+	    agxbprint(&buf, M2, Offset.x, Offset.y, Offset.x, Offset.y);
 	else
-	    sprintf(buf, M1, Offset.y, Offset.x, Offset.y, Offset.x,
+	    agxbprint(&buf, M1, Offset.y, Offset.x, Offset.y, Offset.x,
 		    -Offset.x, -Offset.y);
-	Show_boxes[0] = strdup(buf);
+	show_boxes_append(&Show_boxes, agxbdisown(&buf));
     }
 }
 
@@ -703,7 +703,7 @@ static void place_flip_graph_label(graph_t * g)
     int c;
     pointf p, d;
 
-    if ((g != agroot(g)) && (GD_label(g)) && !GD_label(g)->set) {
+    if (g != agroot(g) && GD_label(g) && !GD_label(g)->set) {
 	if (GD_label_pos(g) & LABEL_AT_TOP) {
 	    d = GD_border(g)[RIGHT_IX];
 	    p.x = GD_bb(g).UR.x - d.x / 2;
@@ -720,7 +720,7 @@ static void place_flip_graph_label(graph_t * g)
 	    p.y = (GD_bb(g).LL.y + GD_bb(g).UR.y) / 2;
 	}
 	GD_label(g)->pos = p;
-	GD_label(g)->set = TRUE;
+	GD_label(g)->set = true;
     }
 
     for (c = 1; c <= GD_n_cluster(g); c++)
@@ -738,7 +738,7 @@ void place_graph_label(graph_t * g)
     int c;
     pointf p, d;
 
-    if ((g != agroot(g)) && (GD_label(g)) && !GD_label(g)->set) {
+    if (g != agroot(g) && GD_label(g) && !GD_label(g)->set) {
 	if (GD_label_pos(g) & LABEL_AT_TOP) {
 	    d = GD_border(g)[TOP_IX];
 	    p.y = GD_bb(g).UR.y - d.y / 2;
@@ -755,7 +755,7 @@ void place_graph_label(graph_t * g)
 	    p.x = (GD_bb(g).LL.x + GD_bb(g).UR.x) / 2;
 	}
 	GD_label(g)->pos = p;
-	GD_label(g)->set = TRUE;
+	GD_label(g)->set = true;
     }
 
     for (c = 1; c <= GD_n_cluster(g); c++)

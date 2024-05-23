@@ -50,19 +50,13 @@
     <ClCompile Include="exexpr.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="exlexname.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="exnospace.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="exopen.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="exrewind.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="exstash.c">
+    <ClCompile Include="exparse.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="extoken.c">
@@ -72,9 +66,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="exzero.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="exparse.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

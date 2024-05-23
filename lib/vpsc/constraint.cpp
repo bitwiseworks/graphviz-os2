@@ -10,22 +10,21 @@
  * This version is released under the CPL (Common Public License) with
  * the Graphviz distribution.
  * A version is also available under the LGPL as part of the Adaptagrams
- * project: http://sourceforge.net/projects/adaptagrams.  
+ * project: https://github.com/mjwybrow/adaptagrams.  
  * If you make improvements or bug fixes to this code it would be much
  * appreciated if you could also contribute those changes back to the
  * Adaptagrams repository.
  */
 
-#include "constraint.h"
+#include <vpsc/constraint.h>
 #include <cassert>
-Constraint::Constraint(Variable *left, Variable *right, double gap, bool equality)
+Constraint::Constraint(Variable *left, Variable *right, double gap)
 : left(left),
   right(right),
   gap(gap),
   timeStamp(0),
   active(false),
-  visited(false),
-  equality(equality)
+  visited(false)
 {
 	left->out.push_back(this);
 	right->in.push_back(this);
@@ -43,10 +42,6 @@ Constraint::~Constraint() {
 }
 std::ostream& operator <<(std::ostream &os, const Constraint &c)
 {
-	if(&c==NULL) {
-		os<<"NULL";
-	} else {
-		os<<*c.left<<"+"<<c.gap<<"<="<<*c.right<<"("<<c.slack()<<")"<<(c.active?"-active":"");
-	}
+	os<<*c.left<<"+"<<c.gap<<"<="<<*c.right<<"("<<c.slack()<<")"<<(c.active?"-active":"");
 	return os;
 }

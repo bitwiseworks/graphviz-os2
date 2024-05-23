@@ -1,18 +1,6 @@
-if (ANN_FOUND)
+if(ANN_FOUND)
 
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${GRAPHVIZ_LIB_DIR}/cdt
-    ${GRAPHVIZ_LIB_DIR}/cgraph
-    ${GRAPHVIZ_LIB_DIR}/common
-    ${GRAPHVIZ_LIB_DIR}/gvc
-    ${GRAPHVIZ_LIB_DIR}/pathplan
-    ${GRAPHVIZ_LIB_DIR}/sfdpgen
-    ${GRAPHVIZ_LIB_DIR}/sparse
-    ${ANN_INCLUDE_DIR}
-)
-
-add_library(libmingle STATIC
+  add_library(libmingle STATIC
     # Header files
     agglomerative_bundling.h
     edge_bundling.h
@@ -21,11 +9,24 @@ add_library(libmingle STATIC
     nearest_neighbor_graph_ann.h
 
     # Source files
-    agglomerative_bundling.c
-    edge_bundling.c
-    ink.c
-    nearest_neighbor_graph.c
+    agglomerative_bundling.cpp
+    edge_bundling.cpp
+    ink.cpp
+    nearest_neighbor_graph.cpp
     nearest_neighbor_graph_ann.cpp
-)
+  )
 
-endif (ANN_FOUND)
+  target_include_directories(libmingle PRIVATE
+    ..
+    ../cdt
+    ../cgraph
+    ../common
+    ../gvc
+    ../pathplan
+  )
+
+  target_include_directories(libmingle SYSTEM PRIVATE
+    ${ANN_INCLUDE_DIR}
+  )
+
+endif()

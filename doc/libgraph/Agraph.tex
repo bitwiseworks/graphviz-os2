@@ -147,7 +147,8 @@ You can also construct a new graph by reading a file:
 
 Here, the graph's name, type and contents including attributes depend
 on the file contents.  (The second argument is the same optional method
-pointer mentioned above for \verb"agopen").
+pointer mentioned above for \verb"agopen"). If the default I/O discipline
+is used and the stream is wide-oriented, the behavior is undefined.
 
 Sometimes it is convenient to have the graph represented concretely as a 
 character string \verb"str".
@@ -169,7 +170,8 @@ on the same file.\footnote{It is the application programmer's job to
 convert between internal attributes to external strings
 when graphs are read and written, if desired.
 This seemed better than inventing a complicated way
-to automate this conversion.}
+to automate this conversion.} If the default I/O discipline is used
+and the stream is wide-oriented, the behavior is undefined.
 
 \verb"agnnodes(g)", \verb"agnedges(g)" and \verb"agnsubg(g)" return the count of nodes,
 edges and (immediate) subgraphs in a graph (or subgraph).
@@ -961,31 +963,7 @@ This adds a small but noticeable overhead when traversing the ``lists.''
 For flat-out efficiency,
 there is a way of linearizing the splay trees in which node
 and edge sets are stored, converting them into flat lists.  After
-this they can be traversed very quickly. The function
-\verb"agflatten(Agraph_t *g, int flag)" 
-will flatten the trees if \verb"flag" is \verb"TRUE",
-or reconstruct the trees if \verb"flag" is \verb"FALSE".
-Note that if any call adds or removes a graph object, the corresponding list
-is automatically returned to its tree form.
-
-The library provides various macros to automate the flattening and simplify
-the standard traversals. For example, the following code performs the usual
-traversal over all out-edges of a graph:
-\begin{verbatim}
-  Agnode_t* n;
-  Agedge_t* e;
-  Agnoderef_t* nr;
-  Agedgeref_t* er;
-  for (nr = FIRSTNREF(g); nr; nr = NEXTNREF(g,nr)) {
-    n = NODEOF(nr);
-    /* do something with node n */
-    for (er = FIRSTOUTREF(g,nr); er; er = NEXTEREF(g,er)) {
-      e = EDGEOF(er);
-      /* do something with edge e */
-    }
-  }
-\end{verbatim}
-Compare this with the code in shown on page \pageref{traversal}. 
+this they can be traversed very quickly.
 
 \section{Related Libraries}
 \label{sec:relatedlibraries}

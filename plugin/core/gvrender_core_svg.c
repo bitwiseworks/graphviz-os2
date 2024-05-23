@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /* Comments on the SVG coordinate system (SN 8 Dec 2006):
@@ -22,48 +19,58 @@
  */
 
 #include "config.h"
-
+#include <math.h>
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 
-#include "macros.h"
-#include "const.h"
+#include <common/macros.h>
+#include <common/const.h>
 
-#include "gvplugin_render.h"
-#include "agxbuf.h"
-#include "utils.h"
-#include "gvplugin_device.h"
-#include "gvio.h"
-#include "gvcint.h"
+#include <gvc/gvplugin_render.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/unreachable.h>
+#include <common/utils.h>
+#include <gvc/gvplugin_device.h>
+#include <gvc/gvio.h>
+#include <gvc/gvcint.h>
+#include <cgraph/strcasecmp.h>
 
 #define LOCALNAMEPREFIX		'%'
 
-typedef enum { FORMAT_SVG, FORMAT_SVGZ, } format_type;
-
-/* SVG dash array */
-static char *sdasharray = "5,2";
-/* SVG dot array */
-static char *sdotarray = "1,5";
-
-#ifndef HAVE_STRCASECMP
-extern int strcasecmp(const char *s1, const char *s2);
+#ifndef EDGEALIGN
+  #define EDGEALIGN 0
 #endif
 
-static void svg_bzptarray(GVJ_t * job, pointf * A, int n)
-{
-    int i;
+typedef enum { FORMAT_SVG, FORMAT_SVGZ, FORMAT_SVG_INLINE } format_type;
+
+/* SVG dash array */
+static const char sdasharray[] = "5,2";
+/* SVG dot array */
+static const char sdotarray[] = "1,5";
+
+static const char transparent[] = "transparent";
+static const char none[] = "none";
+static const char black[] = "black";
+
+static bool emit_standalone_headers(const GVJ_t *job) {
+  return job->render.id != FORMAT_SVG_INLINE;
+}
+
+static void svg_bzptarray(GVJ_t *job, pointf *A, size_t n) {
     char c;
 
     c = 'M';			/* first point */
 #if EDGEALIGN
     if (A[0].x <= A[n-1].x) {
 #endif
-	for (i = 0; i < n; i++) {
-	    gvprintf(job, "%c", c);
+	for (size_t i = 0; i < n; i++) {
+	    gvwrite(job, &c, 1);
             gvprintdouble(job, A[i].x);
-            gvputs(job, ",");
+            gvputc(job, ',');
             gvprintdouble(job, -A[i].y);
 	    if (i == 0)
 		c = 'C';		/* second point */
@@ -72,10 +79,10 @@ static void svg_bzptarray(GVJ_t * job, pointf * A, int n)
 	}
 #if EDGEALIGN
     } else {
-	for (i = n-1; i >= 0; i--) {
-	    gvprintf(job, "%c", c);
+	for (size_t i = n - 1; i != SIZE_MAX; i--) {
+	    gvwrite(job, &c, 1);
             gvprintdouble(job, A[i].x);
-            gvputs(job, ",");
+            gvputc(job, ',');
             gvprintdouble(job, -A[i].y);
 	    if (i == 0)
 		c = 'C';		/* second point */
@@ -91,32 +98,65 @@ static void svg_print_id_class(GVJ_t * job, char* id, char* idx, char* kind, voi
     char* str;
 
     gvputs(job, "<g id=\"");
-    gvputs(job, xml_string(id));
-    if (idx)
-	gvprintf (job, "_%s", xml_string(idx));
+    gvputs_xml(job, id);
+    if (idx) {
+	gvputc(job, '_');
+	gvputs_xml(job, idx);
+    }
     gvprintf(job, "\" class=\"%s", kind);
     if ((str = agget(obj, "class")) && *str) {
-	gvputs(job, " ");
-	gvputs(job, xml_string(str));
+	gvputc(job, ' ');
+	gvputs_xml(job, str);
     }
-    gvputs(job, "\"");
+    gvputc(job, '"');
 }
 
-static void svg_print_color(GVJ_t * job, gvcolor_t color)
+/* svg_print_paint assumes the caller will set the opacity if the alpha channel
+ * is greater than 0 and less than 255
+ */
+static void svg_print_paint(GVJ_t * job, gvcolor_t color)
 {
     switch (color.type) {
     case COLOR_STRING:
-	gvputs(job, color.u.string);
+	if (!strcmp(color.u.string, transparent))
+	    gvputs(job, none);
+	else
+	    gvputs(job, color.u.string);
 	break;
     case RGBA_BYTE:
 	if (color.u.rgba[3] == 0)	/* transparent */
-	    gvputs(job, "transparent");
+	    gvputs(job, none);
 	else
 	    gvprintf(job, "#%02x%02x%02x",
 		     color.u.rgba[0], color.u.rgba[1], color.u.rgba[2]);
 	break;
     default:
-	assert(0);		/* internal error */
+	UNREACHABLE(); // internal error
+    }
+}
+
+/* svg_print_gradient_color assumes the caller will set the opacity if the
+ * alpha channel is less than 255.
+ *
+ * "transparent" in SVG 2 gradients is considered to be black with 0 opacity,
+ * so for compatibility with SVG 1.1 output we use black when the color string
+ * is transparent and assume the caller will also check and set opacity 0.
+ */
+static void svg_print_gradient_color(GVJ_t * job, gvcolor_t color)
+{
+    switch (color.type) {
+    case COLOR_STRING:
+	if (!strcmp(color.u.string, transparent))
+	    gvputs(job, black);
+	else
+	    gvputs(job, color.u.string);
+	break;
+    case RGBA_BYTE:
+	gvprintf(job, "#%02x%02x%02x",
+		 color.u.rgba[0], color.u.rgba[1], color.u.rgba[2]);
+	break;
+    default:
+	UNREACHABLE(); // internal error
     }
 }
 
@@ -126,22 +166,34 @@ static void svg_grstyle(GVJ_t * job, int filled, int gid)
 
     gvputs(job, " fill=\"");
     if (filled == GRADIENT) {
-	gvprintf(job, "url(#l_%d)", gid);
+	gvputs(job, "url(#");
+	if (obj->id != NULL) {
+	    gvputs_xml(job, obj->id);
+	    gvputc(job, '_');
+	}
+	gvprintf(job, "l_%d)", gid);
     } else if (filled == RGRADIENT) {
-	gvprintf(job, "url(#r_%d)", gid);
+	gvputs(job, "url(#");
+	if (obj->id != NULL) {
+	    gvputs_xml(job, obj->id);
+	    gvputc(job, '_');
+	}
+	gvprintf(job, "r_%d)", gid);
     } else if (filled) {
-	svg_print_color(job, obj->fillcolor);
+	svg_print_paint(job, obj->fillcolor);
 	if (obj->fillcolor.type == RGBA_BYTE
 	    && obj->fillcolor.u.rgba[3] > 0
 	    && obj->fillcolor.u.rgba[3] < 255)
 	    gvprintf(job, "\" fill-opacity=\"%f",
-		     ((float) obj->fillcolor.u.rgba[3] / 255.0));
+		     (float)obj->fillcolor.u.rgba[3] / 255.0);
     } else {
 	gvputs(job, "none");
     }
     gvputs(job, "\" stroke=\"");
-    svg_print_color(job, obj->pencolor);
-    if (obj->penwidth != PENWIDTH_NORMAL) {
+    svg_print_paint(job, obj->pencolor);
+    // will `gvprintdouble` output something different from `PENWIDTH_NORMAL`?
+    const double GVPRINT_DOUBLE_THRESHOLD = 0.005;
+    if (!(fabs(obj->penwidth - PENWIDTH_NORMAL) < GVPRINT_DOUBLE_THRESHOLD)) {
 	gvputs(job, "\" stroke-width=\"");
         gvprintdouble(job, obj->penwidth);
     }
@@ -153,49 +205,40 @@ static void svg_grstyle(GVJ_t * job, int filled, int gid)
     if (obj->pencolor.type == RGBA_BYTE && obj->pencolor.u.rgba[3] > 0
 	&& obj->pencolor.u.rgba[3] < 255)
 	gvprintf(job, "\" stroke-opacity=\"%f",
-		 ((float) obj->pencolor.u.rgba[3] / 255.0));
+		 (float)obj->pencolor.u.rgba[3] / 255.0);
 
-    gvputs(job, "\"");
+    gvputc(job, '"');
 }
 
 static void svg_comment(GVJ_t * job, char *str)
 {
     gvputs(job, "<!-- ");
-    gvputs(job, xml_string(str));
+    gvputs_xml(job, str);
     gvputs(job, " -->\n");
 }
 
 static void svg_begin_job(GVJ_t * job)
 {
     char *s;
-    gvputs(job,
-	   "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
-    if ((s = agget(job->gvc->g, "stylesheet")) && s[0]) {
-	gvputs(job, "<?xml-stylesheet href=\"");
-	gvputs(job, s);
-	gvputs(job, "\" type=\"text/css\"?>\n");
+    if (emit_standalone_headers(job)) {
+	    gvputs(job,
+		   "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");
+	    if ((s = agget(job->gvc->g, "stylesheet")) && s[0]) {
+		gvputs(job, "<?xml-stylesheet href=\"");
+		gvputs(job, s);
+		gvputs(job, "\" type=\"text/css\"?>\n");
+	    }
+	    gvputs(job, "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\"\n"
+                " \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n");
     }
-#if 0
-    gvputs(job, "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\"\n");
-    gvputs(job,
-	   " \"http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd\"");
-    /* This is to work around a bug in the SVG 1.0 DTD */
-    gvputs(job,
-	   " [\n <!ATTLIST svg xmlns:xlink CDATA #FIXED \"http://www.w3.org/1999/xlink\">\n]");
-#else
-    gvputs(job, "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\"\n");
-    gvputs(job,
-	   " \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n");
-#endif
-
-    gvputs(job, "<!-- Generated by ");
-    gvputs(job, xml_string(job->common->info[0]));
+    gvputs(job,"<!-- Generated by ");
+    gvputs_xml(job, job->common->info[0]);
     gvputs(job, " version ");
-    gvputs(job, xml_string(job->common->info[1]));
+    gvputs_xml(job, job->common->info[1]);
     gvputs(job, " (");
-    gvputs(job, xml_string(job->common->info[2]));
-    gvputs(job, ")\n");
-    gvputs(job, " -->\n");
+    gvputs_xml(job, job->common->info[2]);
+    gvputs(job, ")\n"
+                " -->\n");
 }
 
 static void svg_begin_graph(GVJ_t * job)
@@ -205,7 +248,7 @@ static void svg_begin_graph(GVJ_t * job)
     gvputs(job, "<!--");
     if (agnameof(obj->u.g)[0] && agnameof(obj->u.g)[0] != LOCALNAMEPREFIX) {
 	gvputs(job, " Title: ");
-	gvputs(job, xml_string(agnameof(obj->u.g)));
+	gvputs_xml(job, agnameof(obj->u.g));
     }
     gvprintf(job, " Pages: %d -->\n",
 	     job->pagesArraySize.x * job->pagesArraySize.y);
@@ -217,10 +260,17 @@ static void svg_begin_graph(GVJ_t * job)
 	job->canvasBox.LL.y,
 	job->canvasBox.UR.x,
 	job->canvasBox.UR.y);
-    /* namespace of svg */
-    gvputs(job, " xmlns=\"http://www.w3.org/2000/svg\"");
-    /* namespace of xlink */
-    gvputs(job, " xmlns:xlink=\"http://www.w3.org/1999/xlink\"");
+    // https://svgwg.org/svg2-draft/struct.html#Namespace says:
+    // > There's no need to have an ‘xmlns’ attribute declaring that the
+    // > element is in the SVG namespace when using the HTML parser. The HTML
+    // > parser will automatically create the SVG elements in the proper
+    // > namespace.
+    if (emit_standalone_headers(job)) {
+	/* namespace of svg */
+	gvputs(job, " xmlns=\"http://www.w3.org/2000/svg\""
+	/* namespace of xlink */
+	    " xmlns:xlink=\"http://www.w3.org/1999/xlink\"");
+    }
     gvputs(job, ">\n");
 }
 
@@ -232,6 +282,9 @@ static void svg_end_graph(GVJ_t * job)
 static void svg_begin_layer(GVJ_t * job, char *layername, int layerNum,
 			    int numLayers)
 {
+    (void)layerNum;
+    (void)numLayers;
+
     obj_state_t *obj = job->obj;
 
     svg_print_id_class(job, layername, NULL, "layer", obj->u.g);
@@ -255,18 +308,17 @@ static void svg_begin_page(GVJ_t * job)
      * and it is the entire graph if we're not currently paging */
     svg_print_id_class(job, obj->id, NULL, "graph", obj->u.g);
     gvputs(job, " transform=\"scale(");
-    gvprintdouble(job, job->scale.x);
-    gvputs(job, " ");
-    gvprintdouble(job, job->scale.y);
+    // cannot be gvprintdouble because 2 digits precision insufficient
+    gvprintf(job, "%g %g", job->scale.x, job->scale.y);
     gvprintf(job, ") rotate(%d) translate(", -job->rotation);
     gvprintdouble(job, job->translation.x);
-    gvputs(job, " ");
+    gvputc(job, ' ');
     gvprintdouble(job, -job->translation.y);
     gvputs(job, ")\">\n");
     /* default style */
     if (agnameof(obj->u.g)[0] && agnameof(obj->u.g)[0] != LOCALNAMEPREFIX) {
 	gvputs(job, "<title>");
-	gvputs(job, xml_string(agnameof(obj->u.g)));
+	gvputs_xml(job, agnameof(obj->u.g));
 	gvputs(job, "</title>\n");
     }
 }
@@ -281,9 +333,9 @@ static void svg_begin_cluster(GVJ_t * job)
     obj_state_t *obj = job->obj;
 
     svg_print_id_class(job, obj->id, NULL, "cluster", obj->u.sg);
-    gvputs(job, ">\n");
-    gvputs(job, "<title>");
-    gvputs(job, xml_string(agnameof(obj->u.g)));
+    gvputs(job, ">\n"
+                "<title>");
+    gvputs_xml(job, agnameof(obj->u.g));
     gvputs(job, "</title>\n");
 }
 
@@ -302,9 +354,9 @@ static void svg_begin_node(GVJ_t * job)
     else
 	idx = NULL;
     svg_print_id_class(job, obj->id, idx, "node", obj->u.n);
-    gvputs(job, ">\n");
-    gvputs(job, "<title>");
-    gvputs(job, xml_string(agnameof(obj->u.n)));
+    gvputs(job, ">\n"
+                "<title>");
+    gvputs_xml(job, agnameof(obj->u.n));
     gvputs(job, "</title>\n");
 }
 
@@ -319,11 +371,11 @@ static void svg_begin_edge(GVJ_t * job)
     char *ename;
 
     svg_print_id_class(job, obj->id, NULL, "edge", obj->u.e);
-    gvputs(job, ">\n");
+    gvputs(job, ">\n"
 
-    gvputs(job, "<title>");
-    ename = strdup_and_subst_obj("\\E", (void *) (obj->u.e));
-    gvputs(job, xml_string(ename));
+                "<title>");
+    ename = strdup_and_subst_obj("\\E", obj->u.e);
+    gvputs_xml(job, ename);
     free(ename);
     gvputs(job, "</title>\n");
 }
@@ -340,49 +392,36 @@ svg_begin_anchor(GVJ_t * job, char *href, char *tooltip, char *target,
     gvputs(job, "<g");
     if (id) {
 	gvputs(job, " id=\"a_");
-        gvputs(job, xml_string(id));
-        gvputs(job, "\"");
+        gvputs_xml(job, id);
+        gvputc(job, '"');
     }
-    gvputs(job, ">");
+    gvputs(job, ">"
 
-    gvputs(job, "<a");
-#if 0
-    /* the svg spec implies this can be omitted: http://www.w3.org/TR/SVG/linking.html#Links */
-    gvputs(job, " xlink:type=\"simple\"");
-#endif
+                "<a");
     if (href && href[0]) {
 	gvputs(job, " xlink:href=\"");
-	gvputs(job, xml_url_string(href));
-	gvputs(job, "\"");
+	const xml_flags_t flags = {0};
+	xml_escape(href, flags, (int(*)(void*, const char*))gvputs, job);
+	gvputc(job, '"');
     }
-#if 0
-    /* linking to itself, just so that it can have a xlink:link in the anchor, seems wrong.
-     * it changes the behavior in browsers, the link apears in the bottom information bar
-     */
-    else {
-	assert(id && id[0]);	/* there should always be an id available */
-	gvputs(job, " xlink:href=\"#");
-	gvputs(job, xml_url_string(href));
-	gvputs(job, "\"");
-    }
-#endif
     if (tooltip && tooltip[0]) {
 	gvputs(job, " xlink:title=\"");
-	gvputs(job, xml_string0(tooltip, 1));
-	gvputs(job, "\"");
+	const xml_flags_t flags = {.raw = 1, .dash = 1, .nbsp = 1};
+	xml_escape(tooltip, flags, (int(*)(void*, const char*))gvputs, job);
+	gvputc(job, '"');
     }
     if (target && target[0]) {
 	gvputs(job, " target=\"");
-	gvputs(job, xml_string(target));
-	gvputs(job, "\"");
+	gvputs_xml(job, target);
+	gvputc(job, '"');
     }
     gvputs(job, ">\n");
 }
 
 static void svg_end_anchor(GVJ_t * job)
 {
-    gvputs(job, "</a>\n");
-    gvputs(job, "</g>\n");
+    gvputs(job, "</a>\n"
+                "</g>\n");
 }
 
 static void svg_textspan(GVJ_t * job, pointf p, textspan_t * span)
@@ -438,7 +477,7 @@ static void svg_textspan(GVJ_t * job, pointf p, textspan_t * span)
 	gvprintf(job, " font-family=\"%s", family);
 	if (pA->svg_font_family)
 	    gvprintf(job, ",%s", pA->svg_font_family);
-	gvputs(job, "\"");
+	gvputc(job, '"');
 	if (weight)
 	    gvprintf(job, " font-weight=\"%s\"", weight);
 	if (stretch)
@@ -447,30 +486,30 @@ static void svg_textspan(GVJ_t * job, pointf p, textspan_t * span)
 	    gvprintf(job, " font-style=\"%s\"", style);
     } else
 	gvprintf(job, " font-family=\"%s\"", span->font->name);
-    if ((span->font) && (flags = span->font->flags)) {
+    if ((flags = span->font->flags)) {
 	if ((flags & HTML_BF) && !weight)
-	    gvprintf(job, " font-weight=\"bold\"");
+	    gvputs(job, " font-weight=\"bold\"");
 	if ((flags & HTML_IF) && !style)
-	    gvprintf(job, " font-style=\"italic\"");
-	if ((flags & (HTML_UL|HTML_S|HTML_OL))) {
+	    gvputs(job, " font-style=\"italic\"");
+	if (flags & (HTML_UL|HTML_S|HTML_OL)) {
 	    int comma = 0;
-	    gvprintf(job, " text-decoration=\"");
+	    gvputs(job, " text-decoration=\"");
 	    if ((flags & HTML_UL)) {
-		gvprintf(job, "underline");
+		gvputs(job, "underline");
 		comma = 1;
 	    }
-	    if ((flags & HTML_OL)) {
+	    if (flags & HTML_OL) {
 		gvprintf(job, "%soverline", (comma?",":""));
 		comma = 1;
 	    }
-	    if ((flags & HTML_S))
+	    if (flags & HTML_S)
 		gvprintf(job, "%sline-through", (comma?",":""));
-	    gvprintf(job, "\"");
+	    gvputc(job, '"');
 	}
-	if ((flags & HTML_SUP))
-	    gvprintf(job, " baseline-shift=\"super\"");
-	if ((flags & HTML_SUB))
-	    gvprintf(job, " baseline-shift=\"sub\"");
+	if (flags & HTML_SUP)
+	    gvputs(job, " baseline-shift=\"super\"");
+	if (flags & HTML_SUB)
+	    gvputs(job, " baseline-shift=\"sub\"");
     }
 
     gvprintf(job, " font-size=\"%.2f\"", span->font->size);
@@ -483,42 +522,65 @@ static void svg_textspan(GVJ_t * job, pointf p, textspan_t * span)
 	gvprintf(job, " fill=\"#%02x%02x%02x\"",
 		 obj->pencolor.u.rgba[0], obj->pencolor.u.rgba[1],
 		 obj->pencolor.u.rgba[2]);
-	if (obj->pencolor.u.rgba[3] > 0 && obj->pencolor.u.rgba[3] < 255)
-	    gvprintf(job, " fill-opacity=\"%f\"", ((float) obj->pencolor.u.rgba[3] / 255.0));
+	if (obj->pencolor.u.rgba[3] < 255)
+	    gvprintf(job, " fill-opacity=\"%f\"", (float)obj->pencolor.u.rgba[3] / 255.0);
 	break;
     default:
-	assert(0);		/* internal error */
+	UNREACHABLE(); // internal error
     }
-    gvputs(job, ">");
+    gvputc(job, '>');
     if (obj->labeledgealigned) {
-	gvprintf(job, "<textPath xlink:href=\"#%s_p\" startOffset=\"50%%\">", xml_string(obj->id));
-	gvputs(job, "<tspan x=\"0\" dy=\"");
+	gvputs(job, "<textPath xlink:href=\"#");
+	gvputs_xml(job, obj->id);
+	gvputs(job, "_p\" startOffset=\"50%\"><tspan x=\"0\" dy=\"");
         gvprintdouble(job, -p.y);
         gvputs(job, "\">");
     }
-    gvputs(job, xml_string0(span->str, TRUE));
+    const xml_flags_t xml_flags = {.raw = 1, .dash = 1, .nbsp = 1};
+    xml_escape(span->str, xml_flags, (int(*)(void*, const char*))gvputs, job);
     if (obj->labeledgealigned)
-	gvprintf (job, "</tspan></textPath>");
+	gvputs(job, "</tspan></textPath>");
     gvputs(job, "</text>\n");
+}
+
+static void svg_print_stop(GVJ_t * job, double offset, gvcolor_t color)
+{
+    if (fabs(offset - 0.0) < 0.0005)
+	gvputs(job, "<stop offset=\"0\" style=\"stop-color:");
+    else if (fabs(offset - 1.0) < 0.0005)
+	gvputs(job, "<stop offset=\"1\" style=\"stop-color:");
+    else
+	gvprintf(job, "<stop offset=\"%.03f\" style=\"stop-color:", offset);
+    svg_print_gradient_color(job, color);
+    gvputs(job, ";stop-opacity:");
+    if (color.type == RGBA_BYTE && color.u.rgba[3] < 255)
+	gvprintf(job, "%f", (float)color.u.rgba[3] / 255.0);
+    else if (color.type == COLOR_STRING && !strcmp(color.u.string, transparent))
+	gvputs(job, "0");
+    else
+	gvputs(job, "1.");
+    gvputs(job, ";\"/>\n");
 }
 
 /* svg_gradstyle
  * Outputs the SVG statements that define the gradient pattern
  */
-static int svg_gradstyle(GVJ_t * job, pointf * A, int n)
-{
+static int svg_gradstyle(GVJ_t *job, pointf *A, size_t n) {
     pointf G[2];
-    float angle;
     static int gradId;
     int id = gradId++;
 
     obj_state_t *obj = job->obj;
-    angle = obj->gradient_angle * M_PI / 180;	//angle of gradient line
+    double angle = obj->gradient_angle * M_PI / 180; //angle of gradient line
     G[0].x = G[0].y = G[1].x = G[1].y = 0.;
-    get_gradient_points(A, G, n, angle, 0);	//get points on gradient line
+    get_gradient_points(A, G, n, angle, 0); // get points on gradient line
 
-    gvprintf(job,
-	     "<defs>\n<linearGradient id=\"l_%d\" gradientUnits=\"userSpaceOnUse\" ", id);
+    gvputs(job, "<defs>\n<linearGradient id=\"");
+    if (obj->id != NULL) {
+        gvputs_xml(job, obj->id);
+        gvputc(job, '_');
+    }
+    gvprintf(job, "l_%d\" gradientUnits=\"userSpaceOnUse\" ", id);
     gvputs(job, "x1=\"");
     gvprintdouble(job, G[0].x);
     gvputs(job, "\" y1=\"");
@@ -528,75 +590,44 @@ static int svg_gradstyle(GVJ_t * job, pointf * A, int n)
     gvputs(job, "\" y2=\"");
     gvprintdouble(job, G[1].y);
     gvputs(job, "\" >\n");
-    if (obj->gradient_frac > 0)
-	gvprintf(job, "<stop offset=\"%.03f\" style=\"stop-color:", obj->gradient_frac - 0.001);
-    else
-	gvputs(job, "<stop offset=\"0\" style=\"stop-color:");
-    svg_print_color(job, obj->fillcolor);
-    gvputs(job, ";stop-opacity:");
-    if (obj->fillcolor.type == RGBA_BYTE && obj->fillcolor.u.rgba[3] > 0
-	&& obj->fillcolor.u.rgba[3] < 255)
-	gvprintf(job, "%f", ((float) obj->fillcolor.u.rgba[3] / 255.0));
-    else
-	gvputs(job, "1.");
-    gvputs(job, ";\"/>\n");
-    if (obj->gradient_frac > 0)
-	gvprintf(job, "<stop offset=\"%.03f\" style=\"stop-color:", obj->gradient_frac);
-    else
-	gvputs(job, "<stop offset=\"1\" style=\"stop-color:");
-    svg_print_color(job, obj->stopcolor);
-    gvputs(job, ";stop-opacity:");
-    if (obj->stopcolor.type == RGBA_BYTE && obj->stopcolor.u.rgba[3] > 0
-	&& obj->stopcolor.u.rgba[3] < 255)
-	gvprintf(job, "%f", ((float) obj->stopcolor.u.rgba[3] / 255.0));
-    else
-	gvputs(job, "1.");
-    gvputs(job, ";\"/>\n</linearGradient>\n</defs>\n");
+
+    svg_print_stop(job, obj->gradient_frac > 0 ? obj->gradient_frac - 0.001 : 0.0, obj->fillcolor);
+    svg_print_stop(job, obj->gradient_frac > 0 ? obj->gradient_frac : 1.0, obj->stopcolor);
+
+    gvputs(job, "</linearGradient>\n</defs>\n");
     return id;
 }
 
 /* svg_rgradstyle
  * Outputs the SVG statements that define the radial gradient pattern
  */
-static int svg_rgradstyle(GVJ_t * job, pointf * A, int n)
+static int svg_rgradstyle(GVJ_t * job)
 {
-    /* pointf G[2]; */
-    float angle;
-    int ifx, ify;
+    double ifx, ify;
     static int rgradId;
     int id = rgradId++;
 
     obj_state_t *obj = job->obj;
-    angle = obj->gradient_angle * M_PI / 180;	//angle of gradient line
-    /* G[0].x = G[0].y = G[1].x = G[1].y; */
-    /* get_gradient_points(A, G, n, 0, 1); */
-    if (angle == 0.) {
+    if (obj->gradient_angle == 0) {
 	ifx = ify = 50;
     } else {
-	ifx = 50 * (1 + cos(angle));
-	ify = 50 * (1 - sin(angle));
+	double angle = obj->gradient_angle * M_PI / 180;	//angle of gradient line
+	ifx = round(50 * (1 + cos(angle)));
+	ify = round(50 * (1 - sin(angle)));
     }
-    gvprintf(job,
-	     "<defs>\n<radialGradient id=\"r_%d\" cx=\"50%%\" cy=\"50%%\" r=\"75%%\" fx=\"%d%%\" fy=\"%d%%\">\n",
+    gvputs(job, "<defs>\n<radialGradient id=\"");
+    if (obj->id != NULL) {
+	gvputs_xml(job, obj->id);
+	gvputc(job, '_');
+    }
+    gvprintf(job, "r_%d\" cx=\"50%%\" cy=\"50%%\" r=\"75%%\" "
+	     "fx=\"%.0f%%\" fy=\"%.0f%%\">\n",
 	     id, ifx, ify);
-    gvputs(job, "<stop offset=\"0\" style=\"stop-color:");
-    svg_print_color(job, obj->fillcolor);
-    gvputs(job, ";stop-opacity:");
-    if (obj->fillcolor.type == RGBA_BYTE && obj->fillcolor.u.rgba[3] > 0
-	&& obj->fillcolor.u.rgba[3] < 255)
-	gvprintf(job, "%f", ((float) obj->fillcolor.u.rgba[3] / 255.0));
-    else
-	gvputs(job, "1.");
-    gvputs(job, ";\"/>\n");
-    gvputs(job, "<stop offset=\"1\" style=\"stop-color:");
-    svg_print_color(job, obj->stopcolor);
-    gvputs(job, ";stop-opacity:");
-    if (obj->stopcolor.type == RGBA_BYTE && obj->stopcolor.u.rgba[3] > 0
-	&& obj->stopcolor.u.rgba[3] < 255)
-	gvprintf(job, "%f", ((float) obj->stopcolor.u.rgba[3] / 255.0));
-    else
-	gvputs(job, "1.");
-    gvputs(job, ";\"/>\n</radialGradient>\n</defs>\n");
+
+    svg_print_stop(job, 0.0, obj->fillcolor);
+    svg_print_stop(job, 1.0, obj->stopcolor);
+
+    gvputs(job, "</radialGradient>\n</defs>\n");
     return id;
 }
 
@@ -608,8 +639,8 @@ static void svg_ellipse(GVJ_t * job, pointf * A, int filled)
     /* A[] contains 2 points: the center and corner. */
     if (filled == GRADIENT) {
 	gid = svg_gradstyle(job, A, 2);
-    } else if (filled == (RGRADIENT)) {
-	gid = svg_rgradstyle(job, A, 2);
+    } else if (filled == RGRADIENT) {
+	gid = svg_rgradstyle(job);
     }
     gvputs(job, "<ellipse");
     svg_grstyle(job, filled, gid);
@@ -624,22 +655,19 @@ static void svg_ellipse(GVJ_t * job, pointf * A, int filled)
     gvputs(job, "\"/>\n");
 }
 
-static void
-svg_bezier(GVJ_t * job, pointf * A, int n, int arrow_at_start,
-	   int arrow_at_end, int filled)
-{
+static void svg_bezier(GVJ_t *job, pointf *A, size_t n, int filled) {
     int gid = 0;
     obj_state_t *obj = job->obj;
   
     if (filled == GRADIENT) {
 	gid = svg_gradstyle(job, A, n);
-    } else if (filled == (RGRADIENT)) {
-	gid = svg_rgradstyle(job, A, n);
+    } else if (filled == RGRADIENT) {
+	gid = svg_rgradstyle(job);
     }
     gvputs(job, "<path");
     if (obj->labeledgealigned) {
 	gvputs(job, " id=\"");
-	gvputs(job, xml_string(obj->id));
+	gvputs_xml(job, obj->id);
 	gvputs(job, "_p\" ");
     } 
     svg_grstyle(job, filled, gid);
@@ -648,42 +676,40 @@ svg_bezier(GVJ_t * job, pointf * A, int n, int arrow_at_start,
     gvputs(job, "\"/>\n");
 }
 
-static void svg_polygon(GVJ_t * job, pointf * A, int n, int filled)
-{
-    int i, gid = 0;
+static void svg_polygon(GVJ_t *job, pointf *A, size_t n, int filled) {
+    int gid = 0;
     if (filled == GRADIENT) {
 	gid = svg_gradstyle(job, A, n);
-    } else if (filled == (RGRADIENT)) {
-	gid = svg_rgradstyle(job, A, n);
+    } else if (filled == RGRADIENT) {
+	gid = svg_rgradstyle(job);
     }
     gvputs(job, "<polygon");
     svg_grstyle(job, filled, gid);
     gvputs(job, " points=\"");
-    for (i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
         gvprintdouble(job, A[i].x);
-        gvputs(job, ",");
+        gvputc(job, ',');
         gvprintdouble(job, -A[i].y);
-        gvputs(job, " ");
+        gvputc(job, ' ');
     }
     /* repeat the first point because Adobe SVG is broken */
     gvprintdouble(job, A[0].x);
-    gvputs(job, ",");
+    gvputc(job, ',');
     gvprintdouble(job, -A[0].y);
     gvputs(job, "\"/>\n");
 }
 
-static void svg_polyline(GVJ_t * job, pointf * A, int n)
-{
-    int i;
-
+static void svg_polyline(GVJ_t *job, pointf *A, size_t n) {
     gvputs(job, "<polyline");
     svg_grstyle(job, 0, 0);
     gvputs(job, " points=\"");
-    for (i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
         gvprintdouble(job, A[i].x);
-        gvputs(job, ",");
+        gvputc(job, ',');
         gvprintdouble(job, -A[i].y);
-        gvputs(job, " ");
+        if (i + 1 != n) {
+            gvputc(job, ' ');
+        }
     }
     gvputs(job, "\"/>\n");
 }
@@ -727,7 +753,7 @@ static char *svg_knowncolors[] = {
     "saddlebrown", "salmon", "sandybrown", "seagreen", "seashell",
     "sienna", "silver", "skyblue", "slateblue", "slategray",
     "slategrey", "snow", "springgreen", "steelblue",
-    "tan", "teal", "thistle", "tomato", "turquoise",
+    "tan", "teal", "thistle", "tomato", "transparent", "turquoise",
     "violet",
     "wheat", "white", "whitesmoke",
     "yellow", "yellowgreen"
@@ -790,13 +816,15 @@ gvdevice_features_t device_features_svgz = {
 
 gvplugin_installed_t gvrender_svg_types[] = {
     {FORMAT_SVG, "svg", 1, &svg_engine, &render_features_svg},
+    {FORMAT_SVG_INLINE, "svg_inline", 1, &svg_engine, &render_features_svg},
     {0, NULL, 0, NULL, NULL}
 };
 
 gvplugin_installed_t gvdevice_svg_types[] = {
     {FORMAT_SVG, "svg:svg", 1, NULL, &device_features_svg},
-#if HAVE_LIBZ
+#ifdef HAVE_LIBZ
     {FORMAT_SVGZ, "svgz:svg", 1, NULL, &device_features_svgz},
 #endif
+    {FORMAT_SVG_INLINE, "svg_inline:svg", 1, NULL, &device_features_svg},
     {0, NULL, 0, NULL, NULL}
 };

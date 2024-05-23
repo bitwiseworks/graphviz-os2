@@ -1,6 +1,3 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /**
  *
  * Authors:
@@ -34,29 +31,30 @@
  * Tim Dwyer, 2006
  **********************************************************/
 
-#include "digcola.h"
+#include <cgraph/alloc.h>
+#include <neatogen/digcola.h>
+#include <stdbool.h>
 #ifdef IPSEPCOLA
 #include <math.h>
 #include <stdlib.h>
 #include <time.h>
 #include <stdio.h>
 #include <float.h>
-#include "stress.h"
-#include "dijkstra.h"
-#include "bfs.h"
-#include "matrix_ops.h"
-#include "kkutils.h"
-#include "conjgrad.h"
-#include <csolve_VPSC.h>
-#include "quad_prog_vpsc.h"
-#include "quad_prog_solver.h"
-#include "matrix_ops.h"
+#include <neatogen/stress.h>
+#include <neatogen/dijkstra.h>
+#include <neatogen/bfs.h>
+#include <neatogen/matrix_ops.h>
+#include <neatogen/kkutils.h>
+#include <neatogen/conjgrad.h>
+#include <vpsc/csolve_VPSC.h>
+#include <neatogen/quad_prog_vpsc.h>
+#include <neatogen/quad_prog_solver.h>
+#include <neatogen/matrix_ops.h>
 
 #define localConstrMajorIterations 1000
 
 int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse representation  */
 			     int n,	/* Number of nodes */
-			     int nedges_graph,	/* Number of edges */
 			     double **d_coords,	/* Coordinates of nodes (output layout)  */
 			     node_t ** nodes,	/* Original nodes */
 			     int dim,	/* Dimemsionality of layout */
@@ -72,7 +70,7 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 	** This function imposes HIERARCHY CONSTRAINTS  **
 	*************************************************/
 
-    int i, j, k;
+    int i, k;
     float *lap1 = NULL;
     float *dist_accumulator = NULL;
     float *tmp_coords = NULL;
@@ -84,7 +82,6 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
     float **coords = NULL;
     int orig_n = n;
 
-    /*double conj_tol=tolerance_cg; *//* tolerance of Conjugate Gradient */
     CMajEnvVPSC *cMajEnvHor = NULL;
     CMajEnvVPSC *cMajEnvVrt = NULL;
     double y_0;
@@ -97,18 +94,18 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
     int step;
     float val;
     double old_stress, new_stress = 0;
-    boolean converged;
+    bool converged;
     int len;
     double nsizeScale = 0;
     float maxEdgeLen = 0;
     double max = 1;
 
-    initLayout(graph, n, dim, d_coords, nodes);
+    initLayout(n, dim, d_coords, nodes);
     if (n == 1)
 	return 0;
 
     for (i = 0; i < n; i++) {
-	for (j = 1; j < graph[i].nedges; j++) {
+	for (size_t j = 1; j < graph[i].nedges; j++) {
 	    maxEdgeLen = MAX(graph[i].ewgts[j], maxEdgeLen);
 	}
     }
@@ -128,11 +125,11 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 	/* and perform slower Dijkstra-based computation */
 	if (Verbose)
 	    fprintf(stderr, "Calculating subset model");
-	Dij = compute_apsp_artifical_weights_packed(graph, n);
+	Dij = compute_apsp_artificial_weights_packed(graph, n);
     } else if (model == MODEL_CIRCUIT) {
 	Dij = circuitModel(graph, n);
 	if (!Dij) {
-	    agerr(AGWARN,
+	    agwarningf(
 		  "graph is disconnected. Hence, the circuit model\n");
 	    agerr(AGPREV,
 		  "is undefined. Reverting to the shortest path model.\n");
@@ -164,14 +161,12 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
     /* for numerical stability, scale down layout                */
     /* No Jiggling, might conflict with constraints                      */
     for (i = 0; i < dim; i++) {
-	for (j = 0; j < n; j++) {
-	    if (fabs(d_coords[i][j]) > max) {
-		max = fabs(d_coords[i][j]);
-	    }
+	for (int j = 0; j < n; j++) {
+	    max = fmax(max, fabs(d_coords[i][j]));
 	}
     }
     for (i = 0; i < dim; i++) {
-	for (j = 0; j < n; j++) {
+	for (int j = 0; j < n; j++) {
 	    d_coords[i][j] *= 10 / max;
 	}
     }
@@ -202,15 +197,15 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
     /* compute off-diagonal entries */
     invert_vec(lap_length, lap2);
 
-    if (opt->clusters->nclusters > 0) {
-	int nn = n + opt->clusters->nclusters * 2;
+    if (opt->clusters.nclusters > 0) {
+	int nn = n + opt->clusters.nclusters * 2;
 	int clap_length = nn + nn * (nn - 1) / 2;
-	float *clap = N_GNEW(clap_length, float);
+	float *clap = gv_calloc(clap_length, sizeof(float));
 	int c0, c1;
 	float v;
 	c0 = c1 = 0;
 	for (i = 0; i < nn; i++) {
-	    for (j = 0; j < nn - i; j++) {
+	    for (int j = 0; j < nn - i; j++) {
 		if (i < n && j < n - i) {
 		    v = lap2[c0++];
 		} else {
@@ -218,8 +213,8 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 		    if (j == 1 && i % 2 == 1) {
 			v = maxEdgeLen;
 			v *= v;
-			if (v > 0.01) {
-			    v = 1.0 / v;
+			if (v > 0.01f) {
+			    v = 1.0f / v;
 			}
 		    } else
 			v = 0;
@@ -234,12 +229,12 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
     }
     /* compute diagonal entries */
     count = 0;
-    degrees = N_GNEW(n, double);
+    degrees = gv_calloc(n, sizeof(double));
     set_vector_val(n, 0, degrees);
     for (i = 0; i < n - 1; i++) {
 	degree = 0;
 	count++;		/* skip main diag entry */
-	for (j = 1; j < n - i; j++, count++) {
+	for (int j = 1; j < n - i; j++, count++) {
 	    val = lap2[count];
 	    degree += val;
 	    degrees[i + j] -= val;
@@ -250,12 +245,12 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 	lap2[count] = (float) degrees[i];
     }
 
-    coords = N_GNEW(dim, float *);
-    f_storage = N_GNEW(dim * n, float);
+    coords = gv_calloc(dim, sizeof(float *));
+    f_storage = gv_calloc(dim * n, sizeof(float));
     for (i = 0; i < dim; i++) {
 	coords[i] = f_storage + i * n;
-	for (j = 0; j < n; j++) {
-	    coords[i][j] = j < orig_n ? (float) (d_coords[i][j]) : 0;
+	for (int j = 0; j < n; j++) {
+	    coords[i][j] = j < orig_n ? (float)d_coords[i][j] : 0;
 	}
     }
 
@@ -268,14 +263,14 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 	** Layout optimization  **
 	*************************/
 
-    b = N_GNEW(dim, float *);
-    b[0] = N_GNEW(dim * n, float);
+    b = gv_calloc(dim, sizeof(float *));
+    b[0] = gv_calloc(dim * n, sizeof(float));
     for (k = 1; k < dim; k++) {
 	b[k] = b[0] + k * n;
     }
 
-    tmp_coords = N_GNEW(n, float);
-    dist_accumulator = N_GNEW(n, float);
+    tmp_coords = gv_calloc(n, sizeof(float));
+    dist_accumulator = gv_calloc(n, sizeof(float));
 
     old_stress = DBL_MAX;	/* at least one iteration */
 
@@ -288,9 +283,9 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 	goto finish;
     }
 
-    lap1 = N_GNEW(lap_length, float);
+    lap1 = gv_calloc(lap_length, sizeof(float));
 
-    for (converged = FALSE, iterations = 0;
+    for (converged = false, iterations = 0;
 	 iterations < maxi && !converged; iterations++) {
 
 	/* First, construct Laplacian of 1/(d_ij*|p_i-p_j|)  */
@@ -306,26 +301,23 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 	     */
 	    for (k = 0; k < dim; k++) {
 		set_vector_valf(len, coords[k][i], tmp_coords);
-		vectors_mult_additionf(len, tmp_coords, -1,
-				       coords[k] + i + 1);
+		vectors_mult_additionf(len, tmp_coords, -1, coords[k] + i + 1);
 		square_vec(len, tmp_coords);
-		vectors_additionf(len, tmp_coords, dist_accumulator,
-				  dist_accumulator);
+		vectors_additionf(len, tmp_coords, dist_accumulator, dist_accumulator);
 	    }
 
 	    /* convert to 1/d_{ij} */
 	    invert_sqrt_vec(len, dist_accumulator);
 	    /* detect overflows */
-	    for (j = 0; j < len; j++) {
-		if (dist_accumulator[j] >= FLT_MAX
-		    || dist_accumulator[j] < 0) {
+	    for (int j = 0; j < len; j++) {
+		if (dist_accumulator[j] >= FLT_MAX || dist_accumulator[j] < 0) {
 		    dist_accumulator[j] = 0;
 		}
 	    }
 
 	    count++;		/* save place for the main diagonal entry */
 	    degree = 0;
-	    for (j = 0; j < len; j++, count++) {
+	    for (int j = 0; j < len; j++, count++) {
 		val = lap1[count] *= dist_accumulator[j];
 		degree += val;
 		degrees[i + j + 1] -= val;
@@ -357,20 +349,6 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 	    new_stress -= vectors_inner_productf(n, coords[k], tmp_coords);
 	}
 
-#ifdef ALTERNATIVE_STRESS_CALC
-	{
-	    double mat_stress = new_stress;
-	    double compute_stress(float **coords, float *lap, int dim,
-				  int n);
-	    new_stress = compute_stress(coords, lap2, dim, n);
-	    if (fabs(mat_stress - new_stress) /
-		min(mat_stress, new_stress) > 0.001) {
-		fprintf(stderr,
-			"Diff stress vals: %lf %lf (iteration #%d)\n",
-			mat_stress, new_stress, iterations);
-	    }
-	}
-#endif
 	/* check for convergence */
 	if (Verbose && (iterations % 1 == 0)) {
 	    fprintf(stderr, "%.3f ", new_stress);
@@ -396,7 +374,7 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 		fprintf(stderr, "nsizescale=%f,iterations=%d\n",
 			nsizeScale, iterations);
 	    iterations = 0;
-	    converged = FALSE;
+	    converged = false;
 	}
 
 
@@ -415,16 +393,10 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 	if (opt->noverlap == 1 && nsizeScale > 0.001) {
 	    generateNonoverlapConstraints(cMajEnvHor, nsizeScale, coords,
 					  0,
-					  nsizeScale < 0.5 ? FALSE : TRUE,
+					  nsizeScale >= 0.5,
 					  opt);
 	}
 	if (cMajEnvHor->m > 0) {
-#ifdef MOSEK
-	    if (opt->mosek) {
-		mosek_quad_solve_sep(cMajEnvHor->mosekEnv, n, b[0],
-				     coords[0]);
-	    } else
-#endif				/* MOSEK */
 		constrained_majorization_vpsc(cMajEnvHor, b[0], coords[0],
 					      localConstrMajorIterations);
 	} else {
@@ -439,15 +411,9 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 	}
 	if (opt->noverlap == 1 && nsizeScale > 0.001) {
 	    generateNonoverlapConstraints(cMajEnvVrt, nsizeScale, coords,
-					  1, FALSE, opt);
+					  1, false, opt);
 	}
 	if (cMajEnvVrt->m > 0) {
-#ifdef MOSEK
-	    if (opt->mosek) {
-		mosek_quad_solve_sep(cMajEnvVrt->mosekEnv, n, b[1],
-				     coords[1]);
-	    } else
-#endif				/* MOSEK */
 		if (constrained_majorization_vpsc(cMajEnvVrt, b[1], coords[1],
 					      localConstrMajorIterations) < 0) {
 		iterations = -1;
@@ -473,7 +439,7 @@ int stress_majorization_cola(vtx_data * graph,	/* Input graph in sparse represen
 finish:
     if (coords != NULL) {
 	for (i = 0; i < dim; i++) {
-	    for (j = 0; j < orig_n; j++) {
+	    for (int j = 0; j < orig_n; j++) {
 		d_coords[i][j] = coords[i][j];
 	    }
 	}

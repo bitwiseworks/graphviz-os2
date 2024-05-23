@@ -1,31 +1,40 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief graphics code generator
+ * @ingroup common_render
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-/*
- *  graphics code generator
- */
-
 #include "config.h"
-
+#include <assert.h>
+#include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
+#include <limits.h>
 #include <locale.h>
-#include "render.h"
-#include "agxbuf.h"
-#include "htmltable.h"
-#include "gvc.h"
-#include "cdt.h"
-#include "xdot.h"
+#include <math.h>
+#include <common/render.h>
+#include <cgraph/agxbuf.h>
+#include <cgraph/alloc.h>
+#include <cgraph/gv_ctype.h>
+#include <cgraph/gv_math.h>
+#include <cgraph/list.h>
+#include <cgraph/streq.h>
+#include <cgraph/unreachable.h>
+#include <common/htmltable.h>
+#include <gvc/gvc.h>
+#include <cdt/cdt.h>
+#include <pathplan/pathgeom.h>
+#include <xdot/xdot.h>
 
 #ifdef _WIN32
 #define strtok_r strtok_s
@@ -59,7 +68,7 @@ void* init_xdot (Agraph_t* g)
     xd = parseXDotF (p, NULL, sizeof (exdot_op));
 
     if (!xd) {
-	agerr(AGWARN, "Could not parse \"_background\" attribute in graph %s\n", agnameof(g));
+	agwarningf("Could not parse \"_background\" attribute in graph %s\n", agnameof(g));
 	agerr(AGPREV, "  \"%s\"\n", p);
     }
 #ifdef DEBUG
@@ -83,12 +92,9 @@ static char *defaultlinestyle[3] = { "solid\0", "setlinewidth\0001\0", 0 };
 /* push empty graphic state for current object */
 obj_state_t* push_obj_state(GVJ_t *job)
 {
-    obj_state_t *obj, *parent;
+    obj_state_t *obj = gv_alloc(sizeof(obj_state_t));
 
-    if (! (obj = zmalloc(sizeof(obj_state_t))))
-        agerr(AGERR, "no memory from zmalloc()\n");
-
-    parent = obj->parent = job->obj;
+    obj_state_t *parent = obj->parent = job->obj;
     job->obj = obj;
     if (parent) {
         obj->pencolor = parent->pencolor;        /* default styles to parent's style */
@@ -100,8 +106,6 @@ obj_state_t* push_obj_state(GVJ_t *job)
 	obj->stopcolor = parent->stopcolor;
     }
     else {
-	/* obj->pencolor = NULL */
-	/* obj->fillcolor = NULL */
 	obj->pen = PEN_SOLID;
 	obj->fill = FILL_NONE;
 	obj->penwidth = PENWIDTH_NORMAL;
@@ -137,8 +141,7 @@ void pop_obj_state(GVJ_t *job)
     free(obj);
 }
 
-/* initMapData:
- * Store image map data into job, substituting for node, edge, etc.
+/* Store image map data into job, substituting for node, edge, etc.
  * names.
  * Return 1 if an assignment was made for url or tooltip or target.
  */
@@ -162,11 +165,11 @@ initMapData (GVJ_t* job, char* lbl, char* url, char* tooltip, char* target, char
     if (flags & GVRENDER_DOES_TOOLTIPS) {
         if (tooltip && tooltip[0]) {
             obj->tooltip = strdup_and_subst_obj(tooltip, gobj);
-            obj->explicit_tooltip = TRUE;
+            obj->explicit_tooltip = true;
 	    assigned = 1;
         }
         else if (obj->label) {
-            obj->tooltip = strdup(obj->label);
+            obj->tooltip = gv_strdup(obj->label);
 	    assigned = 1;
         }
     }
@@ -180,20 +183,15 @@ initMapData (GVJ_t* job, char* lbl, char* url, char* tooltip, char* target, char
 static void
 layerPagePrefix (GVJ_t* job, agxbuf* xb)
 {
-    char buf[128]; /* large enough for 2 decimal 64-bit ints and "page_," */
     if (job->layerNum > 1 && (job->flags & GVDEVICE_DOES_LAYERS)) {
-	agxbput (xb, job->gvc->layerIDs[job->layerNum]);
-	agxbputc (xb, '_');
+	agxbprint (xb, "%s_", job->gvc->layerIDs[job->layerNum]);
     }
-    if ((job->pagesArrayElem.x > 0) || (job->pagesArrayElem.y > 0)) {
-	sprintf (buf, "page%d,%d_", job->pagesArrayElem.x, job->pagesArrayElem.y);
-	agxbput (xb, buf);
+    if (job->pagesArrayElem.x > 0 || job->pagesArrayElem.y > 0) {
+	agxbprint (xb, "page%d,%d_", job->pagesArrayElem.x, job->pagesArrayElem.y);
     }
 }
 
-/* genObjId:
- * Use id of root graph if any, plus kind and internal id of object
- */
+/// Use id of root graph if any, plus kind and internal id of object
 char*
 getObjId (GVJ_t* job, void* obj, agxbuf* xb)
 {
@@ -202,19 +200,17 @@ getObjId (GVJ_t* job, void* obj, agxbuf* xb)
     char* gid = GD_drawing(root)->id;
     long idnum = 0;
     char* pfx = NULL;
-    char buf[64]; /* large enough for a decimal 64-bit int */
 
     layerPagePrefix (job, xb);
 
     id = agget(obj, "id");
-    if (id && (*id != '\0')) {
+    if (id && *id != '\0') {
 	agxbput (xb, id);
 	return agxbuse(xb);
     }
 
-    if ((obj != root) && gid) {
-	agxbput (xb, gid);
-	agxbputc (xb, '_');
+    if (obj != root && gid) {
+	agxbprint (xb, "%s_", gid);
     }
 
     switch (agobjkind(obj)) {
@@ -235,28 +231,24 @@ getObjId (GVJ_t* job, void* obj, agxbuf* xb)
 	break;
     }
 
-    agxbput (xb, pfx);
-    sprintf (buf, "%ld", idnum);
-    agxbput (xb, buf);
+    agxbprint (xb, "%s%ld", pfx, idnum);
 
     return agxbuse(xb);
 }
 
-/* interpretCRNL:
- * Map "\n" to ^J, "\r" to ^M and "\l" to ^J.
+/* Map "\n" to ^J, "\r" to ^M and "\l" to ^J.
  * Map "\\" to backslash.
  * Map "\x" to x.
  * Mapping is done in place.
  * Return input string.
  */
-
 static char*
 interpretCRNL (char* ins)
 {
     char* rets = ins;
     char* outs = ins;
     char c;
-    boolean backslash_seen = FALSE;
+    bool backslash_seen = false;
 
     while ((c = *ins++)) {
 	if (backslash_seen) {
@@ -272,11 +264,11 @@ interpretCRNL (char* ins)
 		*outs++ = c;
 		break;
 	    }
-	    backslash_seen = FALSE;
+	    backslash_seen = false;
 	}
 	else {
 	    if (c == '\\')
-		backslash_seen = TRUE;
+		backslash_seen = true;
 	    else
 		*outs++ = c;
 	}
@@ -285,8 +277,7 @@ interpretCRNL (char* ins)
     return rets;
 }
  
-/* preprocessTooltip:
- * Tooltips are a weak form of escString, so we expect object substitution
+/* Tooltips are a weak form of escString, so we expect object substitution
  * and newlines to be handled. The former occurs in initMapData. Here we
  * map "\r", "\l" and "\n" to newlines. (We don't try to handle alignment
  * as in real labels.) To make things uniform when the 
@@ -320,10 +311,7 @@ initObjMapData (GVJ_t* job, textlabel_t *lab, void* gobj)
     char* tooltip = agget(gobj, "tooltip");
     char* target = agget(gobj, "target");
     char* id;
-    unsigned char buf[SMALLBUF];
-    agxbuf xb;
-
-    agxbinit(&xb, SMALLBUF, buf);
+    agxbuf xb = {0};
 
     if (lab) lbl = lab->text;
     else lbl = NULL;
@@ -354,7 +342,7 @@ static void map_point(GVJ_t *job, pointf pf)
 	    obj->url_map_n = 4;
 	}
 	free(obj->url_map_p);
-	obj->url_map_p = p = N_NEW(obj->url_map_n, pointf);
+	obj->url_map_p = p = gv_calloc(obj->url_map_n, sizeof(pointf));
 	P2RECT(pf, p, FUZZ, FUZZ);
 	if (! (flags & GVRENDER_DOES_TRANSFORM))
 	    gvrender_ptf_A(job, p, p, 2);
@@ -366,10 +354,10 @@ static void map_point(GVJ_t *job, pointf pf)
 static char **checkClusterStyle(graph_t* sg, int *flagp)
 {
     char *style;
-    char **pstyle = 0;
+    char **pstyle = NULL;
     int istyle = 0;
 
-    if (((style = agget(sg, "style")) != 0) && style[0]) {
+    if ((style = agget(sg, "style")) != 0 && style[0]) {
 	char **pp;
 	char **qp;
 	char *p;
@@ -410,7 +398,7 @@ static char **checkClusterStyle(graph_t* sg, int *flagp)
 typedef struct {
     char* color;   /* segment color */
     float t;       /* segment size >= 0 */
-    boolean hasFraction;  /* true if color explicitly specifies its fraction */
+    bool hasFraction;  /* true if color explicitly specifies its fraction */
 } colorseg_t;
 /* Sum of segment sizes should add to 1 */
 typedef struct {
@@ -424,11 +412,9 @@ freeSegs (colorsegs_t* segs)
 {
     free (segs->base);
     free (segs->segs);
-    free (segs);
 }
 
-/* getSegLen:
- * Find semicolon in s, replace with '\0'.
+/* Find semicolon in s, replace with '\0'.
  * Convert remainder to float v.
  * Return 0 if no float given
  * Return -1 on failure
@@ -454,8 +440,7 @@ static double getSegLen (char* s)
 #define EPS 1E-5
 #define AEQ0(x) (((x) < EPS) && ((x) > -EPS))
 
-/* parseSegs:
- * Parse string of form color;float:color;float:...:color;float:color
+/* Parse string of form color;float:color;float:...:color;float:color
  * where the semicolon-floats are optional, nonnegative, sum to <= 1.
  * Store the values in an array of colorseg_t's and return the array in psegs.
  * If nseg == 0, count the number of colors.
@@ -473,12 +458,10 @@ static double getSegLen (char* s)
  * Otherwise, psegs is left unchanged and the allocated memory is
  * freed before returning.
  */
-static int
-parseSegs (char* clrs, int nseg, colorsegs_t** psegs)
-{
-    colorsegs_t* segs = NEW(colorsegs_t);
+static int parseSegs(char *clrs, int nseg, colorsegs_t *psegs) {
+    colorsegs_t segs = {0};
     colorseg_t* s;
-    char* colors = strdup (clrs);
+    char* colors = gv_strdup(clrs);
     char* color;
     int cnum = 0;
     double v, left = 1;
@@ -494,33 +477,33 @@ parseSegs (char* clrs, int nseg, colorsegs_t** psegs)
 	}
     }
 
-    segs->base = colors;
-    segs->segs = s = N_NEW(nseg+1,colorseg_t);
+    segs.base = colors;
+    segs.segs = s = gv_calloc(nseg + 1, sizeof(colorseg_t));
     for (color = strtok(colors, ":"); color; color = strtok(0, ":")) {
 	if ((v = getSegLen (color)) >= 0) {
 	    double del = v - left;
 	    if (del > 0) {
 		if (doWarn && !AEQ0(del)) {
-		    agerr (AGWARN, "Total size > 1 in \"%s\" color spec ", clrs);
+		    agwarningf("Total size > 1 in \"%s\" color spec ", clrs);
 		    doWarn = 0;
 		    rval = 3;
 		}
 		v = left;
 	    }
 	    left -= v;
-	    if (v > 0) s[cnum].hasFraction = TRUE;
+	    if (v > 0) s[cnum].hasFraction = true;
 	    if (*color) s[cnum].color = color;
 	    s[cnum++].t = v;
 	}
 	else {
 	    if (doWarn) {
-		agerr (AGERR, "Illegal value in \"%s\" color attribute; float expected after ';'\n",
+		agerrorf("Illegal value in \"%s\" color attribute; float expected after ';'\n",
                     clrs);
 		doWarn = 0;
 		rval = 2;
 	    }
 	    else rval = 1;
-	    freeSegs (segs);
+	    freeSegs(&segs);
 	    return rval;
 	}
 	if (AEQ0(left)) {
@@ -534,12 +517,12 @@ parseSegs (char* clrs, int nseg, colorsegs_t** psegs)
 	/* count zero segments */
 	nseg = 0;
 	for (i = 0; i < cnum; i++) {
-	    if (s[i].t == 0) nseg++;
+	    if (!(s[i].t > 0)) nseg++;
 	}
 	if (nseg > 0) {
 	    double delta = left/nseg;
 	    for (i = 0; i < cnum; i++) {
-		if (s[i].t == 0) s[i].t = delta;
+		if (!(s[i].t > 0)) s[i].t = delta;
 	    }
 	}
 	else {
@@ -548,12 +531,11 @@ parseSegs (char* clrs, int nseg, colorsegs_t** psegs)
     }
     
     /* Make sure last positive segment is followed by a sentinel. */
-    nseg = 0;
     for (i = cnum-1; i >= 0; i--) {
 	if (s[i].t > 0) break;
     }
     s[i+1].color = NULL;
-    segs->numc = i+1;
+    segs.numc = i+1;
 
     *psegs = segs;
     return rval;
@@ -561,8 +543,7 @@ parseSegs (char* clrs, int nseg, colorsegs_t** psegs)
 
 #define THIN_LINE 0.5
 
-/* wedgedEllipse:
- * Fill an ellipse whose bounding box is given by 2 points in pf
+/* Fill an ellipse whose bounding box is given by 2 points in pf
  * with multiple wedges determined by the color spec in clrs.
  * clrs is a list of colon separated colors, with possible quantities. 
  * Thin boundaries are drawn.
@@ -574,8 +555,7 @@ parseSegs (char* clrs, int nseg, colorsegs_t** psegs)
 int 
 wedgedEllipse (GVJ_t* job, pointf * pf, char* clrs)
 {
-    colorsegs_t* segs;
-    colorseg_t* s;
+    colorsegs_t segs;
     int rv;
     double save_penwidth = job->obj->penwidth;
     pointf ctr, semi;
@@ -583,7 +563,7 @@ wedgedEllipse (GVJ_t* job, pointf * pf, char* clrs)
     double angle0, angle1;
 
     rv = parseSegs (clrs, 0, &segs);
-    if ((rv == 1) || (rv == 2)) return rv;
+    if (rv == 1 || rv == 2) return rv;
     ctr.x = (pf[0].x + pf[1].x) / 2.;
     ctr.y = (pf[0].y + pf[1].y) / 2.;
     semi.x = pf[1].x - ctr.x;
@@ -592,28 +572,27 @@ wedgedEllipse (GVJ_t* job, pointf * pf, char* clrs)
 	gvrender_set_penwidth(job, THIN_LINE);
 	
     angle0 = 0;
-    for (s = segs->segs; s->color; s++) {
-	if (s->t == 0) continue;
+    for (colorseg_t *s = segs.segs; s->color; s++) {
+	if (!(s->t > 0)) continue;
 	gvrender_set_fillcolor (job, (s->color?s->color:DEFAULT_COLOR));
 
 	if (s[1].color == NULL) 
 	    angle1 = 2*M_PI;
 	else
-	    angle1 = angle0 + 2*M_PI*(s->t);
+	    angle1 = angle0 + 2 * M_PI * s->t;
 	pp = ellipticWedge (ctr, semi.x, semi.y, angle0, angle1);
-	gvrender_beziercurve(job, pp->ps, pp->pn, 0, 0, 1);
+	gvrender_beziercurve(job, pp->ps, pp->pn, 1);
 	angle0 = angle1;
 	freePath (pp);
     }
 
     if (save_penwidth > THIN_LINE)
 	gvrender_set_penwidth(job, save_penwidth);
-    freeSegs (segs);
+    freeSegs(&segs);
     return rv;
 }
 
-/* stripedBox:
- * Fill a rectangular box with vertical stripes of colors.
+/* Fill a rectangular box with vertical stripes of colors.
  * AF gives 4 corner points, with AF[0] the LL corner and the points ordered CCW.
  * clrs is a list of colon separated colors, with possible quantities. 
  * Thin boundaries are drawn.
@@ -625,8 +604,7 @@ wedgedEllipse (GVJ_t* job, pointf * pf, char* clrs)
 int
 stripedBox (GVJ_t * job, pointf* AF, char* clrs, int rotate)
 {
-    colorsegs_t* segs;
-    colorseg_t* s;
+    colorsegs_t segs;
     int rv;
     double xdelta;
     pointf pts[4];
@@ -634,7 +612,7 @@ stripedBox (GVJ_t * job, pointf* AF, char* clrs, int rotate)
     double save_penwidth = job->obj->penwidth;
 
     rv = parseSegs (clrs, 0, &segs);
-    if ((rv == 1) || (rv == 2)) return rv;
+    if (rv == 1 || rv == 2) return rv;
     if (rotate) {
 	pts[0] = AF[2];
 	pts[1] = AF[3];
@@ -652,10 +630,9 @@ stripedBox (GVJ_t * job, pointf* AF, char* clrs, int rotate)
     
     if (save_penwidth > THIN_LINE)
 	gvrender_set_penwidth(job, THIN_LINE);
-    for (s = segs->segs; s->color; s++) {
-	if (s->t == 0) continue;
+    for (colorseg_t *s = segs.segs; s->color; s++) {
+	if (!(s->t > 0)) continue;
 	gvrender_set_fillcolor (job, (s->color?s->color:DEFAULT_COLOR));
-	/* gvrender_polygon(job, pts, 4, FILL | NO_POLY); */
 	if (s[1].color == NULL) 
 	    pts[1].x = pts[2].x = lastx;
 	else
@@ -665,7 +642,7 @@ stripedBox (GVJ_t * job, pointf* AF, char* clrs, int rotate)
     }
     if (save_penwidth > THIN_LINE)
 	gvrender_set_penwidth(job, save_penwidth);
-    freeSegs (segs);
+    freeSegs(&segs);
     return rv;
 }
 
@@ -685,7 +662,7 @@ void emit_map_rect(GVJ_t *job, boxf b)
 	    obj->url_map_n = 4;
 	}
 	free(obj->url_map_p);
-	obj->url_map_p = p = N_NEW(obj->url_map_n, pointf);
+	obj->url_map_p = p = gv_calloc(obj->url_map_n, sizeof(pointf));
 	p[0] = b.LL;
 	p[1] = b.UR;
 	if (! (flags & GVRENDER_DOES_TRANSFORM))
@@ -711,7 +688,7 @@ static void map_label(GVJ_t *job, textlabel_t *lab)
 	    obj->url_map_n = 4;
 	}
 	free(obj->url_map_p);
-	obj->url_map_p = p = N_NEW(obj->url_map_n, pointf);
+	obj->url_map_p = p = gv_calloc(obj->url_map_n, sizeof(pointf));
 	P2RECT(lab->pos, p, lab->dimen.x / 2., lab->dimen.y / 2.);
 	if (! (flags & GVRENDER_DOES_TRANSFORM))
 	    gvrender_ptf_A(job, p, p, 2);
@@ -720,52 +697,47 @@ static void map_label(GVJ_t *job, textlabel_t *lab)
     }
 }
 
-/* isRect:
- * isRect function returns true when polygon has
+/* isRect function returns true when polygon has
  * regular rectangular shape. Rectangle is regular when
  * it is not skewed and distorted and orientation is almost zero
  */
-static boolean isRect(polygon_t * p)
+static bool isRect(polygon_t * p)
 {
-    return (p->sides == 4 && (ROUND(p->orientation) % 90) == 0
-            && p->distortion == 0.0 && p->skew == 0.0);
+  return p->sides == 4 && fabs(fmod(p->orientation, 90)) < 0.5
+         && is_exactly_zero(p->distortion) && is_exactly_zero(p->skew);
 }
 
 /*
- * isFilled function returns 1 if filled style has been set for node 'n'
- * otherwise returns 0. it accepts pointer to node_t as an argument
+ * isFilled function returns true if filled style has been set for node 'n'
+ * otherwise returns false. it accepts pointer to node_t as an argument
  */
-static int ifFilled(node_t * n)
+static bool isFilled(node_t * n)
 {
     char *style, *p, **pp;
-    int r = 0;
+    bool r = false;
     style = late_nnstring(n, N_style, "");
     if (style[0]) {
         pp = parse_style(style);
         while ((p = *pp)) {
             if (strcmp(p, "filled") == 0)
-                r = 1;
+                r = true;
             pp++;
         }
     }
     return r;
 }
 
-/* pEllipse:
- * pEllipse function returns 'np' points from the circumference
+/* pEllipse function returns 'np' points from the circumference
  * of ellipse described by radii 'a' and 'b'.
  * Assumes 'np' is greater than zero.
  * 'np' should be at least 4 to sample polygon from ellipse
  */
-static pointf *pEllipse(double a, double b, int np)
-{
+static pointf *pEllipse(double a, double b, size_t np) {
     double theta = 0.0;
-    double deltheta = 2 * M_PI / np;
-    int i;
-    pointf *ps;
+    double deltheta = 2 * M_PI / (double)np;
 
-    ps = N_NEW(np, pointf);
-    for (i = 0; i < np; i++) {
+    pointf *ps = gv_calloc(np, sizeof(pointf));
+    for (size_t i = 0; i < np; i++) {
         ps[i].x = a * cos(theta);
         ps[i].y = b * sin(theta);
         theta += deltheta;
@@ -775,20 +747,16 @@ static pointf *pEllipse(double a, double b, int np)
 
 #define HW 2.0   /* maximum distance away from line, in points */
 
-/* check_control_points:
- * check_control_points function checks the size of quadrilateral
+/* check_control_points function checks the size of quadrilateral
  * formed by four control points
- * returns 1 if four points are in line (or close to line)
- * else return 0
+ * returns true if four points are in line (or close to line)
+ * else return false
  */
-static int check_control_points(pointf *cp)
+static bool check_control_points(pointf *cp)
 {
     double dis1 = ptToLine2 (cp[0], cp[3], cp[1]);
     double dis2 = ptToLine2 (cp[0], cp[3], cp[2]);
-    if (dis1 < HW*HW && dis2 < HW*HW)
-        return 1;
-    else
-        return 0;
+    return dis1 < HW * HW && dis2 < HW * HW;
 }
 
 /* update bounding box to contain a bezier segment */
@@ -822,19 +790,17 @@ void update_bb_bz(boxf *bb, pointf *cp)
         }
         else { /* else refine the segment */
             pointf left[4], right[4];
-            Bezier (cp, 3, 0.5, left, right);
+            Bezier (cp, 0.5, left, right);
             update_bb_bz(bb, left);
             update_bb_bz(bb, right);
         }
     }
 }
 
-#if (DEBUG==2)
-static void psmapOutput (pointf* ps, int n)
-{
-   int i;
+#if defined(DEBUG) && DEBUG == 2
+static void psmapOutput(pointf* ps, size_t n) {
    fprintf (stdout, "newpath %f %f moveto\n", ps[0].x, ps[0].y);
-   for (i=1; i < n; i++)
+   for (size_t i = 1; i < n; i++)
         fprintf (stdout, "%f %f lineto\n", ps[i].x, ps[i].y);
    fprintf (stdout, "closepath stroke\n");
 }
@@ -851,39 +817,37 @@ typedef struct segitem_s {
 
 static segitem_t* appendSeg (pointf p, segitem_t* lp)
 {
-    segitem_t* s = GNEW(segitem_t);
+    segitem_t* s = gv_alloc(sizeof(segitem_t));
     INIT_SEG (p, s);
     lp->next = s;
     return s;
 }
 
-/* map_bspline_poly:
- * Output the polygon determined by the n points in p1, followed
+/* Output the polygon determined by the n points in p1, followed
  * by the n points in p2 in reverse order. Assumes n <= 50.
  */
-static void map_bspline_poly(pointf **pbs_p, int **pbs_n, int *pbs_poly_n, int n, pointf* p1, pointf* p2)
-{
-    int i = 0, nump = 0, last = 2*n-1;
+static void map_bspline_poly(pointf **pbs_p, size_t **pbs_n, size_t *pbs_poly_n,
+                             size_t n, pointf *p1, pointf *p2) {
+    size_t i = 0, nump = 0, last = 2 * n - 1;
 
     for ( ; i < *pbs_poly_n; i++)
         nump += (*pbs_n)[i];
 
     (*pbs_poly_n)++;
-    *pbs_n = grealloc(*pbs_n, (*pbs_poly_n) * sizeof(int));
+    *pbs_n = gv_recalloc(*pbs_n, *pbs_poly_n - 1, *pbs_poly_n, sizeof(size_t));
     (*pbs_n)[i] = 2*n;
-    *pbs_p = grealloc(*pbs_p, (nump + 2*n) * sizeof(pointf));
+    *pbs_p = gv_recalloc(*pbs_p, nump, nump + 2 * n, sizeof(pointf));
 
     for (i = 0; i < n; i++) {
         (*pbs_p)[nump+i] = p1[i];
         (*pbs_p)[nump+last-i] = p2[i];
     }
-#if (DEBUG==2)
+#if defined(DEBUG) && DEBUG == 2
     psmapOutput (*pbs_p + nump, last+1);
 #endif
 }
 
-/* approx_bezier:
- * Approximate Bezier by line segments. If the four points are
+/* Approximate Bezier by line segments. If the four points are
  * almost colinear, as determined by check_control_points, we store
  * the segment cp[0]-cp[3]. Otherwise we split the Bezier into 2 and recurse. 
  * Since 2 contiguous segments share an endpoint, we actually store
@@ -900,15 +864,14 @@ static segitem_t* approx_bezier (pointf *cp, segitem_t* lp)
         lp = appendSeg (cp[3], lp);
     }
     else {
-        Bezier (cp, 3, 0.5, left, right);
+        Bezier (cp, 0.5, left, right);
         lp = approx_bezier (left, lp);
         lp = approx_bezier (right, lp);
     }
     return lp;
 }
 
-/* bisect:
- * Return the angle of the bisector between the two rays
+/* Return the angle of the bisector between the two rays
  * pp-cp and cp-np. The bisector returned is always to the
  * left of pp-cp-np.
  */
@@ -920,11 +883,10 @@ static double bisect (pointf pp, pointf cp, pointf np)
   ang = theta - phi;
   if (ang > 0) ang -= 2*M_PI;
 
-  return (phi + ang/2.0);
+  return phi + ang / 2.0;
 }
 
-/* mkSegPts:
- * Determine polygon points related to 2 segments prv-cur and cur-nxt.
+/* Determine polygon points related to 2 segments prv-cur and cur-nxt.
  * The points lie on the bisector of the 2 segments, passing through cur,
  * and distance w2 from cur. The points are stored in p1 and p2.
  * If p1 is NULL, we use the normal to cur-nxt.
@@ -968,27 +930,25 @@ static void mkSegPts (segitem_t* prv, segitem_t* cur, segitem_t* nxt,
     *p2 = p;
 }
 
-/* map_output_bspline:
- * Construct and output a closed polygon approximating the input
+/* Construct and output a closed polygon approximating the input
  * B-spline bp. We do this by first approximating bp by a sequence
  * of line segments. We then use the sequence of segments to determine
  * the polygon.
  * In cmapx, polygons are limited to 100 points, so we output polygons
  * in chunks of 100.
  */
-static void map_output_bspline (pointf **pbs, int **pbs_n, int *pbs_poly_n, bezier* bp, double w2)
-{
-    segitem_t* segl = GNEW(segitem_t);
+static void map_output_bspline(pointf **pbs, size_t **pbs_n, size_t *pbs_poly_n,
+                               bezier *bp, double w2) {
+    segitem_t* segl = gv_alloc(sizeof(segitem_t));
     segitem_t* segp = segl;
     segitem_t* segprev;
     segitem_t* segnext;
-    int nc, j, k, cnt;
     pointf pts[4], pt1[50], pt2[50];
 
     MARK_FIRST_SEG(segl);
-    nc = (bp->size - 1)/3; /* nc is number of bezier curves */
-    for (j = 0; j < nc; j++) {
-        for (k = 0; k < 4; k++) {
+    const size_t nc = (bp->size - 1) / 3; // nc is number of bezier curves
+    for (size_t j = 0; j < nc; j++) {
+        for (size_t k = 0; k < 4; k++) {
             pts[k] = bp->list[3*j + k];
         }
         segp = approx_bezier (pts, segp);
@@ -996,12 +956,12 @@ static void map_output_bspline (pointf **pbs, int **pbs_n, int *pbs_poly_n, bezi
 
     segp = segl;
     segprev = 0;
-    cnt = 0;
+    size_t cnt = 0;
     while (segp) {
         segnext = segp->next;
         mkSegPts (segprev, segp, segnext, pt1+cnt, pt2+cnt, w2);
         cnt++;
-        if ((segnext == NULL) || (cnt == 50)) {
+        if (segnext == NULL || cnt == 50) {
             map_bspline_poly (pbs, pbs_n, pbs_poly_n, cnt, pt1, pt2);
             pt1[0] = pt1[cnt-1];
             pt2[0] = pt2[cnt-1];
@@ -1019,19 +979,18 @@ static void map_output_bspline (pointf **pbs, int **pbs_n, int *pbs_poly_n, bezi
     }
 }
 
-static boolean is_natural_number(char *sstr)
+static bool is_natural_number(const char *sstr)
 {
-    unsigned char *str = (unsigned char *) sstr;
+    const char *str = sstr;
 
     while (*str)
-	if (NOT(isdigit(*str++)))
-	    return FALSE;
-    return TRUE;
+	if (!gv_isdigit(*str++))
+	    return false;
+    return true;
 }
 
 static int layer_index(GVC_t *gvc, char *str, int all)
 {
-    /* GVJ_t *job = gvc->job; */
     int i;
 
     if (streq(str, "all"))
@@ -1045,36 +1004,26 @@ static int layer_index(GVC_t *gvc, char *str, int all)
     return -1;
 }
 
-static boolean selectedLayer(GVC_t *gvc, int layerNum, int numLayers, char *spec)
+static bool selectedLayer(GVC_t *gvc, int layerNum, int numLayers, char *spec)
 {
     int n0, n1;
-    unsigned char buf[SMALLBUF];
     char *w0, *w1;
     char *buf_part_p = NULL, *buf_p = NULL, *cur, *part_in_p;
-    agxbuf xb;
-    boolean rval = FALSE;
+    bool rval = false;
 
-    agxbinit(&xb, SMALLBUF, buf);
-    agxbput(&xb, spec);
-    part_in_p = agxbuse(&xb);
+    // copy `spec` so we can `strtok_r` it
+    char *spec_copy = gv_strdup(spec);
+    part_in_p = spec_copy;
 
-    /* Thanks to Matteo Nastasi for this extended code. */
-    while ((rval == FALSE) && (cur = strtok_r(part_in_p, gvc->layerListDelims, &buf_part_p))) {
+    while (!rval && (cur = strtok_r(part_in_p, gvc->layerListDelims, &buf_part_p))) {
 	w1 = w0 = strtok_r (cur, gvc->layerDelims, &buf_p);
 	if (w0)
 	    w1 = strtok_r (NULL, gvc->layerDelims, &buf_p);
-	switch ((w0 != NULL) + (w1 != NULL)) {
-	case 0:
-	    rval = FALSE;
-	    break;
-	case 1:
-	    n0 = layer_index(gvc, w0, layerNum);
-	    rval = (n0 == layerNum);
-	    break;
-	case 2:
+	if (w1 != NULL) {
+	    assert(w0 != NULL);
 	    n0 = layer_index(gvc, w0, 0);
 	    n1 = layer_index(gvc, w1, numLayers);
-	    if ((n0 >= 0) || (n1 >= 0)) {
+	    if (n0 >= 0 || n1 >= 0) {
 		if (n0 > n1) {
 		    int t = n0;
 		    n0 = n1;
@@ -1082,21 +1031,24 @@ static boolean selectedLayer(GVC_t *gvc, int layerNum, int numLayers, char *spec
 		}
 		rval = BETWEEN(n0, layerNum, n1);
 	    }
-	    break;
+	} else if (w0 != NULL) {
+	    n0 = layer_index(gvc, w0, layerNum);
+	    rval = (n0 == layerNum);
+	} else {
+	    rval = false;
 	}
 	part_in_p = NULL;
     }
-    agxbfree(&xb);
+    free(spec_copy);
     return rval;
 }
 
-static boolean selectedlayer(GVJ_t *job, char *spec)
+static bool selectedlayer(GVJ_t *job, char *spec)
 {
     return selectedLayer (job->gvc, job->layerNum, job->numLayers, spec);
 }
 
-/* parse_layerselect:
- * Parse the graph's layerselect attribute, which determines
+/* Parse the graph's layerselect attribute, which determines
  * which layers are emitted. The specification is the same used
  * by the layer attribute.
  *
@@ -1111,9 +1063,8 @@ static boolean selectedlayer(GVJ_t *job, char *spec)
  * efficient way to do this, but this is simple and until we find people
  * using huge numbers of layers, it should be adequate.
  */
-static int* parse_layerselect(GVC_t *gvc, graph_t * g, char *p)
-{
-    int* laylist = N_GNEW(gvc->numLayers+2,int);
+static int *parse_layerselect(GVC_t *gvc, char *p) {
+    int* laylist = gv_calloc(gvc->numLayers + 2, sizeof(int));
     int i, cnt = 0;
     for (i = 1; i <=gvc->numLayers; i++) {
 	if (selectedLayer (gvc, i, gvc->numLayers, p)) {
@@ -1125,26 +1076,24 @@ static int* parse_layerselect(GVC_t *gvc, graph_t * g, char *p)
 	laylist[cnt+1] = gvc->numLayers+1;
     }
     else {
-	agerr(AGWARN, "The layerselect attribute \"%s\" does not match any layer specifed by the layers attribute - ignored.\n", p);
-	laylist[0] = cnt;
+	agwarningf("The layerselect attribute \"%s\" does not match any layer specifed by the layers attribute - ignored.\n", p);
 	free (laylist);
 	laylist = NULL;
     }
     return laylist;
 }
 
-/* parse_layers:
- * Split input string into tokens, with separators specified by
+DEFINE_LIST(layer_names, char*)
+
+/* Split input string into tokens, with separators specified by
  * the layersep attribute. Store the values in the gvc->layerIDs array,
  * starting at index 1, and return the count.
- * Free previously stored list. Note that there is no mechanism
+ * Note that there is no mechanism
  * to free the memory before exit.
  */
 static int parse_layers(GVC_t *gvc, graph_t * g, char *p)
 {
-    int ntok;
     char *tok;
-    int sz;
 
     gvc->layerDelims = agget(g, "layersep");
     if (!gvc->layerDelims)
@@ -1153,44 +1102,44 @@ static int parse_layers(GVC_t *gvc, graph_t * g, char *p)
     if (!gvc->layerListDelims)
         gvc->layerListDelims = DEFAULT_LAYERLISTSEP;
     if ((tok = strpbrk (gvc->layerDelims, gvc->layerListDelims))) { /* conflict in delimiter strings */
-	agerr(AGWARN, "The character \'%c\' appears in both the layersep and layerlistsep attributes - layerlistsep ignored.\n", *tok);
+	agwarningf("The character \'%c\' appears in both the layersep and layerlistsep attributes - layerlistsep ignored.\n", *tok);
         gvc->layerListDelims = "";
     }
 
-    ntok = 0;
-    sz = 0;
-    gvc->layers = strdup(p);
+    gvc->layers = gv_strdup(p);
+    layer_names_t layerIDs = {0};
+
+    // inferred entry for the first (unnamed) layer
+    layer_names_append(&layerIDs, NULL);
 
     for (tok = strtok(gvc->layers, gvc->layerDelims); tok;
          tok = strtok(NULL, gvc->layerDelims)) {
-        ntok++;
-        if (ntok > sz) {
-            sz += SMALLBUF;
-            gvc->layerIDs = ALLOC(sz, gvc->layerIDs, char *);
-        }
-        gvc->layerIDs[ntok] = tok;
+        layer_names_append(&layerIDs, tok);
     }
-    if (ntok) {
-        gvc->layerIDs = RALLOC(ntok + 2, gvc->layerIDs, char *);        /* shrink to minimum size */
-        gvc->layerIDs[0] = NULL;
-        gvc->layerIDs[ntok + 1] = NULL;
+
+    assert(layer_names_size(&layerIDs) - 1 <= INT_MAX);
+    int ntok = (int)(layer_names_size(&layerIDs) - 1);
+
+    // if we found layers, save them for later reference
+    if (layer_names_size(&layerIDs) > 1) {
+        layer_names_append(&layerIDs, NULL); // add a terminating entry
+        gvc->layerIDs = layer_names_detach(&layerIDs);
     }
+    layer_names_free(&layerIDs);
 
     return ntok;
 }
 
-/* chkOrder:
- * Determine order of output.
+/* Determine order of output.
  * Output usually in breadth first graph walk order
  */
 static int chkOrder(graph_t * g)
 {
     char *p = agget(g, "outputorder");
     if (p) {
-        char c = *p;
-        if ((c == 'n') && !strcmp(p + 1, "odesfirst"))
+        if (!strcmp(p, "nodesfirst"))
             return EMIT_SORTED;
-        if ((c == 'e') && !strcmp(p + 1, "dgesfirst"))
+        if (!strcmp(p, "edgesfirst"))
             return EMIT_EDGE_SORTED;
     }
     return 0;
@@ -1201,32 +1150,23 @@ static void init_layering(GVC_t * gvc, graph_t * g)
     char *str;
 
     /* free layer strings and pointers from previous graph */
-    if (gvc->layers) {
-	free(gvc->layers);
-	gvc->layers = NULL;
-    }
-    if (gvc->layerIDs) {
-	free(gvc->layerIDs);
-	gvc->layerIDs = NULL;
-    }
-    if (gvc->layerlist) {
-	free(gvc->layerlist);
-	gvc->layerlist = NULL;
-    }
+    free(gvc->layers);
+    gvc->layers = NULL;
+    free(gvc->layerIDs);
+    gvc->layerIDs = NULL;
+    free(gvc->layerlist);
+    gvc->layerlist = NULL;
     if ((str = agget(g, "layers")) != 0) {
 	gvc->numLayers = parse_layers(gvc, g, str);
- 	if (((str = agget(g, "layerselect")) != 0) && *str) {
-	    gvc->layerlist = parse_layerselect(gvc, g, str);
+ 	if ((str = agget(g, "layerselect")) != 0 && *str) {
+	    gvc->layerlist = parse_layerselect(gvc, str);
 	}
     } else {
-	gvc->layerIDs = NULL;
 	gvc->numLayers = 1;
     }
 }
 
-/* numPhysicalLayers:
- * Return number of physical layers to be emitted.
- */
+/// Return number of physical layers to be emitted.
 static int numPhysicalLayers (GVJ_t *job)
 {
     if (job->gvc->layerlist) {
@@ -1243,8 +1183,8 @@ static void firstlayer(GVJ_t *job, int** listp)
     if (job->gvc->layerlist) {
 	int *list = job->gvc->layerlist;
 	int cnt = *list++;
-	if ((cnt > 1) && (! (job->flags & GVDEVICE_DOES_LAYERS))) {
-	    agerr(AGWARN, "layers not supported in %s output\n",
+	if (cnt > 1 && !(job->flags & GVDEVICE_DOES_LAYERS)) {
+	    agwarningf("layers not supported in %s output\n",
 		job->output_langname);
 	    list[1] = job->numLayers + 1; /* only one layer printed */
 	}
@@ -1252,9 +1192,8 @@ static void firstlayer(GVJ_t *job, int** listp)
 	*listp = list;
     }
     else {
-	if ((job->numLayers > 1)
-		&& (! (job->flags & GVDEVICE_DOES_LAYERS))) {
-	    agerr(AGWARN, "layers not supported in %s output\n",
+	if (job->numLayers > 1 && !(job->flags & GVDEVICE_DOES_LAYERS)) {
+	    agwarningf("layers not supported in %s output\n",
 		job->output_langname);
 	    job->numLayers = 1;
 	}
@@ -1263,9 +1202,9 @@ static void firstlayer(GVJ_t *job, int** listp)
     }
 }
 
-static boolean validlayer(GVJ_t *job)
+static bool validlayer(GVJ_t *job)
 {
-    return (job->layerNum <= job->numLayers);
+    return job->layerNum <= job->numLayers;
 }
 
 static void nextlayer(GVJ_t *job, int** listp)
@@ -1281,8 +1220,7 @@ static void nextlayer(GVJ_t *job, int** listp)
 
 static point pagecode(GVJ_t *job, char c)
 {
-    point rv;
-    rv.x = rv.y = 0;
+    point rv = {0};
     switch (c) {
     case 'T':
 	job->pagesArrayFirst.y = job->pagesArraySize.y - 1;
@@ -1298,6 +1236,9 @@ static point pagecode(GVJ_t *job, char c)
 	job->pagesArrayFirst.x = job->pagesArraySize.x - 1;
 	rv.x = -1;
 	break;
+    default:
+	// ignore; will trigger a warning later in our caller
+	break;
     }
     return rv;
 }
@@ -1306,19 +1247,17 @@ static void init_job_pagination(GVJ_t * job, graph_t *g)
 {
     GVC_t *gvc = job->gvc;
     pointf pageSize;	/* page size for the graph - points*/
-    pointf imageSize;	/* image size on one page of the graph - points */
-    pointf margin;	/* margin for a page of the graph - points */
-    pointf centering = {0.0, 0.0}; /* centering offset - points */
+    pointf centering = {0}; // centering offset - points
 
     /* unpaginated image size - in points - in graph orientation */
-    imageSize = job->view;
+    pointf imageSize = job->view; // image size on one page of the graph - points
 
     /* rotate imageSize to page orientation */
     if (job->rotation)
 	imageSize = exch_xyf(imageSize);
 
     /* margin - in points - in page orientation */
-    margin = job->margin;
+    pointf margin = job->margin; // margin for a page of the graph - points
 
     /* determine pagination */
     if (gvc->graph_sets_pageSize && (job->flags & GVDEVICE_DOES_PAGES)) {
@@ -1332,57 +1271,52 @@ static void init_job_pagination(GVJ_t * job, graph_t *g)
 	    job->pagesArraySize.x = 1;
 	else {
 	    job->pagesArraySize.x = (int)(imageSize.x / pageSize.x);
-	    if ((imageSize.x - (job->pagesArraySize.x * pageSize.x)) > EPSILON)
+	    if (imageSize.x - job->pagesArraySize.x * pageSize.x > EPSILON)
 		job->pagesArraySize.x++;
 	}
 	if (pageSize.y < EPSILON)
 	    job->pagesArraySize.y = 1;
 	else {
 	    job->pagesArraySize.y = (int)(imageSize.y / pageSize.y);
-	    if ((imageSize.y - (job->pagesArraySize.y * pageSize.y)) > EPSILON)
+	    if (imageSize.y - job->pagesArraySize.y * pageSize.y > EPSILON)
 		job->pagesArraySize.y++;
 	}
 	job->numPages = job->pagesArraySize.x * job->pagesArraySize.y;
 
 	/* find the drawable size in points */
-	imageSize.x = MIN(imageSize.x, pageSize.x);
-	imageSize.y = MIN(imageSize.y, pageSize.y);
+	imageSize.x = fmin(imageSize.x, pageSize.x);
+	imageSize.y = fmin(imageSize.y, pageSize.y);
     } else {
 	/* page not set by user, use default from renderer */
 	if (job->render.features) {
 	    pageSize.x = job->device.features->default_pagesize.x - 2*margin.x;
-	    if (pageSize.x < 0.)
-		pageSize.x = 0.;
+	    pageSize.x = fmax(pageSize.x, 0);
 	    pageSize.y = job->device.features->default_pagesize.y - 2*margin.y;
-	    if (pageSize.y < 0.)
-		pageSize.y = 0.;
+	    pageSize.y = fmax(pageSize.y, 0);
 	}
 	else
 	    pageSize.x = pageSize.y = 0.;
 	job->pagesArraySize.x = job->pagesArraySize.y = job->numPages = 1;
         
-        if (pageSize.x < imageSize.x)
-	    pageSize.x = imageSize.x;
-        if (pageSize.y < imageSize.y)
-	    pageSize.y = imageSize.y;
+        pageSize.x = fmax(pageSize.x, imageSize.x);
+        pageSize.y = fmax(pageSize.y, imageSize.y);
     }
 
     /* initial window size */
-//fprintf(stderr,"page=%g,%g dpi=%g,%g zoom=%g\n", pageSize.x, pageSize.y, job->dpi.x, job->dpi.y, job->zoom);
     job->width = ROUND((pageSize.x + 2*margin.x) * job->dpi.x / POINTS_PER_INCH);
     job->height = ROUND((pageSize.y + 2*margin.y) * job->dpi.y / POINTS_PER_INCH);
 
     /* set up pagedir */
-    job->pagesArrayMajor.x = job->pagesArrayMajor.y 
-		= job->pagesArrayMinor.x = job->pagesArrayMinor.y = 0;
-    job->pagesArrayFirst.x = job->pagesArrayFirst.y = 0;
+    job->pagesArrayMajor = (point){0};
+    job->pagesArrayMinor = (point){0};
+    job->pagesArrayFirst = (point){0};
     job->pagesArrayMajor = pagecode(job, gvc->pagedir[0]);
     job->pagesArrayMinor = pagecode(job, gvc->pagedir[1]);
-    if ((abs(job->pagesArrayMajor.x + job->pagesArrayMinor.x) != 1)
-     || (abs(job->pagesArrayMajor.y + job->pagesArrayMinor.y) != 1)) {
+    if (abs(job->pagesArrayMajor.x + job->pagesArrayMinor.x) != 1
+     || abs(job->pagesArrayMajor.y + job->pagesArrayMinor.y) != 1) {
 	job->pagesArrayMajor = pagecode(job, 'B');
 	job->pagesArrayMinor = pagecode(job, 'L');
-	agerr(AGWARN, "pagedir=%s ignored\n", gvc->pagedir);
+	agwarningf("pagedir=%s ignored\n", gvc->pagedir);
     }
 
     /* determine page box including centering */
@@ -1429,18 +1363,18 @@ static void firstpage(GVJ_t *job)
     job->pagesArrayElem = job->pagesArrayFirst;
 }
 
-static boolean validpage(GVJ_t *job)
+static bool validpage(GVJ_t *job)
 {
-    return ((job->pagesArrayElem.x >= 0)
-	 && (job->pagesArrayElem.x < job->pagesArraySize.x)
-	 && (job->pagesArrayElem.y >= 0)
-	 && (job->pagesArrayElem.y < job->pagesArraySize.y));
+    return job->pagesArrayElem.x >= 0
+	 && job->pagesArrayElem.x < job->pagesArraySize.x
+	 && job->pagesArrayElem.y >= 0
+	 && job->pagesArrayElem.y < job->pagesArraySize.y;
 }
 
 static void nextpage(GVJ_t *job)
 {
     job->pagesArrayElem = add_point(job->pagesArrayElem, job->pagesArrayMinor);
-    if (validpage(job) == FALSE) {
+    if (!validpage(job)) {
 	if (job->pagesArrayMajor.y)
 	    job->pagesArrayElem.x = job->pagesArrayFirst.x;
 	else
@@ -1449,7 +1383,7 @@ static void nextpage(GVJ_t *job)
     }
 }
 
-static boolean write_edge_test(Agraph_t * g, Agedge_t * e)
+static bool write_edge_test(Agraph_t * g, Agedge_t * e)
 {
     Agraph_t *sg;
     int c;
@@ -1457,12 +1391,12 @@ static boolean write_edge_test(Agraph_t * g, Agedge_t * e)
     for (c = 1; c <= GD_n_cluster(g); c++) {
 	sg = GD_clust(g)[c];
 	if (agcontains(sg, e))
-	    return FALSE;
+	    return false;
     }
-    return TRUE;
+    return true;
 }
 
-static boolean write_node_test(Agraph_t * g, Agnode_t * n)
+static bool write_node_test(Agraph_t * g, Agnode_t * n)
 {
     Agraph_t *sg;
     int c;
@@ -1470,80 +1404,72 @@ static boolean write_node_test(Agraph_t * g, Agnode_t * n)
     for (c = 1; c <= GD_n_cluster(g); c++) {
 	sg = GD_clust(g)[c];
 	if (agcontains(sg, n))
-	    return FALSE;
+	    return false;
     }
-    return TRUE;
+    return true;
 }
 
-#define INITPTS 1000
-
-static pointf*
-copyPts (pointf* pts, int* ptsize, xdot_point* inpts, int numpts)
-{
-    int i, sz = *ptsize;
-
-    if (numpts > sz) {
-	sz = MAX(2*sz, numpts);
-	pts = RALLOC(sz, pts, pointf);
-	*ptsize = sz;
-    }
-
-    for (i = 0; i < numpts; i++) {
+static pointf *copyPts(xdot_point *inpts, size_t numpts) {
+    pointf *pts = gv_calloc(numpts, sizeof(pointf));
+    for (size_t i = 0; i < numpts; i++) {
 	pts[i].x = inpts[i].x;
 	pts[i].y = inpts[i].y;
     }
-
     return pts;
 }
 
 static void emit_xdot (GVJ_t * job, xdot* xd)
 {
     int image_warn = 1;
-    int ptsize = INITPTS;
-    pointf* pts = N_GNEW(INITPTS, pointf);
     exdot_op* op;
-    int i, angle;
-    char** styles = 0;
+    int angle;
+    char** styles = NULL;
     int filled = FILL;
 
     op = (exdot_op*)(xd->ops);
-    for (i = 0; i < xd->cnt; i++) {
+    for (size_t i = 0; i < xd->cnt; i++) {
 	switch (op->op.kind) {
 	case xd_filled_ellipse :
 	case xd_unfilled_ellipse :
     	    if (boxf_overlap(op->bb, job->clip)) {
-		pts[0].x = op->op.u.ellipse.x - op->op.u.ellipse.w;
-		pts[0].y = op->op.u.ellipse.y - op->op.u.ellipse.h;
-		pts[1].x = op->op.u.ellipse.x + op->op.u.ellipse.w;
-		pts[1].y = op->op.u.ellipse.y + op->op.u.ellipse.h;
-		gvrender_ellipse(job, pts, 2, (op->op.kind == xd_filled_ellipse?filled:0));
+		pointf pts[] = {{.x = op->op.u.ellipse.x - op->op.u.ellipse.w,
+		                 .y = op->op.u.ellipse.y - op->op.u.ellipse.h},
+		                {.x = op->op.u.ellipse.x + op->op.u.ellipse.w,
+		                 .y = op->op.u.ellipse.y + op->op.u.ellipse.h}};
+		gvrender_ellipse(job, pts, op->op.kind == xd_filled_ellipse ? filled : 0);
 	    }
 	    break;
 	case xd_filled_polygon :
 	case xd_unfilled_polygon :
     	    if (boxf_overlap(op->bb, job->clip)) {
-		pts = copyPts (pts, &ptsize, op->op.u.polygon.pts, op->op.u.polygon.cnt);
-		gvrender_polygon(job, pts, op->op.u.polygon.cnt, (op->op.kind == xd_filled_polygon?filled:0));
+		pointf *pts = copyPts(op->op.u.polygon.pts, op->op.u.polygon.cnt);
+		assert(op->op.u.polygon.cnt <= INT_MAX &&
+		       "polygon count exceeds gvrender_polygon support");
+		gvrender_polygon(job, pts, op->op.u.polygon.cnt,
+		                 op->op.kind == xd_filled_polygon ? filled : 0);
+		free(pts);
 	    }
 	    break;
 	case xd_filled_bezier :
 	case xd_unfilled_bezier :
     	    if (boxf_overlap(op->bb, job->clip)) {
-		pts = copyPts (pts, &ptsize, op->op.u.bezier.pts, op->op.u.bezier.cnt);
-		gvrender_beziercurve(job, pts, op->op.u.bezier.cnt, 0, 0, (op->op.kind == xd_filled_bezier?filled:0));
+		pointf *pts = copyPts(op->op.u.bezier.pts, op->op.u.bezier.cnt);
+		gvrender_beziercurve(job, pts, op->op.u.bezier.cnt,
+		                     op->op.kind == xd_filled_bezier ? filled : 0);
+		free(pts);
 	    }
 	    break;
 	case xd_polyline :
     	    if (boxf_overlap(op->bb, job->clip)) {
-		pts = copyPts (pts, &ptsize, op->op.u.polyline.pts, op->op.u.polyline.cnt);
+		pointf *pts = copyPts(op->op.u.polyline.pts, op->op.u.polyline.cnt);
 		gvrender_polyline(job, pts, op->op.u.polyline.cnt);
+		free(pts);
 	    }
 	    break;
 	case xd_text :
     	    if (boxf_overlap(op->bb, job->clip)) {
-		pts[0].x = op->op.u.text.x;
-		pts[0].y = op->op.u.text.y;
-		gvrender_textspan(job, pts[0], op->span);
+		pointf pt = {.x = op->op.u.text.x, .y = op->op.u.text.y};
+		gvrender_textspan(job, pt, op->span);
 	    }
 	    break;
 	case xd_fill_color :
@@ -1564,7 +1490,7 @@ static void emit_xdot (GVJ_t * job, xdot* xd)
 		    clr0 = p->stops[0].color;
 		    clr1 = p->stops[1].color;
 		    frac = p->stops[1].frac;
-		    if ((p->x1 == p->x0) && (p->y1 == p->y0))
+		    if (p->x1 == p->x0 && p->y1 == p->y0)
 			angle = 0;
 		    else
 			angle = (int)(180.0*acos((p->x0 - p->x1)/p->r0)/M_PI);
@@ -1585,7 +1511,7 @@ static void emit_xdot (GVJ_t * job, xdot* xd)
 	    }
 	    break;
 	case xd_grad_pen_color :
-	    agerr (AGWARN, "gradient pen colors not yet supported.\n");
+	    agwarningf("gradient pen colors not yet supported.\n");
 	    break;
 	case xd_font :
 	    /* fontsize and fontname already encoded via xdotBB */
@@ -1599,16 +1525,17 @@ static void emit_xdot (GVJ_t * job, xdot* xd)
 	    break;
 	case xd_image :
 	    if (image_warn) {
-	        agerr(AGWARN, "Images unsupported in \"background\" attribute\n");
+	        agwarningf("Images unsupported in \"background\" attribute\n");
 	        image_warn = 0;
 	    }
 	    break;
+	default:
+	    UNREACHABLE();
 	}
 	op++;
     }
     if (styles)
 	gvrender_set_style(job, job->gvc->defaultlinestyle);
-    free (pts);
 }
 
 static void emit_background(GVJ_t * job, graph_t *g)
@@ -1661,11 +1588,11 @@ static void emit_background(GVJ_t * job, graph_t *g)
 	}
     }
 
-    if ((xd = (xdot*)GD_drawing(g)->xdots))
+    if ((xd = GD_drawing(g)->xdots))
 	emit_xdot (job, xd);
 }
 
-static void setup_page(GVJ_t * job, graph_t * g)
+static void setup_page(GVJ_t * job)
 {
     point pagesArrayElem = job->pagesArrayElem, pagesArraySize = job->pagesArraySize;
 	
@@ -1700,10 +1627,10 @@ static void setup_page(GVJ_t * job, graph_t * g)
     }
 
     /* CAUTION - job->translation was difficult to get right. */
-    /* Test with and without assymmetric margins, e.g: -Gmargin="1,0" */
+    // Test with and without asymmetric margins, e.g: -Gmargin="1,0"
     if (job->rotation) {
 	job->translation.y = - job->clip.UR.y - job->canvasBox.LL.y / job->zoom;
-        if ((job->flags & GVRENDER_Y_GOES_DOWN) || (Y_invert))
+        if ((job->flags & GVRENDER_Y_GOES_DOWN) || Y_invert)
             job->translation.x = - job->clip.UR.x - job->canvasBox.LL.x / job->zoom;
         else
             job->translation.x = - job->clip.LL.x + job->canvasBox.LL.x / job->zoom;
@@ -1711,101 +1638,86 @@ static void setup_page(GVJ_t * job, graph_t * g)
     else {
 	/* pre unscale margins to keep them constant under scaling */
         job->translation.x = - job->clip.LL.x + job->canvasBox.LL.x / job->zoom;
-        if ((job->flags & GVRENDER_Y_GOES_DOWN) || (Y_invert))
+        if ((job->flags & GVRENDER_Y_GOES_DOWN) || Y_invert)
             job->translation.y = - job->clip.UR.y - job->canvasBox.LL.y / job->zoom;
         else
             job->translation.y = - job->clip.LL.y + job->canvasBox.LL.y / job->zoom;
     }
-
-#if 0
-fprintf(stderr,"width=%d height=%d dpi=%g,%g\npad=%g,%g focus=%g,%g view=%g,%g zoom=%g\npageBox=%g,%g,%g,%g pagesArraySize=%d,%d pageSize=%g,%g canvasBox=%g,%g,%g,%g pageOffset=%g,%g\ntranslation=%g,%g clip=%g,%g,%g,%g margin=%g,%g\n",
-	job->width, job->height,
-	job->dpi.x, job->dpi.y,
-	job->pad.x, job->pad.y,
-	job->focus.x, job->focus.y,
-	job->view.x, job->view.y,
-	job->zoom,
-	job->pageBox.LL.x, job->pageBox.LL.y, job->pageBox.UR.x, job->pageBox.UR.y,
-	job->pagesArraySize.x, job->pagesArraySize.y,
-	job->pageSize.x, job->pageSize.y,
-	job->canvasBox.LL.x, job->canvasBox.LL.y, job->canvasBox.UR.x, job->canvasBox.UR.y,
-	job->pageOffset.x, job->pageOffset.y,
-	job->translation.x, job->translation.y,
-	job->clip.LL.x, job->clip.LL.y, job->clip.UR.x, job->clip.UR.y,
-	job->margin.x, job->margin.y);
-#endif
 }
 
-static boolean node_in_layer(GVJ_t *job, graph_t * g, node_t * n)
+static bool node_in_layer(GVJ_t *job, graph_t * g, node_t * n)
 {
     char *pn, *pe;
     edge_t *e;
 
     if (job->numLayers <= 1)
-	return TRUE;
+	return true;
     pn = late_string(n, N_layer, "");
     if (selectedlayer(job, pn))
-	return TRUE;
+	return true;
     if (pn[0])
-	return FALSE;		/* Only check edges if pn = "" */
+	return false;		/* Only check edges if pn = "" */
     if ((e = agfstedge(g, n)) == NULL)
-	return TRUE;
+	return true;
     for (e = agfstedge(g, n); e; e = agnxtedge(g, e, n)) {
 	pe = late_string(e, E_layer, "");
-	if ((pe[0] == '\0') || selectedlayer(job, pe))
-	    return TRUE;
+	if (pe[0] == '\0' || selectedlayer(job, pe))
+	    return true;
     }
-    return FALSE;
+    return false;
 }
 
-static boolean edge_in_layer(GVJ_t *job, graph_t * g, edge_t * e)
+static bool edge_in_layer(GVJ_t *job, edge_t * e)
 {
     char *pe, *pn;
     int cnt;
 
     if (job->numLayers <= 1)
-	return TRUE;
+	return true;
     pe = late_string(e, E_layer, "");
     if (selectedlayer(job, pe))
-	return TRUE;
+	return true;
     if (pe[0])
-	return FALSE;
+	return false;
     for (cnt = 0; cnt < 2; cnt++) {
 	pn = late_string(cnt < 1 ? agtail(e) : aghead(e), N_layer, "");
-	if ((pn[0] == '\0') || selectedlayer(job, pn))
-	    return TRUE;
+	if (pn[0] == '\0' || selectedlayer(job, pn))
+	    return true;
     }
-    return FALSE;
+    return false;
 }
 
-static boolean clust_in_layer(GVJ_t *job, graph_t * sg)
+static bool clust_in_layer(GVJ_t *job, graph_t * sg)
 {
     char *pg;
     node_t *n;
 
     if (job->numLayers <= 1)
-	return TRUE;
+	return true;
     pg = late_string(sg, agattr(sg, AGRAPH, "layer", 0), "");
     if (selectedlayer(job, pg))
-	return TRUE;
+	return true;
     if (pg[0])
-	return FALSE;
+	return false;
     for (n = agfstnode(sg); n; n = agnxtnode(sg, n))
 	if (node_in_layer(job, sg, n))
-	    return TRUE;
-    return FALSE;
+	    return true;
+    return false;
 }
 
-static boolean node_in_box(node_t *n, boxf b)
+static bool node_in_box(node_t *n, boxf b)
 {
-    return boxf_overlap(ND_bb(n), b);
+  return boxf_overlap(ND_bb(n), b);
 }
+
+static char *saved_color_scheme;
 
 static void emit_begin_node(GVJ_t * job, node_t * n)
 {
     obj_state_t *obj;
     int flags = job->flags;
-    int sides, peripheries, i, j, filled = 0, rect = 0, shape, nump = 0;
+    int shape;
+    size_t nump = 0;
     polygon_t *poly = NULL;
     pointf *vertices, *p = NULL;
     pointf coord;
@@ -1817,7 +1729,6 @@ static void emit_begin_node(GVJ_t * job, node_t * n)
     obj->emit_state = EMIT_NDRAW;
 
     if (flags & GVRENDER_DOES_Z) {
-        /* obj->z = late_double(n, N_z, 0.0, -MAXFLOAT); */
 	if (GD_odim(agraphof(n)) >=3)
             obj->z = POINTS(ND_pos(n)[2]);
 	else
@@ -1832,14 +1743,15 @@ static void emit_begin_node(GVJ_t * job, node_t * n)
         /* node coordinate */
         coord = ND_coord(n);
         /* checking if filled style has been set for node */
-        filled = ifFilled(n);
+        bool filled = isFilled(n);
 
+        bool is_rect = false;
         if (shape == SH_POLY || shape == SH_POINT) {
-            poly = (polygon_t *) ND_shape_info(n);
+            poly = ND_shape_info(n);
 
             /* checking if polygon is regular rectangle */
             if (isRect(poly) && (poly->peripheries || filled))
-                rect = 1;
+                is_rect = true;
         }
 
         /* When node has polygon shape and requested output supports polygons
@@ -1847,43 +1759,37 @@ static void emit_begin_node(GVJ_t * job, node_t * n)
          * circle, ellipse, polygon with n side, or point.
          * For regular rectangular shape we have use node's bounding box to map clickable region
          */
-        if (poly && !rect && (flags & GVRENDER_DOES_MAP_POLYGON)) {
+        if (poly && !is_rect && (flags & GVRENDER_DOES_MAP_POLYGON)) {
 
-            if (poly->sides < 3)
-                sides = 1;
-            else
-                sides = poly->sides;
-
-            if (poly->peripheries < 2)
-                peripheries = 1;
-            else
-                peripheries = poly->peripheries;
+            const size_t sides = poly->sides < 3 ? 1 : poly->sides;
+            const size_t peripheries = poly->peripheries < 2 ? 1 : poly->peripheries;
 
             vertices = poly->vertices;
 
+            int nump_int = 0;
             if ((s = agget(n, "samplepoints")))
-                nump = atoi(s);
+                nump_int = atoi(s);
             /* We want at least 4 points. For server-side maps, at most 100
              * points are allowed. To simplify things to fit with the 120 points
              * used for skewed ellipses, we set the bound at 60.
              */
-            if ((nump < 4) || (nump > 60))
-                nump = DFLT_SAMPLE;
+            nump = (nump_int < 4 || nump_int > 60) ? DFLT_SAMPLE : (size_t)nump_int;
             /* use bounding box of text label or node image for mapping
              * when polygon has no peripheries and node is not filled
              */
             if (poly->peripheries == 0 && !filled) {
                 obj->url_map_shape = MAP_RECTANGLE;
                 nump = 2;
-                p = N_NEW(nump, pointf);
+                p = gv_calloc(nump, sizeof(pointf));
                 P2RECT(coord, p, ND_lw(n), ND_ht(n) / 2.0 );
             }
             /* circle or ellipse */
-            else if (poly->sides < 3 && poly->skew == 0.0 && poly->distortion == 0.0) {
+            else if (poly->sides < 3 && is_exactly_zero(poly->skew) &&
+                     is_exactly_zero(poly->distortion)) {
                 if (poly->regular) {
                     obj->url_map_shape = MAP_CIRCLE;
                     nump = 2;              /* center of circle and top right corner of bb */
-                    p = N_NEW(nump, pointf);
+                    p = gv_calloc(nump, sizeof(pointf));
                     p[0].x = coord.x;
                     p[0].y = coord.y;
 		    /* even vertices contain LL corner of bb */
@@ -1893,9 +1799,9 @@ static void emit_begin_node(GVJ_t * job, node_t * n)
                 }
                 else { /* ellipse is treated as polygon */
                     obj->url_map_shape= MAP_POLYGON;
-                    p = pEllipse((double)(vertices[2*peripheries - 1].x),
-                                 (double)(vertices[2*peripheries - 1].y), nump);
-                    for (i = 0; i < nump; i++) {
+                    p = pEllipse(vertices[2 * peripheries - 1].x,
+                                 vertices[2 * peripheries - 1].y, nump);
+                    for (size_t i = 0; i < nump; i++) {
                         p[i].x += coord.x;
                         p[i].y += coord.y;
                     }
@@ -1903,22 +1809,23 @@ static void emit_begin_node(GVJ_t * job, node_t * n)
             }
             /* all other polygonal shape */
             else {
-                int offset = (peripheries - 1)*(poly->sides);
+                assert(peripheries >= 1);
+                size_t offset = (peripheries - 1) * poly->sides;
                 obj->url_map_shape = MAP_POLYGON;
                 /* distorted or skewed ellipses and circles are polygons with 120
                  * sides. For mapping we convert them into polygon with sample sides
                  */
                 if (poly->sides >= nump) {
-                    int delta = poly->sides / nump;
-                    p = N_NEW(nump, pointf);
-                    for (i = 0, j = 0; j < nump; i += delta, j++) {
+                    size_t delta = poly->sides / nump;
+                    p = gv_calloc(nump, sizeof(pointf));
+                    for (size_t i = 0, j = 0; j < nump; i += delta, j++) {
                         p[j].x = coord.x + vertices[i + offset].x;
                         p[j].y = coord.y + vertices[i + offset].y;
                     }
                 } else {
                     nump = sides;
-                    p = N_NEW(nump, pointf);
-                    for (i = 0; i < nump; i++) {
+                    p = gv_calloc(nump, sizeof(pointf));
+                    for (size_t i = 0; i < nump; i++) {
                         p[i].x = coord.x + vertices[i + offset].x;
                         p[i].y = coord.y + vertices[i + offset].y;
                     }
@@ -1931,7 +1838,7 @@ static void emit_begin_node(GVJ_t * job, node_t * n)
              */
             obj->url_map_shape = MAP_RECTANGLE;
             nump = 2;
-            p = N_NEW(nump, pointf);
+            p = gv_calloc(nump, sizeof(pointf));
             p[0].x = coord.x - ND_lw(n);
             p[0].y = coord.y - (ND_ht(n) / 2);
             p[1].x = coord.x + ND_rw(n);
@@ -1943,31 +1850,35 @@ static void emit_begin_node(GVJ_t * job, node_t * n)
         obj->url_map_n = nump;
     }
 
-    setColorScheme (agget (n, "colorscheme"));
-    gvrender_begin_node(job, n);
+    saved_color_scheme = setColorScheme(agget(n, "colorscheme"));
+    gvrender_begin_node(job);
 }
 
 static void emit_end_node(GVJ_t * job)
 {
     gvrender_end_node(job);
+
+    char *color_scheme = setColorScheme(saved_color_scheme);
+    free(color_scheme);
+    free(saved_color_scheme);
+    saved_color_scheme = NULL;
+
     pop_obj_state(job);
 }
 
-/* emit_node:
- */
 static void emit_node(GVJ_t * job, node_t * n)
 {
     GVC_t *gvc = job->gvc;
     char *s;
     char *style;
-    char **styles = 0;
+    char **styles = NULL;
     char **sp;
     char *p;
 
     if (ND_shape(n) 				     /* node has a shape */
 	    && node_in_layer(job, agraphof(n), n)    /* and is in layer */
 	    && node_in_box(n, job->clip)             /* and is in page/view */
-	    && (ND_state(n) != gvc->common.viewNum)) /* and not already drawn */
+	    && ND_state(n) != gvc->common.viewNum) /* and not already drawn */
     {
 	ND_state(n) = gvc->common.viewNum; 	     /* mark node as drawn */
 
@@ -2014,7 +1925,7 @@ static pointf computeoffset_qr(pointf p, pointf q, pointf r, pointf s,
     double len;
     double x = q.x - r.x, y = q.y - r.y;
 
-    len = sqrt(x * x + y * y);
+    len = hypot(x, y);
     if (len < EPSILON) {
 	/* control points are on top of each other
 	   use slope between endpoints instead */
@@ -2031,18 +1942,18 @@ static pointf computeoffset_qr(pointf p, pointf q, pointf r, pointf s,
 static void emit_attachment(GVJ_t * job, textlabel_t * lp, splines * spl)
 {
     pointf sz, AF[3];
-    unsigned char *s;
+    const char *s;
 
-    for (s = (unsigned char *) (lp->text); *s; s++) {
-	if (isspace(*s) == FALSE)
+    for (s = lp->text; *s; s++) {
+	if (!gv_isspace(*s))
 	    break;
     }
-    if (*s == 0)
+    if (*s == '\0')
 	return;
 
     sz = lp->dimen;
-    AF[0] = pointfof(lp->pos.x + sz.x / 2., lp->pos.y - sz.y / 2.);
-    AF[1] = pointfof(AF[0].x - sz.x, AF[0].y);
+    AF[0] = (pointf){lp->pos.x + sz.x / 2., lp->pos.y - sz.y / 2.};
+    AF[1] = (pointf){AF[0].x - sz.x, AF[0].y};
     AF[2] = dotneato_closest(spl, lp->pos);
     /* Don't use edge style to draw attachment */
     gvrender_set_style(job, job->gvc->defaultlinestyle);
@@ -2054,35 +1965,24 @@ static void emit_attachment(GVJ_t * job, textlabel_t * lp, splines * spl)
     gvrender_polyline(job, AF, 3);
 }
 
-/* edges colors can be mutiple colors separated by ":"
+/* edges colors can be multiple colors separated by ":"
  * so we commpute a default pencolor with the same number of colors. */
 static char* default_pencolor(char *pencolor, char *deflt)
 {
-    static char *buf;
-    static int bufsz;
+    static agxbuf buf;
     char *p;
-    int len, ncol;
-
-    ncol = 1;
+    size_t ncol = 1;
     for (p = pencolor; *p; p++) {
 	if (*p == ':')
 	    ncol++;
     }
-    len = ncol * (strlen(deflt) + 1);
-    if (bufsz < len) {
-	bufsz = len + 10;
-	buf = realloc(buf, bufsz);
-    }
-    strcpy(buf, deflt);
+    agxbput(&buf, deflt);
     while(--ncol) {
-	strcat(buf, ":");
-	strcat(buf, deflt);
+	agxbprint(&buf, ":%s", deflt);
     }
-    return buf;
+    return agxbuse(&buf);
 }
 
-/* approxLen:
- */
 static double approxLen (pointf* pts)
 {
     double d = DIST(pts[0],pts[1]);
@@ -2091,8 +1991,7 @@ static double approxLen (pointf* pts)
     return d;
 }
  
-/* splitBSpline:
- * Given B-spline bz and 0 < t < 1, split bz so that left corresponds to
+/* Given B-spline bz and 0 < t < 1, split bz so that left corresponds to
  * the fraction t of the arc length. The new parts are store in left and right.
  * The caller needs to free the allocated points.
  *
@@ -2102,31 +2001,31 @@ static double approxLen (pointf* pts)
  */
 static void splitBSpline (bezier* bz, float t, bezier* left, bezier* right)
 {
-    int i, j, k, cnt = (bz->size - 1)/3;
-    double* lens;
+    const size_t cnt = (bz->size - 1) / 3;
     double last, len, sum;
     pointf* pts;
     float r;
 
     if (cnt == 1) {
 	left->size = 4;
-	left->list = N_NEW(4, pointf);
+	left->list = gv_calloc(4, sizeof(pointf));
 	right->size = 4;
-	right->list = N_NEW(4, pointf);
-	Bezier (bz->list, 3, t, left->list, right->list);
+	right->list = gv_calloc(4, sizeof(pointf));
+	Bezier (bz->list, t, left->list, right->list);
 	return;
     }
     
-    lens = N_NEW(cnt, double);
+    double* lens = gv_calloc(cnt, sizeof(double));
     sum = 0;
     pts = bz->list;
-    for (i = 0; i < cnt; i++) {
+    for (size_t i = 0; i < cnt; i++) {
 	lens[i] = approxLen (pts);
 	sum += lens[i];
 	pts += 3;
     }
     len = t*sum;
     sum = 0;
+    size_t i;
     for (i = 0; i < cnt; i++) {
 	sum += lens[i];
 	if (sum >= len)
@@ -2134,24 +2033,24 @@ static void splitBSpline (bezier* bz, float t, bezier* left, bezier* right)
     }
 
     left->size = 3*(i+1) + 1;
-    left->list = N_NEW(left->size,pointf);
+    left->list = gv_calloc(left->size, sizeof(pointf));
     right->size = 3*(cnt-i) + 1;
-    right->list = N_NEW(right->size,pointf);
+    right->list = gv_calloc(right->size, sizeof(pointf));
+    size_t j;
     for (j = 0; j < left->size; j++)
 	left->list[j] = bz->list[j];
-    k = j - 4;
+    size_t k = j - 4;
     for (j = 0; j < right->size; j++)
 	right->list[j] = bz->list[k++];
 
     last = lens[i];
     r = (len - (sum - last))/last;
-    Bezier (bz->list + 3*i, 3, r, left->list + 3*i, right->list);
+    Bezier (bz->list + 3*i, r, left->list + 3*i, right->list);
 
     free (lens);
 }
 
-/* multicolor:
- * Draw an edge as a sequence of colors.
+/* Draw an edge as a sequence of colors.
  * Not sure how to handle multiple B-splines, so do a naive
  * implementation.
  * Return non-zero if color spec is incorrect
@@ -2160,9 +2059,8 @@ static int multicolor (GVJ_t * job, edge_t * e, char** styles, char* colors, int
 { 
     bezier bz;
     bezier bz0, bz_l, bz_r;
-    int i, rv;
-    colorsegs_t* segs;
-    colorseg_t* s;
+    int rv;
+    colorsegs_t segs;
     char* endcolor = NULL;
     double left;
     int first;  /* first segment with t > 0 */
@@ -2179,11 +2077,11 @@ static int multicolor (GVJ_t * job, edge_t * e, char** styles, char* colors, int
 	return 1;
     
 
-    for (i = 0; i < ED_spl(e)->size; i++) {
+    for (size_t i = 0; i < ED_spl(e)->size; i++) {
 	left = 1;
 	bz = ED_spl(e)->list[i];
 	first = 1;
-	for (s = segs->segs; s->color; s++) {
+	for (colorseg_t *s = segs.segs; s->color; s++) {
 	    if (AEQ0(s->t)) continue;
     	    gvrender_set_pencolor(job, s->color);
 	    left -= s->t;
@@ -2191,7 +2089,7 @@ static int multicolor (GVJ_t * job, edge_t * e, char** styles, char* colors, int
 	    if (first) {
 		first = 0;
 		splitBSpline (&bz, s->t, &bz_l, &bz_r);
-		gvrender_beziercurve(job, bz_l.list, bz_l.size, FALSE, FALSE, FALSE);
+		gvrender_beziercurve(job, bz_l.list, bz_l.size, 0);
 		free (bz_l.list);
 		if (AEQ0(left)) {
 		    free (bz_r.list);
@@ -2199,15 +2097,15 @@ static int multicolor (GVJ_t * job, edge_t * e, char** styles, char* colors, int
 		}
 	    }
 	    else if (AEQ0(left)) {
-		gvrender_beziercurve(job, bz_r.list, bz_r.size, FALSE, FALSE, FALSE);
+		gvrender_beziercurve(job, bz_r.list, bz_r.size, 0);
 		free (bz_r.list);
 		break;
 	    }
 	    else {
 		bz0 = bz_r;
-		splitBSpline (&bz0, (s->t)/(left+s->t), &bz_l, &bz_r);
+		splitBSpline(&bz0, s->t / (left + s->t), &bz_l, &bz_r);
 		free (bz0.list);
-		gvrender_beziercurve(job, bz_l.list, bz_l.size, FALSE, FALSE, FALSE);
+		gvrender_beziercurve(job, bz_l.list, bz_l.size, 0);
 		free (bz_l.list);
 	    }
 		
@@ -2217,8 +2115,8 @@ static int multicolor (GVJ_t * job, edge_t * e, char** styles, char* colors, int
                  * Use local copy of penwidth to work around reset.
                  */
 	if (bz.sflag) {
-    	    gvrender_set_pencolor(job, segs->segs->color);
-    	    gvrender_set_fillcolor(job, segs->segs->color);
+    	    gvrender_set_pencolor(job, segs.segs->color);
+    	    gvrender_set_fillcolor(job, segs.segs->color);
 	    arrow_gen(job, EMIT_TDRAW, bz.sp, bz.list[0], arrowsize, penwidth, bz.sflag);
 	}
 	if (bz.eflag) {
@@ -2226,43 +2124,42 @@ static int multicolor (GVJ_t * job, edge_t * e, char** styles, char* colors, int
     	    gvrender_set_fillcolor(job, endcolor);
 	    arrow_gen(job, EMIT_HDRAW, bz.ep, bz.list[bz.size - 1], arrowsize, penwidth, bz.eflag);
 	}
-	if ((ED_spl(e)->size>1) && (bz.sflag||bz.eflag) && styles) 
+	if (ED_spl(e)->size > 1 && (bz.sflag || bz.eflag) && styles)
 	    gvrender_set_style(job, styles);
     }
-    freeSegs (segs);
+    freeSegs(&segs);
     return 0;
 }
 
-static void free_stroke (stroke_t* sp)
-{
-    if (sp) {
-	free (sp->vertices);
-	free (sp);
-    }
+static void free_stroke(stroke_t sp) {
+  free(sp.vertices);
 }
 
 typedef double (*radfunc_t)(double,double,double);
 
 static double forfunc (double curlen, double totallen, double initwid)
 {
-    return ((1 - (curlen/totallen))*initwid/2.0);
+    return (1 - curlen / totallen) * initwid / 2.0;
 }
 
 static double revfunc (double curlen, double totallen, double initwid)
 {
-    return (((curlen/totallen))*initwid/2.0);
+    return curlen / totallen * initwid / 2.0;
 }
 
 static double nonefunc (double curlen, double totallen, double initwid)
 {
-    return (initwid/2.0);
+    (void)curlen;
+    (void)totallen;
+
+    return initwid / 2.0;
 }
 
 static double bothfunc (double curlen, double totallen, double initwid)
 {
     double fr = curlen/totallen;
-    if (fr <= 0.5) return (fr*initwid);
-    else return ((1-fr)*initwid);
+    if (fr <= 0.5) return fr * initwid;
+    return (1 - fr) * initwid;
 }
 
 static radfunc_t 
@@ -2275,12 +2172,12 @@ taperfun (edge_t* e)
 	if (streq(attr, "both")) return bothfunc;
 	if (streq(attr, "none")) return nonefunc;
     }
-    return (agisdirected(agraphof(aghead(e))) ? forfunc : nonefunc);
+    return agisdirected(agraphof(aghead(e))) ? forfunc : nonefunc;
 }
 
 static void emit_edge_graphics(GVJ_t * job, edge_t * e, char** styles)
 {
-    int i, j, cnum, numc = 0, numsemi = 0;
+    int cnum, numc = 0, numsemi = 0;
     char *color, *pencolor, *fillcolor;
     char *headcolor, *tailcolor, *lastcolor;
     char *colors = NULL;
@@ -2289,11 +2186,11 @@ static void emit_edge_graphics(GVJ_t * job, edge_t * e, char** styles)
     pointf pf0, pf1, pf2 = { 0, 0 }, pf3, *offlist, *tmplist;
     double arrowsize, numc2, penwidth=job->obj->penwidth;
     char* p;
-    boolean tapered = 0;
+    bool tapered = false;
 
 #define SEP 2.0
 
-    setColorScheme (agget (e, "colorscheme"));
+    char *previous_color_scheme = setColorScheme(agget(e, "colorscheme"));
     if (ED_spl(e)) {
 	arrowsize = late_double(e, E_arrowsz, 1.0, 0.0);
 	color = late_string(e, E_color, "");
@@ -2302,7 +2199,7 @@ static void emit_edge_graphics(GVJ_t * job, edge_t * e, char** styles)
 	    char** sp = styles;
 	    while ((p = *sp++)) {
 		if (streq(p, "tapered")) {
-		    tapered = 1;
+		    tapered = true;
 		    break;
 		}
 	    }
@@ -2321,7 +2218,7 @@ static void emit_edge_graphics(GVJ_t * job, edge_t * e, char** styles)
 		color = DEFAULT_COLOR;
 	    }
 	    else
-		return;
+		goto done;
 	}
 
 	fillcolor = pencolor = color;
@@ -2354,15 +2251,15 @@ static void emit_edge_graphics(GVJ_t * job, edge_t * e, char** styles)
 	color = pencolor;
 
 	if (tapered) {
-	    stroke_t* stp;
 	    if (*color == '\0') color = DEFAULT_COLOR;
 	    if (*fillcolor == '\0') fillcolor = DEFAULT_COLOR;
     	    gvrender_set_pencolor(job, "transparent");
 	    gvrender_set_fillcolor(job, color);
 	    bz = ED_spl(e)->list[0];
-	    stp = taper (&bz, taperfun (e), penwidth, 0, 0);
-	    gvrender_polygon(job, stp->vertices, stp->nvertices, TRUE);
-	    free_stroke (stp);
+	    stroke_t stp = taper(&bz, taperfun (e), penwidth);
+	    assert(stp.nvertices <= INT_MAX);
+	    gvrender_polygon(job, stp.vertices, stp.nvertices, 1);
+	    free_stroke(stp);
     	    gvrender_set_pencolor(job, color);
 	    if (fillcolor != color)
 		gvrender_set_fillcolor(job, fillcolor);
@@ -2377,15 +2274,16 @@ static void emit_edge_graphics(GVJ_t * job, edge_t * e, char** styles)
 	else if (numc) {
 	    /* calculate and save offset vector spline and initialize first offset spline */
 	    tmpspl.size = offspl.size = ED_spl(e)->size;
-	    offspl.list = malloc(sizeof(bezier) * offspl.size);
-	    tmpspl.list = malloc(sizeof(bezier) * tmpspl.size);
+	    offspl.list = gv_calloc(offspl.size, sizeof(bezier));
+	    tmpspl.list = gv_calloc(tmpspl.size, sizeof(bezier));
 	    numc2 = (2 + numc) / 2.0;
-	    for (i = 0; i < offspl.size; i++) {
+	    for (size_t i = 0; i < offspl.size; i++) {
 		bz = ED_spl(e)->list[i];
 		tmpspl.list[i].size = offspl.list[i].size = bz.size;
-		offlist = offspl.list[i].list = malloc(sizeof(pointf) * bz.size);
-		tmplist = tmpspl.list[i].list = malloc(sizeof(pointf) * bz.size);
+		offlist = offspl.list[i].list = gv_calloc(bz.size, sizeof(pointf));
+		tmplist = tmpspl.list[i].list = gv_calloc(bz.size, sizeof(pointf));
 		pf3 = bz.list[0];
+		size_t j;
 		for (j = 0; j < bz.size - 1; j += 3) {
 		    pf0 = pf3;
 		    pf1 = bz.list[j + 1];
@@ -2412,7 +2310,7 @@ static void emit_edge_graphics(GVJ_t * job, edge_t * e, char** styles)
 		tmplist[j].y = pf3.y - numc2 * offlist[j].y;
 	    }
 	    lastcolor = headcolor = tailcolor = color;
-	    colors = strdup(color);
+	    colors = gv_strdup(color);
 	    for (cnum = 0, color = strtok(colors, ":"); color;
 		cnum++, color = strtok(0, ":")) {
 		if (!color[0])
@@ -2428,15 +2326,14 @@ static void emit_edge_graphics(GVJ_t * job, edge_t * e, char** styles)
 		    headcolor = tailcolor = color;
 		if (cnum == 1)
 		    tailcolor = color;
-		for (i = 0; i < tmpspl.size; i++) {
+		for (size_t i = 0; i < tmpspl.size; i++) {
 		    tmplist = tmpspl.list[i].list;
 		    offlist = offspl.list[i].list;
-		    for (j = 0; j < tmpspl.list[i].size; j++) {
+		    for (size_t j = 0; j < tmpspl.list[i].size; j++) {
 			tmplist[j].x += offlist[j].x;
 			tmplist[j].y += offlist[j].y;
 		    }
-		    gvrender_beziercurve(job, tmplist, tmpspl.list[i].size,
-					 FALSE, FALSE, FALSE);
+		    gvrender_beziercurve(job, tmplist, tmpspl.list[i].size, 0);
 		}
 	    }
 	    if (bz.sflag) {
@@ -2462,7 +2359,7 @@ static void emit_edge_graphics(GVJ_t * job, edge_t * e, char** styles)
 			arrowsize, penwidth, bz.eflag);
 	    }
 	    free(colors);
-	    for (i = 0; i < offspl.size; i++) {
+	    for (size_t i = 0; i < offspl.size; i++) {
 		free(offspl.list[i].list);
 		free(tmpspl.list[i].list);
 	    }
@@ -2481,230 +2378,223 @@ static void emit_edge_graphics(GVJ_t * job, edge_t * e, char** styles)
 			gvrender_set_fillcolor(job, DEFAULT_COLOR);
 	        }
 	    }
-	    for (i = 0; i < ED_spl(e)->size; i++) {
+	    for (size_t i = 0; i < ED_spl(e)->size; i++) {
 		bz = ED_spl(e)->list[i];
-		if (job->flags & GVRENDER_DOES_ARROWS) {
-		    gvrender_beziercurve(job, bz.list, bz.size, bz.sflag, bz.eflag, FALSE);
-		} else {
-		    gvrender_beziercurve(job, bz.list, bz.size, FALSE, FALSE, FALSE);
-		    if (bz.sflag) {
-			arrow_gen(job, EMIT_TDRAW, bz.sp, bz.list[0],
-				arrowsize, penwidth, bz.sflag);
-		    }
-		    if (bz.eflag) {
-			arrow_gen(job, EMIT_HDRAW, bz.ep, bz.list[bz.size - 1],
-				arrowsize, penwidth, bz.eflag);
-		    }
-		    if ((ED_spl(e)->size>1) && (bz.sflag||bz.eflag) && styles) 
-			gvrender_set_style(job, styles);
+		gvrender_beziercurve(job, bz.list, bz.size, 0);
+		if (bz.sflag) {
+		    arrow_gen(job, EMIT_TDRAW, bz.sp, bz.list[0],
+		              arrowsize, penwidth, bz.sflag);
 		}
-	    }
+		if (bz.eflag) {
+		    arrow_gen(job, EMIT_HDRAW, bz.ep, bz.list[bz.size - 1],
+		              arrowsize, penwidth, bz.eflag);
+		}
+		if (ED_spl(e)->size > 1 && (bz.sflag || bz.eflag) && styles)
+		    gvrender_set_style(job, styles);
+		}
 	}
     }
+
+done:;
+    char *color_scheme = setColorScheme(previous_color_scheme);
+    free(color_scheme);
+    free(previous_color_scheme);
 }
 
-static boolean edge_in_box(edge_t *e, boxf b)
+static bool edge_in_box(edge_t *e, boxf b)
 {
     splines *spl;
     textlabel_t *lp;
 
     spl = ED_spl(e);
     if (spl && boxf_overlap(spl->bb, b))
-        return TRUE;
+        return true;
 
     lp = ED_label(e);
     if (lp && overlap_label(lp, b))
-        return TRUE;
+        return true;
 
     lp = ED_xlabel(e);
     if (lp && lp->set && overlap_label(lp, b))
-        return TRUE;
+        return true;
 
-    return FALSE;
+    return false;
 }
 
-static void emit_begin_edge(GVJ_t * job, edge_t * e, char** styles)
-{
-    obj_state_t *obj;
-    int flags = job->flags;
-    char *s;
-    textlabel_t *lab = NULL, *tlab = NULL, *hlab = NULL;
-    pointf *pbs = NULL;
-    int	i, nump, *pbs_n = NULL, pbs_poly_n = 0;
-    char* dflt_url = NULL;
-    char* dflt_target = NULL;
-    double penwidth;
+static void emit_begin_edge(GVJ_t *job, edge_t *e, char **styles) {
+  obj_state_t *obj;
+  int flags = job->flags;
+  char *s;
+  textlabel_t *lab = NULL, *tlab = NULL, *hlab = NULL;
+  pointf *pbs = NULL;
+  size_t *pbs_n = NULL, pbs_poly_n = 0;
+  char *dflt_url = NULL;
+  char *dflt_target = NULL;
+  double penwidth;
 
-    obj = push_obj_state(job);
-    obj->type = EDGE_OBJTYPE;
-    obj->u.e = e;
-    obj->emit_state = EMIT_EDRAW;
-    if (ED_label(e) && !ED_label(e)->html && mapBool(agget(e,"labelaligned"),FALSE))
-	obj->labeledgealigned = TRUE;
+  obj = push_obj_state(job);
+  obj->type = EDGE_OBJTYPE;
+  obj->u.e = e;
+  obj->emit_state = EMIT_EDRAW;
+  if (ED_label(e) && !ED_label(e)->html && mapbool(agget(e, "labelaligned")))
+    obj->labeledgealigned = true;
 
-    /* We handle the edge style and penwidth here because the width
-     * is needed below for calculating polygonal image maps
-     */
-    if (styles && ED_spl(e)) gvrender_set_style(job, styles);
+  /* We handle the edge style and penwidth here because the width
+   * is needed below for calculating polygonal image maps
+   */
+  if (styles && ED_spl(e))
+    gvrender_set_style(job, styles);
 
-    if (E_penwidth && ((s=agxget(e,E_penwidth)) && s[0])) {
-	penwidth = late_double(e, E_penwidth, 1.0, 0.0);
-	gvrender_set_penwidth(job, penwidth);
+  if (E_penwidth && (s = agxget(e, E_penwidth)) && s[0]) {
+    penwidth = late_double(e, E_penwidth, 1.0, 0.0);
+    gvrender_set_penwidth(job, penwidth);
+  }
+
+  if (flags & GVRENDER_DOES_Z) {
+    if (GD_odim(agraphof(agtail(e))) >= 3) {
+      obj->tail_z = POINTS(ND_pos(agtail(e))[2]);
+      obj->head_z = POINTS(ND_pos(aghead(e))[2]);
+    } else {
+      obj->tail_z = obj->head_z = 0.0;
     }
+  }
 
-    if (flags & GVRENDER_DOES_Z) {
-        /* obj->tail_z = late_double(agtail(e), N_z, 0.0, -1000.0); */
-        /* obj->head_z = late_double(aghead(e), N_z, 0.0, -MAXFLOAT); */
-	if (GD_odim(agraphof(agtail(e))) >=3) {
-            obj->tail_z = POINTS(ND_pos(agtail(e))[2]);
-            obj->head_z = POINTS(ND_pos(aghead(e))[2]);
-	} else {
-            obj->tail_z = obj->head_z = 0.0;
-	}
+  if (flags & GVRENDER_DOES_LABELS) {
+    if ((lab = ED_label(e)))
+      obj->label = lab->text;
+    obj->taillabel = obj->headlabel = obj->xlabel = obj->label;
+    if ((tlab = ED_xlabel(e)))
+      obj->xlabel = tlab->text;
+    if ((tlab = ED_tail_label(e)))
+      obj->taillabel = tlab->text;
+    if ((hlab = ED_head_label(e)))
+      obj->headlabel = hlab->text;
+  }
+
+  if (flags & GVRENDER_DOES_MAPS) {
+    agxbuf xb = {0};
+
+    s = getObjId(job, e, &xb);
+    obj->id = strdup_and_subst_obj(s, e);
+    agxbfree(&xb);
+
+    if (((s = agget(e, "href")) && s[0]) || ((s = agget(e, "URL")) && s[0]))
+      dflt_url = strdup_and_subst_obj(s, e);
+    if (((s = agget(e, "edgehref")) && s[0]) ||
+        ((s = agget(e, "edgeURL")) && s[0]))
+      obj->url = strdup_and_subst_obj(s, e);
+    else if (dflt_url)
+      obj->url = gv_strdup(dflt_url);
+    if (((s = agget(e, "labelhref")) && s[0]) ||
+        ((s = agget(e, "labelURL")) && s[0]))
+      obj->labelurl = strdup_and_subst_obj(s, e);
+    else if (dflt_url)
+      obj->labelurl = gv_strdup(dflt_url);
+    if (((s = agget(e, "tailhref")) && s[0]) ||
+        ((s = agget(e, "tailURL")) && s[0])) {
+      obj->tailurl = strdup_and_subst_obj(s, e);
+      obj->explicit_tailurl = true;
+    } else if (dflt_url)
+      obj->tailurl = gv_strdup(dflt_url);
+    if (((s = agget(e, "headhref")) && s[0]) ||
+        ((s = agget(e, "headURL")) && s[0])) {
+      obj->headurl = strdup_and_subst_obj(s, e);
+      obj->explicit_headurl = true;
+    } else if (dflt_url)
+      obj->headurl = gv_strdup(dflt_url);
+  }
+
+  if (flags & GVRENDER_DOES_TARGETS) {
+    if ((s = agget(e, "target")) && s[0])
+      dflt_target = strdup_and_subst_obj(s, e);
+    if ((s = agget(e, "edgetarget")) && s[0]) {
+      obj->explicit_edgetarget = true;
+      obj->target = strdup_and_subst_obj(s, e);
+    } else if (dflt_target)
+      obj->target = gv_strdup(dflt_target);
+    if ((s = agget(e, "labeltarget")) && s[0])
+      obj->labeltarget = strdup_and_subst_obj(s, e);
+    else if (dflt_target)
+      obj->labeltarget = gv_strdup(dflt_target);
+    if ((s = agget(e, "tailtarget")) && s[0]) {
+      obj->tailtarget = strdup_and_subst_obj(s, e);
+      obj->explicit_tailtarget = true;
+    } else if (dflt_target)
+      obj->tailtarget = gv_strdup(dflt_target);
+    if ((s = agget(e, "headtarget")) && s[0]) {
+      obj->explicit_headtarget = true;
+      obj->headtarget = strdup_and_subst_obj(s, e);
+    } else if (dflt_target)
+      obj->headtarget = gv_strdup(dflt_target);
+  }
+
+  if (flags & GVRENDER_DOES_TOOLTIPS) {
+    if (((s = agget(e, "tooltip")) && s[0]) ||
+        ((s = agget(e, "edgetooltip")) && s[0])) {
+      char *tooltip = preprocessTooltip(s, e);
+      obj->tooltip = strdup_and_subst_obj(tooltip, e);
+      free(tooltip);
+      obj->explicit_tooltip = true;
+    } else if (obj->label)
+      obj->tooltip = gv_strdup(obj->label);
+
+    if ((s = agget(e, "labeltooltip")) && s[0]) {
+      char *tooltip = preprocessTooltip(s, e);
+      obj->labeltooltip = strdup_and_subst_obj(tooltip, e);
+      free(tooltip);
+      obj->explicit_labeltooltip = true;
+    } else if (obj->label)
+      obj->labeltooltip = gv_strdup(obj->label);
+
+    if ((s = agget(e, "tailtooltip")) && s[0]) {
+      char *tooltip = preprocessTooltip(s, e);
+      obj->tailtooltip = strdup_and_subst_obj(tooltip, e);
+      free(tooltip);
+      obj->explicit_tailtooltip = true;
+    } else if (obj->taillabel)
+      obj->tailtooltip = gv_strdup(obj->taillabel);
+
+    if ((s = agget(e, "headtooltip")) && s[0]) {
+      char *tooltip = preprocessTooltip(s, e);
+      obj->headtooltip = strdup_and_subst_obj(tooltip, e);
+      free(tooltip);
+      obj->explicit_headtooltip = true;
+    } else if (obj->headlabel)
+      obj->headtooltip = gv_strdup(obj->headlabel);
+  }
+
+  free(dflt_url);
+  free(dflt_target);
+
+  if (flags & (GVRENDER_DOES_MAPS | GVRENDER_DOES_TOOLTIPS)) {
+    if (ED_spl(e) && (obj->url || obj->tooltip) &&
+        (flags & GVRENDER_DOES_MAP_POLYGON)) {
+      splines *spl;
+      double w2 = fmax(job->obj->penwidth / 2.0, 2.0);
+
+      spl = ED_spl(e);
+      const size_t ns = spl->size; /* number of splines */
+      for (size_t i = 0; i < ns; i++)
+        map_output_bspline(&pbs, &pbs_n, &pbs_poly_n, spl->list + i, w2);
+      obj->url_bsplinemap_poly_n = pbs_poly_n;
+      obj->url_bsplinemap_n = pbs_n;
+      if (!(flags & GVRENDER_DOES_TRANSFORM)) {
+        size_t nump = 0;
+        for (size_t i = 0; i < pbs_poly_n; i++) {
+          nump += pbs_n[i];
+        }
+        gvrender_ptf_A(job, pbs, pbs, nump);
+      }
+      obj->url_bsplinemap_p = pbs;
+      obj->url_map_shape = MAP_POLYGON;
+      obj->url_map_p = pbs;
+      obj->url_map_n = pbs_n[0];
     }
+  }
 
-    if (flags & GVRENDER_DOES_LABELS) {
-	if ((lab = ED_label(e)))
-	    obj->label = lab->text;
-	obj->taillabel = obj->headlabel = obj->xlabel = obj->label;
-	if ((tlab = ED_xlabel(e)))
-	    obj->xlabel = tlab->text;
-	if ((tlab = ED_tail_label(e)))
-	    obj->taillabel = tlab->text;
-	if ((hlab = ED_head_label(e)))
-	    obj->headlabel = hlab->text;
-    }
-
-    if (flags & GVRENDER_DOES_MAPS) {
-	agxbuf xb;
-	unsigned char xbuf[SMALLBUF];
-
-	agxbinit(&xb, SMALLBUF, xbuf);
-	s = getObjId (job, e, &xb);
-	obj->id = strdup_and_subst_obj(s, (void*)e);
-	agxbfree(&xb);
-
-        if (((s = agget(e, "href")) && s[0]) || ((s = agget(e, "URL")) && s[0]))
-            dflt_url = strdup_and_subst_obj(s, (void*)e);
-	if (((s = agget(e, "edgehref")) && s[0]) || ((s = agget(e, "edgeURL")) && s[0]))
-            obj->url = strdup_and_subst_obj(s, (void*)e);
-	else if (dflt_url)
-	    obj->url = strdup(dflt_url);
-	if (((s = agget(e, "labelhref")) && s[0]) || ((s = agget(e, "labelURL")) && s[0]))
-            obj->labelurl = strdup_and_subst_obj(s, (void*)e);
-	else if (dflt_url)
-	    obj->labelurl = strdup(dflt_url);
-	if (((s = agget(e, "tailhref")) && s[0]) || ((s = agget(e, "tailURL")) && s[0])) {
-            obj->tailurl = strdup_and_subst_obj(s, (void*)e);
-            obj->explicit_tailurl = TRUE;
-	}
-	else if (dflt_url)
-	    obj->tailurl = strdup(dflt_url);
-	if (((s = agget(e, "headhref")) && s[0]) || ((s = agget(e, "headURL")) && s[0])) {
-            obj->headurl = strdup_and_subst_obj(s, (void*)e);
-            obj->explicit_headurl = TRUE;
-	}
-	else if (dflt_url)
-	    obj->headurl = strdup(dflt_url);
-    } 
-
-    if (flags & GVRENDER_DOES_TARGETS) {
-        if ((s = agget(e, "target")) && s[0])
-            dflt_target = strdup_and_subst_obj(s, (void*)e);
-        if ((s = agget(e, "edgetarget")) && s[0]) {
-	    obj->explicit_edgetarget = TRUE;
-            obj->target = strdup_and_subst_obj(s, (void*)e);
-	}
-	else if (dflt_target)
-	    obj->target = strdup(dflt_target);
-        if ((s = agget(e, "labeltarget")) && s[0])
-            obj->labeltarget = strdup_and_subst_obj(s, (void*)e);
-	else if (dflt_target)
-	    obj->labeltarget = strdup(dflt_target);
-        if ((s = agget(e, "tailtarget")) && s[0]) {
-            obj->tailtarget = strdup_and_subst_obj(s, (void*)e);
-	    obj->explicit_tailtarget = TRUE;
-	}
-	else if (dflt_target)
-	    obj->tailtarget = strdup(dflt_target);
-        if ((s = agget(e, "headtarget")) && s[0]) {
-	    obj->explicit_headtarget = TRUE;
-            obj->headtarget = strdup_and_subst_obj(s, (void*)e);
-	}
-	else if (dflt_target)
-	    obj->headtarget = strdup(dflt_target);
-    } 
-
-    if (flags & GVRENDER_DOES_TOOLTIPS) {
-        if (((s = agget(e, "tooltip")) && s[0]) ||
-            ((s = agget(e, "edgetooltip")) && s[0])) {
-	    char* tooltip = preprocessTooltip (s, e);
-            obj->tooltip = strdup_and_subst_obj(tooltip, (void*)e);
-	    free (tooltip);
-	    obj->explicit_tooltip = TRUE;
-	}
-	else if (obj->label)
-	    obj->tooltip = strdup(obj->label);
-
-        if ((s = agget(e, "labeltooltip")) && s[0]) {
-	    char* tooltip = preprocessTooltip (s, e);
-            obj->labeltooltip = strdup_and_subst_obj(tooltip, (void*)e);
-	    free (tooltip);
-	    obj->explicit_labeltooltip = TRUE;
-	}
-	else if (obj->label)
-	    obj->labeltooltip = strdup(obj->label);
-
-        if ((s = agget(e, "tailtooltip")) && s[0]) {
-	    char* tooltip = preprocessTooltip (s, e);
-            obj->tailtooltip = strdup_and_subst_obj(tooltip, (void*)e);
-	    free (tooltip);
-	    obj->explicit_tailtooltip = TRUE;
-	}
-	else if (obj->taillabel)
-	    obj->tailtooltip = strdup(obj->taillabel);
-
-        if ((s = agget(e, "headtooltip")) && s[0]) {
-	    char* tooltip = preprocessTooltip (s, e);
-            obj->headtooltip = strdup_and_subst_obj(tooltip, (void*)e);
-	    free (tooltip);
-	    obj->explicit_headtooltip = TRUE;
-	}
-	else if (obj->headlabel)
-	    obj->headtooltip = strdup(obj->headlabel);
-    } 
-    
-    free (dflt_url);
-    free (dflt_target);
-
-    if (flags & (GVRENDER_DOES_MAPS | GVRENDER_DOES_TOOLTIPS)) {
-	if (ED_spl(e) && (obj->url || obj->tooltip) && (flags & GVRENDER_DOES_MAP_POLYGON)) {
-	    int ns;
-	    splines *spl;
-	    double w2 = MAX(job->obj->penwidth/2.0,2.0);
-
-	    spl = ED_spl(e);
-	    ns = spl->size; /* number of splines */
-	    for (i = 0; i < ns; i++)
-		map_output_bspline (&pbs, &pbs_n, &pbs_poly_n, spl->list+i, w2);
-	    obj->url_bsplinemap_poly_n = pbs_poly_n;
-	    obj->url_bsplinemap_n = pbs_n;
-	    if (! (flags & GVRENDER_DOES_TRANSFORM)) {
-    		for ( nump = 0, i = 0; i < pbs_poly_n; i++)
-        	    nump += pbs_n[i];
-		gvrender_ptf_A(job, pbs, pbs, nump);		
-	    }
-	    obj->url_bsplinemap_p = pbs;
-	    obj->url_map_shape = MAP_POLYGON;
-	    obj->url_map_p = pbs;
-	    obj->url_map_n = pbs_n[0];
-	}
-    }
-
-    gvrender_begin_edge(job, e);
-    if (obj->url || obj->explicit_tooltip)
-	gvrender_begin_anchor(job,
-		obj->url, obj->tooltip, obj->target, obj->id);
+  gvrender_begin_edge(job);
+  if (obj->url || obj->explicit_tooltip)
+    gvrender_begin_anchor(job, obj->url, obj->tooltip, obj->target, obj->id);
 }
 
 static void
@@ -2714,11 +2604,11 @@ emit_edge_label(GVJ_t* job, textlabel_t* lbl, emit_state_t lkind, int explicit,
     int flags = job->flags;
     emit_state_t old_emit_state;
     char* newid;
+    agxbuf xb = {0};
     char* type;
 
-    if ((lbl == NULL) || !(lbl->set)) return;
+    if (lbl == NULL || !lbl->set) return;
     if (id) { /* non-NULL if needed */
-	newid = N_NEW(strlen(id) + sizeof("-headlabel"),char);
 	switch (lkind) {
 	case EMIT_ELABEL :
 	    type = "label";
@@ -2730,10 +2620,10 @@ emit_edge_label(GVJ_t* job, textlabel_t* lbl, emit_state_t lkind, int explicit,
 	    type = "taillabel";
 	    break;
 	default :
-	    assert (0);
-	    break;
+	    UNREACHABLE();
 	}
-	sprintf (newid, "%s-%s", id, type);
+	agxbprint(&xb, "%s-%s", id, type);
+	newid = agxbuse(&xb);
     }
     else
 	newid = NULL;
@@ -2752,12 +2642,11 @@ emit_edge_label(GVJ_t* job, textlabel_t* lbl, emit_state_t lkind, int explicit,
 	}
 	gvrender_end_anchor(job);
     }
-    if (newid) free (newid);
+    agxbfree(&xb);
     job->obj->emit_state = old_emit_state;
 }
 
-/* nodeIntersect:
- * Common logic for setting hot spots at the beginning and end of 
+/* Common logic for setting hot spots at the beginning and end of 
  * an edge.
  * If we are given a value (url, tooltip, target) explicitly set for
  * the head/tail, we use that. 
@@ -2768,55 +2657,26 @@ emit_edge_label(GVJ_t* job, textlabel_t* lbl, emit_state_t lkind, int explicit,
  * If the url is non-NULL or the tooltip was explicit, we set
  * a hot spot around point p.
  */
-static void nodeIntersect (GVJ_t * job, pointf p, 
-    boolean explicit_iurl, char* iurl,
-    boolean explicit_itooltip, char* itooltip,
-    boolean explicit_itarget, char* itarget)
-{
+static void nodeIntersect(GVJ_t *job, pointf p, bool explicit_iurl, char *iurl,
+                          bool explicit_itooltip) {
     obj_state_t *obj = job->obj;
     char* url;
-#if 0
-    char* tooltip;
-    char* target;
-#endif
-    boolean explicit;
+    bool explicit;
 
     if (explicit_iurl) url = iurl;
     else url = obj->url;
     if (explicit_itooltip) {
-#if 0
-	tooltip = itooltip;
-#endif
-	explicit = TRUE;
+	explicit = true;
     }
     else if (obj->explicit_tooltip) {
-#if 0
-	tooltip = obj->tooltip;
-#endif
-	explicit = TRUE;
+	explicit = true;
     }
     else {
-#if 0
-	tooltip = itooltip;
-#endif
-	explicit = FALSE;
+	explicit = false;
     }
-#if 0
-    if (explicit_itarget)
-	target = itarget;
-    else if (obj->explicit_edgetarget)
-	target = obj->target;
-    else
-	target = itarget;
-#endif
 
     if (url || explicit) {
 	map_point(job, p);
-#if 0
-/* this doesn't work because there is nothing contained in the anchor */
-	gvrender_begin_anchor(job, url, tooltip, target, obj->id);
-	gvrender_end_anchor(job);
-#endif
     }
 }
 
@@ -2824,12 +2684,12 @@ static void emit_end_edge(GVJ_t * job)
 {
     obj_state_t *obj = job->obj;
     edge_t *e = obj->u.e;
-    int i, nump;
 
     if (obj->url || obj->explicit_tooltip) {
 	gvrender_end_anchor(job);
 	if (obj->url_bsplinemap_poly_n) {
-	    for ( nump = obj->url_bsplinemap_n[0], i = 1; i < obj->url_bsplinemap_poly_n; i++) {
+	    for (size_t nump = obj->url_bsplinemap_n[0], i = 1;
+	         i < obj->url_bsplinemap_poly_n; i++) {
 		/* additional polygon maps around remaining bezier pieces */
 		obj->url_map_n = obj->url_bsplinemap_n[i];
 		obj->url_map_p = &(obj->url_bsplinemap_p[nump]);
@@ -2853,9 +2713,8 @@ static void emit_end_edge(GVJ_t * job)
 	    p = bz.sp;
 	else /* No arrow at start of splines */
 	    p = bz.list[0];
-	nodeIntersect (job, p, obj->explicit_tailurl, obj->tailurl,
-	    obj->explicit_tailtooltip, obj->tailtooltip, 
-	    obj->explicit_tailtarget, obj->tailtarget); 
+	nodeIntersect(job, p, obj->explicit_tailurl != 0, obj->tailurl,
+	              obj->explicit_tailtooltip != 0);
         
 	/* process intersection with head node */
 	bz = ED_spl(e)->list[ED_spl(e)->size - 1];
@@ -2863,9 +2722,8 @@ static void emit_end_edge(GVJ_t * job)
 	    p = bz.ep;
 	else /* No arrow at end of splines */
 	    p = bz.list[bz.size - 1];
-	nodeIntersect (job, p, obj->explicit_headurl, obj->headurl,
-	    obj->explicit_headtooltip, obj->headtooltip, 
-	    obj->explicit_headtarget, obj->headtarget); 
+	nodeIntersect(job, p, obj->explicit_headurl != 0, obj->headurl,
+	              obj->explicit_headtooltip != 0);
     }
 
     emit_edge_label(job, ED_label(e), EMIT_ELABEL,
@@ -2893,22 +2751,21 @@ static void emit_edge(GVJ_t * job, edge_t * e)
 {
     char *s;
     char *style;
-    char **styles = 0;
+    char **styles = NULL;
     char **sp;
     char *p;
 
-    if (edge_in_box(e, job->clip) && edge_in_layer(job, agraphof(aghead(e)), e) ) {
+    if (edge_in_box(e, job->clip) && edge_in_layer(job, e) ) {
 
-	s = malloc(strlen(agnameof(agtail(e))) + 2 + strlen(agnameof(aghead(e))) + 1);
-	strcpy(s,agnameof(agtail(e)));
+	agxbuf edge = {0};
+	agxbput(&edge, agnameof(agtail(e)));
 	if (agisdirected(agraphof(aghead(e))))
-
-	    strcat(s,"->");
+	    agxbput(&edge, "->");
 	else
-	    strcat(s,"--");
-	strcat(s,agnameof(aghead(e)));
-	gvrender_comment(job, s);
-	free(s);
+	    agxbput(&edge, "--");
+	agxbput(&edge, agnameof(aghead(e)));
+	gvrender_comment(job, agxbuse(&edge));
+	agxbfree(&edge);
 
 	s = late_string(e, E_comment, "");
 	if (s[0])
@@ -2938,25 +2795,18 @@ static char adjust[] = {'l', 'n', 'r'};
 static void
 expandBB (boxf* bb, pointf p)
 {
-    if (p.x > bb->UR.x)
-	bb->UR.x = p.x;
-    if (p.x < bb->LL.x)
-	bb->LL.x = p.x;
-    if (p.y > bb->UR.y)
-	bb->UR.y = p.y;
-    if (p.y < bb->LL.y)
-	bb->LL.y = p.y;
+    bb->UR.x = fmax(bb->UR.x, p.x);
+    bb->LL.x = fmin(bb->LL.x, p.x);
+    bb->UR.y = fmax(bb->UR.y, p.y);
+    bb->LL.y = fmin(bb->LL.y, p.y);
 }
 
-static boxf
-ptsBB (xdot_point* inpts, int numpts, boxf* bb)
-{
+static boxf ptsBB(xdot_point *inpts, size_t numpts, boxf *bb) {
     boxf opbb;
-    int i;
 
     opbb.LL.x = opbb.UR.x = inpts->x;
     opbb.LL.y = opbb.UR.y = inpts->y;
-    for (i = 1; i < numpts; i++) {
+    for (size_t i = 1; i < numpts; i++) {
 	inpts++;
 	if (inpts->x < opbb.LL.x)
 	    opbb.LL.x = inpts->x;
@@ -3009,26 +2859,24 @@ boxf xdotBB (Agraph_t* g)
 {
     GVC_t *gvc = GD_gvc(g);
     exdot_op* op;
-    int i;
     double fontsize = 0.0;
     char* fontname = NULL;
     pointf pts[2];
-    /* pointf sz; */
     boxf bb0;
     boxf bb = GD_bb(g);
-    xdot* xd = (xdot*)GD_drawing(g)->xdots;
-    textfont_t tf, null_tf = {NULL,NULL,NULL,0.0,0,0};
+    xdot* xd = GD_drawing(g)->xdots;
+    textfont_t tf, null_tf = {0};
     int fontflags = 0;
 
     if (!xd) return bb;
 
-    if ((bb.LL.x == bb.UR.x) && (bb.LL.y == bb.UR.y)) {
+    if (bb.LL.x == bb.UR.x && bb.LL.y == bb.UR.y) {
 	bb.LL.x = bb.LL.y = MAXDOUBLE;
 	bb.UR.x = bb.UR.y = -MAXDOUBLE;
     }
 
-    op = (exdot_op*)(xd->ops);
-    for (i = 0; i < xd->cnt; i++) {
+    op = (exdot_op*)xd->ops;
+    for (size_t i = 0; i < xd->cnt; i++) {
 	tf = null_tf;
 	switch (op->op.kind) {
 	case xd_filled_ellipse :
@@ -3054,8 +2902,8 @@ boxf xdotBB (Agraph_t* g)
 	    op->bb = ptsBB (op->op.u.polygon.pts, op->op.u.polygon.cnt, &bb);
 	    break;
 	case xd_text :
-	    op->span = NEW(textspan_t);
-	    op->span->str = strdup (op->op.u.text.text);
+	    op->span = gv_alloc(sizeof(textspan_t));
+	    op->span->str = gv_strdup (op->op.u.text.text);
 	    op->span->just = adjust [op->op.u.text.align];
 	    tf.name = fontname;
 	    tf.size = fontsize;
@@ -3093,34 +2941,34 @@ static void init_gvc(GVC_t * gvc, graph_t * g)
     gvc->g = g;
 
     /* margins */
-    gvc->graph_sets_margin = FALSE;
+    gvc->graph_sets_margin = false;
     if ((p = agget(g, "margin"))) {
         i = sscanf(p, "%lf,%lf", &xf, &yf);
         if (i > 0) {
             gvc->margin.x = gvc->margin.y = xf * POINTS_PER_INCH;
             if (i > 1)
                 gvc->margin.y = yf * POINTS_PER_INCH;
-            gvc->graph_sets_margin = TRUE;
+            gvc->graph_sets_margin = true;
         }
     }
 
     /* pad */
-    gvc->graph_sets_pad = FALSE;
+    gvc->graph_sets_pad = false;
     if ((p = agget(g, "pad"))) {
         i = sscanf(p, "%lf,%lf", &xf, &yf);
         if (i > 0) {
             gvc->pad.x = gvc->pad.y = xf * POINTS_PER_INCH;
             if (i > 1)
                 gvc->pad.y = yf * POINTS_PER_INCH;
-            gvc->graph_sets_pad = TRUE;
+            gvc->graph_sets_pad = true;
         }
     }
 
     /* pagesize */
-    gvc->graph_sets_pageSize = FALSE;
+    gvc->graph_sets_pageSize = false;
     gvc->pageSize = GD_drawing(g)->page;
-    if ((GD_drawing(g)->page.x > 0.001) && (GD_drawing(g)->page.y > 0.001))
-        gvc->graph_sets_pageSize = TRUE;
+    if (GD_drawing(g)->page.x > 0.001 && GD_drawing(g)->page.y > 0.001)
+        gvc->graph_sets_pageSize = true;
 
     /* rotation */
     if (GD_drawing(g)->landscape)
@@ -3185,7 +3033,7 @@ static void init_job_margin(GVJ_t *job)
         case GVRENDER_PLUGIN:
             job->margin = job->device.features->default_margin;
             break;
-        case HPGL: case PCL: case MIF: case METAPOST: case VTX: case QPDF:
+        case PCL: case MIF: case METAPOST: case VTX: case QPDF:
             job->margin.x = job->margin.y = DEFAULT_PRINT_MARGIN;
             break;
         default:
@@ -3201,7 +3049,7 @@ static void init_job_dpi(GVJ_t *job, graph_t *g)
     GVJ_t *firstjob = job->gvc->active_jobs;
 
     if (GD_drawing(g)->dpi != 0) {
-        job->dpi.x = job->dpi.y = (double)(GD_drawing(g)->dpi);
+        job->dpi.x = job->dpi.y = (double)GD_drawing(g)->dpi;
     }
     else if (firstjob && firstjob->device_sets_dpi) {
         job->dpi = firstjob->device_dpi;   /* some devices set dpi in initialize() */
@@ -3213,7 +3061,7 @@ static void init_job_dpi(GVJ_t *job, graph_t *g)
             job->dpi = job->device.features->default_dpi;
             break;
         default:
-            job->dpi.x = job->dpi.y = (double)(DEFAULT_DPI);
+            job->dpi.x = job->dpi.y = (double)DEFAULT_DPI;
             break;
         }
     }
@@ -3226,7 +3074,7 @@ static void init_job_viewport(GVJ_t * job, graph_t * g)
     double X, Y, Z, x, y;
     int rv;
     Agnode_t *n;
-    char *str, *nodename = NULL, *junk = NULL;
+    char *str, *nodename = NULL;
 
     UR = gvc->bb.UR;
     LL = gvc->bb.LL;
@@ -3244,12 +3092,12 @@ static void init_job_viewport(GVJ_t * job, graph_t * g)
     Z = 1.0;
     if (GD_drawing(g)->size.x > 0.001 && GD_drawing(g)->size.y > 0.001) { /* graph size was given by user... */
 	size = GD_drawing(g)->size;
-	if (sz.x == 0) sz.x = size.x;
-	if (sz.y == 0) sz.y = size.y;
-	if ((size.x < sz.x) || (size.y < sz.y) /* drawing is too big (in either axis) ... */
-	    || ((GD_drawing(g)->filled) /* or ratio=filled requested and ... */
-		&& (size.x > sz.x) && (size.y > sz.y))) /* drawing is too small (in both axes) ... */
-	    Z = MIN(size.x/sz.x, size.y/sz.y);
+	if (sz.x <= 0.001) sz.x = size.x;
+	if (sz.y <= 0.001) sz.y = size.y;
+	if (size.x < sz.x || size.y < sz.y /* drawing is too big (in either axis) ... */
+	    || (GD_drawing(g)->filled /* or ratio=filled requested and ... */
+		&& size.x > sz.x && size.y > sz.y)) /* drawing is too small (in both axes) ... */
+	    Z = fmin(size.x / sz.x, size.y / sz.y);
     }
     
     /* default focus, in graph units = center of bb */
@@ -3263,8 +3111,7 @@ static void init_job_viewport(GVJ_t * job, graph_t * g)
 
     /* user can override */
     if ((str = agget(g, "viewport"))) {
-        nodename = malloc(strlen(str)+1);
-        junk = malloc(strlen(str)+1);
+        nodename = gv_alloc(strlen(str) + 1);
 	rv = sscanf(str, "%lf,%lf,%lf,\'%[^\']\'", &X, &Y, &Z, nodename);
 	if (rv == 4) {
 	    n = agfindnode(g->root, nodename);
@@ -3274,7 +3121,8 @@ static void init_job_viewport(GVJ_t * job, graph_t * g)
 	    }
 	}
 	else {
-	    rv = sscanf(str, "%lf,%lf,%lf,%[^,]%s", &X, &Y, &Z, nodename, junk);
+	    char junk;
+	    rv = sscanf(str, "%lf,%lf,%lf,%[^,]%c", &X, &Y, &Z, nodename, &junk);
 	    if (rv == 4) {
                 n = agfindnode(g->root, nodename);
                 if (n) {
@@ -3287,7 +3135,6 @@ static void init_job_viewport(GVJ_t * job, graph_t * g)
 	    }
         }
 	free (nodename);
-	free (junk);
     }
     /* rv is ignored since args retain previous values if not scanned */
 
@@ -3300,12 +3147,6 @@ static void init_job_viewport(GVJ_t * job, graph_t * g)
     job->zoom = Z;              /* scaling factor */
     job->focus.x = x;
     job->focus.y = y;
-#if 0
-fprintf(stderr, "view=%g,%g, zoom=%g, focus=%g,%g\n",
-	job->view.x, job->view.y,
-	job->zoom,
-	job->focus.x, job->focus.y);
-#endif
 }
 
 static void emit_cluster_colors(GVJ_t * job, graph_t * g)
@@ -3350,7 +3191,7 @@ static void emit_colors(GVJ_t * job, graph_t * g)
 	    gvrender_set_fillcolor(job, str);
 	if (((str = agget(n, "fillcolor")) != 0) && str[0]) {
 	    if (strchr(str, ':')) {
-		colors = strdup(str);
+		colors = gv_strdup(str);
 		for (str = strtok(colors, ":"); str;
 		    str = strtok(0, ":")) {
 		    if (str[0])
@@ -3367,7 +3208,7 @@ static void emit_colors(GVJ_t * job, graph_t * g)
 	for (e = agfstout(g, n); e; e = agnxtout(g, e)) {
 	    if (((str = agget(e, "color")) != 0) && str[0]) {
 		if (strchr(str, ':')) {
-		    colors = strdup(str);
+		    colors = gv_strdup(str);
 		    for (str = strtok(colors, ":"); str;
 			str = strtok(0, ":")) {
 			if (str[0])
@@ -3459,10 +3300,10 @@ static void emit_begin_graph(GVJ_t * job, graph_t * g)
 
     initObjMapData (job, GD_label(g), g);
 
-    gvrender_begin_graph(job, g);
+    gvrender_begin_graph(job);
 }
 
-static void emit_end_graph(GVJ_t * job, graph_t * g)
+static void emit_end_graph(GVJ_t * job)
 {
     gvrender_end_graph(job);
     pop_obj_state(job);
@@ -3473,18 +3314,17 @@ static void emit_end_graph(GVJ_t * job, graph_t * g)
 static void emit_page(GVJ_t * job, graph_t * g)
 {
     obj_state_t *obj = job->obj;
-    int nump = 0, flags = job->flags;
+    int flags = job->flags;
+    size_t nump = 0;
     textlabel_t *lab;
     pointf *p = NULL;
     char* saveid;
-    unsigned char buf[SMALLBUF];
-    agxbuf xb;
+    agxbuf xb = {0};
 
     /* For the first page, we can use the values generated in emit_begin_graph. 
      * For multiple pages, we need to generate a new id.
      */
     if (NotFirstPage(job)) {
-	agxbinit(&xb, SMALLBUF, buf);
 	saveid = obj->id;
 	layerPagePrefix (job, &xb);
 	agxbput (&xb, saveid);
@@ -3493,8 +3333,8 @@ static void emit_page(GVJ_t * job, graph_t * g)
     else
 	saveid = NULL;
 
-    setColorScheme (agget (g, "colorscheme"));
-    setup_page(job, g);
+    char *previous_color_scheme = setColorScheme(agget(g, "colorscheme"));
+    setup_page(job);
     gvrender_begin_page(job);
     gvrender_set_pencolor(job, DEFAULT_COLOR);
     gvrender_set_fillcolor(job, DEFAULT_FILL);
@@ -3509,7 +3349,7 @@ static void emit_page(GVJ_t * job, graph_t * g)
 		obj->url_map_shape = MAP_POLYGON;
 		nump = 4;
 	    }
-	    p = N_NEW(nump, pointf);
+	    p = gv_calloc(nump, sizeof(pointf));
 	    p[0] = job->pageBox.LL;
 	    p[1] = job->pageBox.UR;
 	    if (! (flags & (GVRENDER_DOES_MAP_RECTANGLE)))
@@ -3531,7 +3371,6 @@ static void emit_page(GVJ_t * job, graph_t * g)
 	emit_map_rect(job, job->clip);
 	gvrender_begin_anchor(job, obj->url, obj->tooltip, obj->target, obj->id);
     }
-    /* if (numPhysicalLayers(job) == 1) */
 	emit_background(job, g);
     if (GD_label(g))
 	emit_label(job, EMIT_GLABEL, GD_label(g));
@@ -3540,9 +3379,13 @@ static void emit_page(GVJ_t * job, graph_t * g)
     emit_view(job,g,flags);
     gvrender_end_page(job);
     if (saveid) {
-	agxbfree(&xb);
 	obj->id = saveid;
     }
+    agxbfree(&xb);
+
+    char *color_scheme = setColorScheme(previous_color_scheme);
+    free(color_scheme);
+    free(previous_color_scheme);
 }
 
 void emit_graph(GVJ_t * job, graph_t * g)
@@ -3570,10 +3413,6 @@ void emit_graph(GVJ_t * job, graph_t * g)
 	job->view.x = job->width / job->scale.x;
 	job->view.y = job->height / job->scale.y;
     }
-#if 0
-fprintf(stderr,"focus=%g,%g view=%g,%g\n",
-	job->focus.x, job->focus.y, job->view.x, job->view.y);
-#endif
 
     s = late_string(g, agattr(g, AGRAPH, "comment", 0), "");
     gvrender_comment(job, s);
@@ -3599,37 +3438,29 @@ fprintf(stderr,"focus=%g,%g view=%g,%g\n",
 	if (numPhysicalLayers (job) > 1)
 	    gvrender_end_layer(job);
     } 
-    emit_end_graph(job, g);
+    emit_end_graph(job);
 }
 
 /* support for stderr_once */
-static void free_string_entry(Dict_t * dict, char *key, Dtdisc_t * disc)
-{
+static void free_string_entry(char *key, Dtdisc_t *disc) {
+    (void)disc;
     free(key);
 }
 
 static Dict_t *strings;
 static Dtdisc_t stringdict = {
-    0,				/* key  - the object itself */
-    0,				/* size - null-terminated string */
-    -1,				/* link - allocate separate holder objects  */
-    NIL(Dtmake_f),
-    (Dtfree_f) free_string_entry,
-    NIL(Dtcompar_f),
-    NIL(Dthash_f),
-    NIL(Dtmemory_f),
-    NIL(Dtevent_f)
+    .link = -1, // link - allocate separate holder objects
+    .freef = (Dtfree_f)free_string_entry,
 };
 
-int emit_once(char *str)
-{
+bool emit_once(char *str) {
     if (strings == 0)
 	strings = dtopen(&stringdict, Dtoset);
     if (!dtsearch(strings, str)) {
-	dtinsert(strings, strdup(str));
-	return TRUE;
+	dtinsert(strings, gv_strdup(str));
+	return true;
     }
-    return FALSE;
+    return false;
 }
 
 void emit_once_reset(void)
@@ -3651,12 +3482,11 @@ static void emit_begin_cluster(GVJ_t * job, Agraph_t * sg)
 
     initObjMapData (job, GD_label(sg), sg);
     
-    gvrender_begin_cluster(job, sg);
+    gvrender_begin_cluster(job);
 }
 
-static void emit_end_cluster(GVJ_t * job, Agraph_t * g)
-{
-    gvrender_end_cluster(job, g);
+static void emit_end_cluster(GVJ_t *job) {
+    gvrender_end_cluster(job);
     pop_obj_state(job);
 }
 
@@ -3676,20 +3506,20 @@ void emit_clusters(GVJ_t * job, Agraph_t * g, int flags)
     
     for (c = 1; c <= GD_n_cluster(g); c++) {
 	sg = GD_clust(g)[c];
-	if (clust_in_layer(job, sg) == FALSE)
+	if (!clust_in_layer(job, sg))
 	    continue;
 	/* when mapping, detect events on clusters after sub_clusters */
 	if (flags & EMIT_CLUSTERS_LAST)
 	    emit_clusters(job, sg, flags);
 	emit_begin_cluster(job, sg);
 	obj = job->obj;
-	doAnchor = (obj->url || obj->explicit_tooltip);
-	setColorScheme (agget (sg, "colorscheme"));
+	doAnchor = obj->url || obj->explicit_tooltip;
+	char *previous_color_scheme = setColorScheme(agget(sg, "colorscheme"));
 	if (doAnchor && !(flags & EMIT_CLUSTERS_LAST)) {
 	    emit_map_rect(job, GD_bb(sg));
 	    gvrender_begin_anchor(job, obj->url, obj->tooltip, obj->target, obj->id);
 	}
-	filled = FALSE;
+	filled = 0;
 	istyle = 0;
 	if ((style = checkClusterStyle(sg, &istyle))) {
 	    gvrender_set_style(job, style);
@@ -3701,36 +3531,36 @@ void emit_clusters(GVJ_t * job, Agraph_t * g, int flags)
 	if (GD_gui_state(sg) & GUI_STATE_ACTIVE) {
 	    pencolor = late_nnstring(sg, G_activepencolor, DEFAULT_ACTIVEPENCOLOR);
 	    fillcolor = late_nnstring(sg, G_activefillcolor, DEFAULT_ACTIVEFILLCOLOR);
-	    filled = TRUE;
+	    filled = FILL;
 	}
 	else if (GD_gui_state(sg) & GUI_STATE_SELECTED) {
 	    pencolor = late_nnstring(sg, G_activepencolor, DEFAULT_SELECTEDPENCOLOR);
 	    fillcolor = late_nnstring(sg, G_activefillcolor, DEFAULT_SELECTEDFILLCOLOR);
-	    filled = TRUE;
+	    filled = FILL;
 	}
 	else if (GD_gui_state(sg) & GUI_STATE_DELETED) {
 	    pencolor = late_nnstring(sg, G_deletedpencolor, DEFAULT_DELETEDPENCOLOR);
 	    fillcolor = late_nnstring(sg, G_deletedfillcolor, DEFAULT_DELETEDFILLCOLOR);
-	    filled = TRUE;
+	    filled = FILL;
 	}
 	else if (GD_gui_state(sg) & GUI_STATE_VISITED) {
 	    pencolor = late_nnstring(sg, G_visitedpencolor, DEFAULT_VISITEDPENCOLOR);
 	    fillcolor = late_nnstring(sg, G_visitedfillcolor, DEFAULT_VISITEDFILLCOLOR);
-	    filled = TRUE;
+	    filled = FILL;
 	}
 	else {
-	    if (((color = agget(sg, "color")) != 0) && color[0])
+	    if ((color = agget(sg, "color")) != 0 && color[0])
 		fillcolor = pencolor = color;
-	    if (((color = agget(sg, "pencolor")) != 0) && color[0])
+	    if ((color = agget(sg, "pencolor")) != 0 && color[0])
 		pencolor = color;
-	    if (((color = agget(sg, "fillcolor")) != 0) && color[0])
+	    if ((color = agget(sg, "fillcolor")) != 0 && color[0])
 		fillcolor = color;
 	    /* bgcolor is supported for backward compatibility 
 	       if fill is set, fillcolor trumps bgcolor, so
                don't bother checking.
                if gradient is set fillcolor trumps bgcolor
              */
-	    if ((!filled || !fillcolor) && ((color = agget(sg, "bgcolor")) != 0) && color[0]) {
+	    if ((filled == 0 || !fillcolor) && (color = agget(sg, "bgcolor")) != 0 && color[0]) {
 		fillcolor = color;
 	        filled = FILL;
             }
@@ -3739,7 +3569,7 @@ void emit_clusters(GVJ_t * job, Agraph_t * g, int flags)
 	if (!pencolor) pencolor = DEFAULT_COLOR;
 	if (!fillcolor) fillcolor = DEFAULT_FILL;
 	clrs[0] = NULL;
-	if (filled) {
+	if (filled != 0) {
 	    float frac;
 	    if (findStopColor (fillcolor, clrs, &frac)) {
         	gvrender_set_fillcolor(job, clrs[0]);
@@ -3762,7 +3592,7 @@ void emit_clusters(GVJ_t * job, Agraph_t * g, int flags)
 	}
 
 	if (istyle & ROUNDED) {
-	    if ((doPerim = late_int(sg, G_peripheries, 1, 0)) || filled) {
+	    if ((doPerim = late_int(sg, G_peripheries, 1, 0)) || filled != 0) {
 		AF[0] = GD_bb(sg).LL;
 		AF[2] = GD_bb(sg).UR;
 		AF[1].x = AF[2].x;
@@ -3798,7 +3628,7 @@ void emit_clusters(GVJ_t * job, Agraph_t * g, int flags)
     		gvrender_set_pencolor(job, pencolor);
 		gvrender_box(job, GD_bb(sg), filled);
 	    }
-	    else if (filled) {
+	    else if (filled != 0) {
         	gvrender_set_pencolor(job, "transparent");
 		gvrender_box(job, GD_bb(sg), filled);
 	    }
@@ -3823,36 +3653,49 @@ void emit_clusters(GVJ_t * job, Agraph_t * g, int flags)
 		    emit_edge(job, e);
 	    }
 	}
-	emit_end_cluster(job, g);
+	emit_end_cluster(job);
 	/* when drawing, lay down clusters before sub_clusters */
 	if (!(flags & EMIT_CLUSTERS_LAST))
 	    emit_clusters(job, sg, flags);
+
+	char *color_scheme = setColorScheme(previous_color_scheme);
+	free(color_scheme);
+	free(previous_color_scheme);
     }
 }
 
-static boolean is_style_delim(int c)
+static bool is_style_delim(int c)
 {
     switch (c) {
     case '(':
     case ')':
     case ',':
     case '\0':
-	return TRUE;
+	return true;
     default:
-	return FALSE;
+	return false;
     }
 }
 
 #define SID 1
 
-static int style_token(char **s, agxbuf * xb)
-{
+/// Recognized token, returned from `style_token`
+///
+/// The token content fields, `.start` and `.size` are only populated with
+/// useful values when `.type` is `SID`, an identifier.
+typedef struct {
+  int type; ///< Token category
+  const char *start; ///< Beginning of the token content
+  size_t size; ///< Number of bytes in the token content
+} token_t;
+
+static token_t style_token(char **s) {
     char *p = *s;
     int token;
-    char c;
 
-    while (*p && (isspace(*p) || (*p == ',')))
+    while (gv_isspace(*p) || *p == ',')
 	p++;
+    const char *start = p;
     switch (*p) {
     case '\0':
 	token = 0;
@@ -3863,28 +3706,19 @@ static int style_token(char **s, agxbuf * xb)
 	break;
     default:
 	token = SID;
-	while (!is_style_delim(c = *p)) {
-	    agxbputc(xb, c);
+	while (!is_style_delim(*p)) {
 	    p++;
 	}
     }
     *s = p;
-    return token;
+    assert(start <= p);
+    size_t size = (size_t)(p - start);
+    return (token_t){.type = token, .start = start, .size = size};
 }
 
 #define FUNLIMIT 64
-static unsigned char outbuf[SMALLBUF];
-static agxbuf ps_xb;
 
-#if 0
-static void cleanup(void)
-{
-    agxbfree(&ps_xb);
-}
-#endif
-
-/* parse_style:
- * This is one of the worst internal designs in graphviz.
+/* This is one of the worst internal designs in graphviz.
  * The use of '\0' characters within strings seems cute but it
  * makes all of the standard functions useless if not dangerous.
  * Plus the function uses static memory for both the array and
@@ -3894,84 +3728,78 @@ static void cleanup(void)
 char **parse_style(char *s)
 {
     static char *parse[FUNLIMIT];
-    static boolean is_first = TRUE;
-    int fun = 0;
-    boolean in_parens = FALSE;
-    unsigned char buf[SMALLBUF];
+    size_t parse_offsets[sizeof(parse) / sizeof(parse[0])];
+    size_t fun = 0;
+    bool in_parens = false;
     char *p;
-    int c;
-    agxbuf xb;
+    static agxbuf ps_xb;
 
-    if (is_first) {
-	agxbinit(&ps_xb, SMALLBUF, outbuf);
-#if 0
-	atexit(cleanup);
-#endif
-	is_first = FALSE;
-    }
-
-    agxbinit(&xb, SMALLBUF, buf);
     p = s;
-    while ((c = style_token(&p, &xb)) != 0) {
-	switch (c) {
+    while (true) {
+	token_t c = style_token(&p);
+	if (c.type == 0) {
+	    break;
+	}
+	switch (c.type) {
 	case '(':
 	    if (in_parens) {
-		agerr(AGERR, "nesting not allowed in style: %s\n", s);
-		parse[0] = (char *) 0;
-		agxbfree(&xb);
+		agerrorf("nesting not allowed in style: %s\n", s);
+		parse[0] = NULL;
 		return parse;
 	    }
-	    in_parens = TRUE;
+	    in_parens = true;
 	    break;
 
 	case ')':
-	    if (in_parens == FALSE) {
-		agerr(AGERR, "unmatched ')' in style: %s\n", s);
-		parse[0] = (char *) 0;
-		agxbfree(&xb);
+	    if (!in_parens) {
+		agerrorf("unmatched ')' in style: %s\n", s);
+		parse[0] = NULL;
 		return parse;
 	    }
-	    in_parens = FALSE;
+	    in_parens = false;
 	    break;
 
 	default:
-	    if (in_parens == FALSE) {
+	    if (!in_parens) {
 		if (fun == FUNLIMIT - 1) {
-		    agerr(AGWARN, "truncating style '%s'\n", s);
-		    parse[fun] = (char *) 0;
-		    agxbfree(&xb);
+		    agwarningf("truncating style '%s'\n", s);
+		    parse[fun] = NULL;
 		    return parse;
 		}
 		agxbputc(&ps_xb, '\0');	/* terminate previous */
-		parse[fun++] = agxbnext(&ps_xb);
+		parse_offsets[fun++] = agxblen(&ps_xb);
 	    }
-	    agxbput(&ps_xb, agxbuse(&xb));
+	    agxbput_n(&ps_xb, c.start, c.size);
 	    agxbputc(&ps_xb, '\0');
 	}
     }
 
     if (in_parens) {
-	agerr(AGERR, "unmatched '(' in style: %s\n", s);
-	parse[0] = (char *) 0;
-	agxbfree(&xb);
+	agerrorf("unmatched '(' in style: %s\n", s);
+	parse[0] = NULL;
 	return parse;
     }
-    parse[fun] = (char *) 0;
-    agxbfree(&xb);
-    (void)agxbuse(&ps_xb);		/* adds final '\0' to buffer */
+
+    char *base = agxbuse(&ps_xb); // add final '\0' to buffer
+
+    // construct list of style strings
+    for (size_t i = 0; i < fun; ++i) {
+        parse[i] = base + parse_offsets[i];
+    }
+    parse[fun] = NULL;
+
     return parse;
 }
 
 static boxf bezier_bb(bezier bz)
 {
-    int i;
     pointf p, p1, p2;
     boxf bb;
 
     assert(bz.size > 0);
     assert(bz.size % 3 == 1);
     bb.LL = bb.UR = bz.list[0];
-    for (i = 1; i < bz.size;) {
+    for (size_t i = 1; i < bz.size;) {
 	/* take mid-point between two control points for bb calculation */
 	p1=bz.list[i];
 	i++;
@@ -3990,25 +3818,24 @@ static boxf bezier_bb(bezier bz)
 
 static void init_splines_bb(splines *spl)
 {
-    int i;
     bezier bz;
     boxf bb, b;
 
     assert(spl->size > 0);
     bz = spl->list[0];
     bb = bezier_bb(bz);
-    for (i = 0; i < spl->size; i++) {
+    for (size_t i = 0; i < spl->size; i++) {
         if (i > 0) {
             bz = spl->list[i];
             b = bezier_bb(bz);
             EXPANDBB(bb, b);
         }
         if (bz.sflag) {
-            b = arrow_bb(bz.sp, bz.list[0], 1, bz.sflag);
+            b = arrow_bb(bz.sp, bz.list[0], 1);
             EXPANDBB(bb, b);
         }
         if (bz.eflag) {
-            b = arrow_bb(bz.ep, bz.list[bz.size - 1], 1, bz.eflag);
+            b = arrow_bb(bz.ep, bz.list[bz.size - 1], 1);
             EXPANDBB(bb, b);
         }
     }
@@ -4022,10 +3849,6 @@ static void init_bb_edge(edge_t *e)
     spl = ED_spl(e);
     if (spl)
         init_splines_bb(spl);
-
-//    lp = ED_label(e);
-//    if (lp)
-//        {}
 }
 
 static void init_bb_node(graph_t *g, node_t *n)
@@ -4058,11 +3881,10 @@ static void init_bb(graph_t *g)
 }
 
 extern gvevent_key_binding_t gvevent_key_binding[];
-extern int gvevent_key_binding_size;
+extern const size_t gvevent_key_binding_size;
 extern gvdevice_callbacks_t gvdevice_callbacks;
 
-/* gv_fixLocale:
- * Set LC_NUMERIC to "C" to get expected interpretation of %f
+/* Set LC_NUMERIC to "C" to get expected interpretation of %f
  * in printf functions. Languages like postscript and dot expect
  * floating point numbers to use a decimal point.
  * 
@@ -4078,7 +3900,7 @@ void gv_fixLocale (int set)
     if (set) {
 	cnt++;
 	if (cnt == 1) {
-	    save_locale = strdup (setlocale (LC_NUMERIC, NULL));
+	    save_locale = gv_strdup(setlocale (LC_NUMERIC, NULL));
 	    setlocale (LC_NUMERIC, "C");
 	}
     }
@@ -4103,7 +3925,7 @@ int gvRenderJobs (GVC_t * gvc, graph_t * g)
 	start_timer();
     
     if (!LAYOUT_DONE(g)) {
-        agerr (AGERR, "Layout was not done.  Missing layout plugins? \n");
+        agerrorf("Layout was not done.  Missing layout plugins? \n");
 	FINISH();
         return -1;
     }
@@ -4127,7 +3949,7 @@ int gvRenderJobs (GVC_t * gvc, graph_t * g)
 	job->keybindings = gvevent_key_binding;
 	job->numkeys = gvevent_key_binding_size;
 	if (!GD_drawing(g)) {
-	    agerr (AGERR, "layout was not done\n");
+	    agerrorf("layout was not done\n");
 	    gv_fixLocale (0);
 	    FINISH();
 	    return -1;
@@ -4135,7 +3957,7 @@ int gvRenderJobs (GVC_t * gvc, graph_t * g)
 
         job->output_lang = gvrender_select(job, job->output_langname);
         if (job->output_lang == NO_SUPPORT) {
-            agerr (AGERR, "renderer for %s is unavailable\n", job->output_langname);
+            agerrorf("renderer for %s is unavailable\n", job->output_langname);
 	    gv_fixLocale (0);
 	    FINISH();
             return -1;
@@ -4146,21 +3968,18 @@ int gvRenderJobs (GVC_t * gvc, graph_t * g)
             /* output sorted, i.e. all nodes then all edges */
             job->flags |= EMIT_SORTED;
             break;
-        case DIA:
-            /* output in preorder traversal of the graph */
-            job->flags |= EMIT_PREORDER
-		       | GVDEVICE_BINARY_FORMAT;
-            break;
         default:
             job->flags |= chkOrder(g);
             break;
         }
 
-	/* if we already have an active job list and the device doesn't support mutiple output files, or we are about to write to a different output device */
+	// if we already have an active job list and the device doesn't support
+	// multiple output files, or we are about to write to a different output
+	// device
         firstjob = gvc->active_jobs;
         if (firstjob) {
 	    if (! (firstjob->flags & GVDEVICE_DOES_PAGES)
-	      || (strcmp(job->output_langname,firstjob->output_langname))) {
+	      || strcmp(job->output_langname, firstjob->output_langname)) {
 
 	        gvrender_end_job(firstjob);
 	    
@@ -4196,7 +4015,8 @@ int gvRenderJobs (GVC_t * gvc, graph_t * g)
     		/* Show_boxes is not defined, if at all, 
                  * until splines are generated in dot 
                  */
-	    job->common->show_boxes = (const char**)Show_boxes; 
+	    show_boxes_append(&Show_boxes, NULL);
+	    job->common->show_boxes = Show_boxes.data;
 #endif
 	    emit_graph(job, g);
 	}
@@ -4211,8 +4031,7 @@ int gvRenderJobs (GVC_t * gvc, graph_t * g)
     return 0;
 }
 
-/* findStopColor:
- * Check for colon in colorlist. If one exists, and not the first
+/* Check for colon in colorlist. If one exists, and not the first
  * character, store the characters before the colon in clrs[0] and
  * the characters after the colon (and before the next or end-of-string)
  * in clrs[1]. If there are no characters after the first colon, clrs[1]
@@ -4223,38 +4042,38 @@ int gvRenderJobs (GVC_t * gvc, graph_t * g)
  * Note that memory is allocated as a single block stored in clrs[0] and
  * must be freed by calling function.
  */
-boolean findStopColor (char* colorlist, char* clrs[2], float* frac)
+bool findStopColor (char* colorlist, char* clrs[2], float* frac)
 {
-    colorsegs_t* segs = NULL;
+    colorsegs_t segs = {0};
     int rv;
 
     rv = parseSegs (colorlist, 0, &segs);
-    if (rv || (segs->numc < 2) || (segs->segs[0].color == NULL)) {
+    if (rv || segs.numc < 2 || segs.segs[0].color == NULL) {
 	clrs[0] = NULL;
-	if (segs) freeSegs (segs);
-	return FALSE;
+	freeSegs(&segs);
+	return false;
     }
 
-    if (segs->numc > 2)
-	agerr (AGWARN, "More than 2 colors specified for a gradient - ignoring remaining\n");
+    if (segs.numc > 2)
+	agwarningf("More than 2 colors specified for a gradient - ignoring remaining\n");
 
-    clrs[0] = N_GNEW (strlen(colorlist)+1,char); 
-    strcpy (clrs[0], segs->segs[0].color);
-    if (segs->segs[1].color) {
+    clrs[0] = gv_calloc(strlen(colorlist) + 1, sizeof(char));
+    strcpy(clrs[0], segs.segs[0].color);
+    if (segs.segs[1].color) {
 	clrs[1] = clrs[0] + (strlen(clrs[0])+1);
-	strcpy (clrs[1], segs->segs[1].color);
+	strcpy(clrs[1], segs.segs[1].color);
     }
     else
 	clrs[1] = NULL;
 
-    if (segs->segs[0].hasFraction)
-	*frac = segs->segs[0].t;
-    else if (segs->segs[1].hasFraction)
-	*frac = 1 - segs->segs[1].t;
+    if (segs.segs[0].hasFraction)
+	*frac = segs.segs[0].t;
+    else if (segs.segs[1].hasFraction)
+	*frac = 1 - segs.segs[1].t;
     else 
 	*frac = 0;
 
-    freeSegs (segs);
-    return TRUE;
+    freeSegs(&segs);
+    return true;
 }
 

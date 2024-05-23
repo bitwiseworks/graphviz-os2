@@ -1,21 +1,24 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @ingroup common_utils
+ * @brief geometric functions (e.g. on points and boxes)
+ *
+ * with application to, but no specific dependence on graphs
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-/* geometric functions (e.g. on points and boxes) with application to, but
- * no specific dependence on graphs */
+#pragma once
 
-#ifndef GV_GEOMPROCS_H
-#define GV_GEOMPROCS_H
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,76 +27,31 @@ extern "C" {
 
 #include "geom.h"
 
-#ifdef _WIN32
 #ifdef GVDLL
-#define extern __declspec(dllexport)
+#ifdef GVC_EXPORTS
+#define GEOMPROCS_API __declspec(dllexport)
 #else
-#define extern __declspec(dllimport)
+#define GEOMPROCS_API __declspec(dllimport)
 #endif
 #elif defined(__OS2__) && defined(GVDLL)
 #define extern __declspec(dllexport)
 #endif
 
-extern box mkbox(point p, point q);
-extern boxf mkboxf(pointf p, pointf q);
-
-extern box flip_rec_box(box b, point p);
-extern boxf flip_rec_boxf(boxf b, pointf p);
-
-extern double ptToLine2 (pointf l1, pointf l2, pointf p);
-
-extern int lineToBox(pointf p1, pointf p2, boxf b);
-
-extern point ccwrotatep(point p, int ccwrot);
-extern pointf ccwrotatepf(pointf p, int ccwrot);
-
-extern point cwrotatep(point p, int cwrot);
-extern pointf cwrotatepf(pointf p, int cwrot);
-
-extern void rect2poly(pointf *p);
-
-extern int line_intersect (pointf a, pointf b, pointf c, pointf d, pointf* p);
-
-#if defined(_WIN32)
-#define inline __inline
+#ifndef GEOMPROCS_API
+#define GEOMPROCS_API /* nothing */
 #endif
 
+GEOMPROCS_API boxf flip_rec_boxf(boxf b, pointf p);
 
-static inline point pointof(int x, int y)
-{
-    point r;
+GEOMPROCS_API double ptToLine2 (pointf l1, pointf l2, pointf p);
 
-    r.x = x;
-    r.y = y;
-    return r;
-}
+GEOMPROCS_API int lineToBox(pointf p1, pointf p2, boxf b);
+GEOMPROCS_API pointf ccwrotatepf(pointf p, int ccwrot);
+GEOMPROCS_API pointf cwrotatepf(pointf p, int cwrot);
 
-static inline pointf pointfof(double x, double y)
-{
-    pointf r;
+GEOMPROCS_API void rect2poly(pointf *p);
 
-    r.x = x;
-    r.y = y;
-    return r;
-}
-
-static inline box boxof(int llx, int lly, int urx, int ury)
-{
-    box b;
-
-    b.LL.x = llx, b.LL.y = lly;
-    b.UR.x = urx, b.UR.y = ury;
-    return b;
-}
-
-static inline boxf boxfof(double llx, double lly, double urx, double ury)
-{
-    boxf b;
-
-    b.LL.x = llx, b.LL.y = lly;
-    b.UR.x = urx, b.UR.y = ury;
-    return b;
-}
+GEOMPROCS_API int line_intersect (pointf a, pointf b, pointf c, pointf d, pointf* p);
 
 static inline point add_point(point p, point q)
 {
@@ -128,16 +86,6 @@ static inline pointf sub_pointf(pointf p, pointf q)
 
     r.x = p.x - q.x;
     r.y = p.y - q.y;
-    return r;
-}
-
-/* for +ve coord values, this rounds towards p */
-static inline point mid_point(point p, point q)
-{
-    point r;
-
-    r.x = (p.x + q.x) / 2;
-    r.y = (p.y + q.y) / 2;
     return r;
 }
 
@@ -177,72 +125,8 @@ static inline pointf exch_xyf(pointf p)
     return r;
 }
 
-static inline box box_bb(box b0, box b1)
-{
-    box b;
-
-    b.LL.x = MIN(b0.LL.x, b1.LL.x);
-    b.LL.y = MIN(b0.LL.y, b1.LL.y);
-    b.UR.x = MAX(b0.UR.x, b1.UR.x);
-    b.UR.y = MAX(b0.UR.y, b1.UR.y);
-
-    return b;
-}
-
-static inline boxf boxf_bb(boxf b0, boxf b1)
-{
-    boxf b;
-
-    b.LL.x = MIN(b0.LL.x, b1.LL.x);
-    b.LL.y = MIN(b0.LL.y, b1.LL.y);
-    b.UR.x = MAX(b0.UR.x, b1.UR.x);
-    b.UR.y = MAX(b0.UR.y, b1.UR.y);
-
-    return b;
-}
-
-static inline box box_intersect(box b0, box b1)
-{
-    box b;
-
-    b.LL.x = MAX(b0.LL.x, b1.LL.x);
-    b.LL.y = MAX(b0.LL.y, b1.LL.y);
-    b.UR.x = MIN(b0.UR.x, b1.UR.x);
-    b.UR.y = MIN(b0.UR.y, b1.UR.y);
-
-    return b;
-}
-
-static inline boxf boxf_intersect(boxf b0, boxf b1)
-{
-    boxf b;
-
-    b.LL.x = MAX(b0.LL.x, b1.LL.x);
-    b.LL.y = MAX(b0.LL.y, b1.LL.y);
-    b.UR.x = MIN(b0.UR.x, b1.UR.x);
-    b.UR.y = MIN(b0.UR.y, b1.UR.y);
-
-    return b;
-}
-
-static inline int box_overlap(box b0, box b1)
-{
+static inline bool boxf_overlap(boxf b0, boxf b1) {
     return OVERLAP(b0, b1);
-}
-
-static inline int boxf_overlap(boxf b0, boxf b1)
-{
-    return OVERLAP(b0, b1);
-}
-
-static inline int box_contains(box b0, box b1)
-{
-    return CONTAINS(b0, b1);
-}
-
-static inline int boxf_contains(boxf b0, boxf b1)
-{
-    return CONTAINS(b0, b1);
 }
 
 static inline pointf perp (pointf p)
@@ -262,13 +146,8 @@ static inline pointf scale (double c, pointf p)
     r.y = c * p.y;
     return r;
 }
-#ifdef WIN32_STATIC
-#undef inline
-#endif
 
-#undef extern
+#undef GEOMPROCS_API
 #ifdef __cplusplus
 }
-#endif
-
 #endif

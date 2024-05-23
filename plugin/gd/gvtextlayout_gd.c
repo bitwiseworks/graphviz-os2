@@ -1,23 +1,24 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 #include "config.h"
-
+#include <cgraph/strview.h>
+#include "gd_psfontResolve.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "gvplugin_textlayout.h"
-#include "gd.h"
+#include <gvc/gvplugin_textlayout.h>
+#include <gd.h>
+#include <cgraph/strcasecmp.h>
+#include <common/const.h>
 
 #ifdef HAVE_GD_FREETYPE
 
@@ -32,61 +33,47 @@
  * especially on Windows. Without fontconfig, we provide
  * here some rudimentary name mapping.
  */
-char *gd_alternate_fontlist(char *font)
-{
-    static char *fontbuf;
-    static int fontbufsz;
-    char *p, *fontlist;
-    int len;
-
-    len = strlen(font) + 1;
-    if (len > fontbufsz) {
-	fontbufsz = 2 * len;
-	if (fontbuf == NULL)
-	    fontbuf = malloc(fontbufsz);
-	else
-	    fontbuf = realloc(fontbuf, fontbufsz);
-    }
+char *gd_alternate_fontlist(const char *font) {
+    char *p;
 
     /* fontbuf to contain font without style descriptions like -Roman or -Italic */
-    strcpy(fontbuf, font);
-    if ((p = strchr(fontbuf, '-')) || (p = strchr(fontbuf, '_')))
-	*p = 0;
+    strview_t fontlist = strview(font, '\0');
+    if ((p = strchr(font, '-')) || (p = strchr(font, '_')))
+	fontlist.size = (size_t)(p - font);
 
-    fontlist = fontbuf;
     if ((strcasecmp(font, "times-bold") == 0)
-	|| (strcasecmp(fontbuf, "timesbd") == 0)
-	|| (strcasecmp(fontbuf, "timesb") == 0))
-	fontlist = "timesbd;Timesbd;TIMESBD;timesb;Timesb;TIMESB";
+	|| strview_case_str_eq(fontlist, "timesbd")
+	|| strview_case_str_eq(fontlist, "timesb"))
+	fontlist = strview("timesbd;Timesbd;TIMESBD;timesb;Timesb;TIMESB", '\0');
 
     else if ((strcasecmp(font, "times-italic") == 0)
-	     || (strcasecmp(fontbuf, "timesi") == 0))
-	fontlist = "timesi;Timesi;TIMESI";
+	     || strview_case_str_eq(fontlist, "timesi"))
+	fontlist = strview("timesi;Timesi;TIMESI", '\0');
 
     else if ((strcasecmp(font, "timesnewroman") == 0)
 	     || (strcasecmp(font, "timesnew") == 0)
 	     || (strcasecmp(font, "timesroman") == 0)
-	     || (strcasecmp(fontbuf, "times") == 0))
-	fontlist = "times;Times;TIMES";
+	     || strview_case_str_eq(fontlist, "times"))
+	fontlist = strview("times;Times;TIMES", '\0');
 
     else if ((strcasecmp(font, "arial-bold") == 0)
-	     || (strcasecmp(fontbuf, "arialb") == 0))
-	fontlist = "arialb;Arialb;ARIALB";
+	     || strview_case_str_eq(fontlist, "arialb"))
+	fontlist = strview("arialb;Arialb;ARIALB", '\0');
 
     else if ((strcasecmp(font, "arial-italic") == 0)
-	     || (strcasecmp(fontbuf, "ariali") == 0))
-	fontlist = "ariali;Ariali;ARIALI";
+	     || strview_case_str_eq(fontlist, "ariali"))
+	fontlist = strview("ariali;Ariali;ARIALI", '\0');
 
-    else if (strcasecmp(fontbuf, "helvetica") == 0)
-	fontlist = "helvetica;Helvetica;HELVETICA;arial;Arial;ARIAL";
+    else if (strview_case_str_eq(fontlist, "helvetica"))
+	fontlist = strview("helvetica;Helvetica;HELVETICA;arial;Arial;ARIAL", '\0');
 
-    else if (strcasecmp(fontbuf, "arial") == 0)
-	fontlist = "arial;Arial;ARIAL";
+    else if (strview_case_str_eq(fontlist, "arial"))
+	fontlist = strview("arial;Arial;ARIAL", '\0');
 
-    else if (strcasecmp(fontbuf, "courier") == 0)
-	fontlist = "courier;Courier;COURIER;cour";
+    else if (strview_case_str_eq(fontlist, "courier"))
+	fontlist = strview("courier;Courier;COURIER;cour", '\0');
 
-    return fontlist;
+    return strview_str(fontlist);
 }
 #endif				/* HAVE_GD_FONTCONFIG */
 
@@ -115,7 +102,7 @@ char* gd_psfontResolve (PostscriptAlias* pa)
     return buf;
 }
 
-static boolean gd_textlayout(textspan_t * span, char **fontpath)
+static bool gd_textlayout(textspan_t * span, char **fontpath)
 {
     char *err, *fontlist, *fontname;
     double fontsize;
@@ -132,7 +119,7 @@ static boolean gd_textlayout(textspan_t * span, char **fontpath)
     strex.flags = gdFTEX_RETURNFONTPATHNAME | gdFTEX_RESOLUTION;
     strex.hdpi = strex.vdpi = POINTS_PER_INCH;
 
-    if (strstr(fontname, "/"))
+    if (strchr(fontname, '/'))
 	strex.flags |= gdFTEX_FONTPATHNAME;
     else
 	strex.flags |= gdFTEX_FONTCONFIG;
@@ -144,11 +131,11 @@ static boolean gd_textlayout(textspan_t * span, char **fontpath)
     span->layout = NULL;
     span->free_layout = NULL;
 
-    span->yoffset_centerline = 0.1 * fontsize;
+    span->yoffset_centerline = 0.05 * fontsize;
 
     if (fontname) {
 	if (fontsize <= FONTSIZE_MUCH_TOO_SMALL) {
-	    return TRUE; /* OK, but ignore text entirely */
+	    return true; /* OK, but ignore text entirely */
 	} else if (fontsize <= FONTSIZE_TOO_SMALL) {
 	    /* draw line in place of text */
 	    /* fake a finite fontsize so that line length is calculated */
@@ -168,10 +155,13 @@ static boolean gd_textlayout(textspan_t * span, char **fontpath)
 
 	err = gdImageStringFTEx(NULL, brect, -1, fontlist,
 				fontsize, 0, 0, 0, span->str, &strex);
+#ifndef HAVE_GD_FONTCONFIG
+	free(fontlist);
+#endif
 
 	if (err) {
-	    agerr(AGERR,"%s\n", err);
-	    return FALSE; /* indicate error */
+	    agerrorf("%s\n", err);
+	    return false; /* indicate error */
 	}
 
 	if (fontpath)
@@ -182,13 +172,11 @@ static boolean gd_textlayout(textspan_t * span, char **fontpath)
 	if (span->str && span->str[0]) {
 	    /* can't use brect on some archtectures if strlen 0 */
 	    span->size.x = (double) (brect[4] - brect[0]);
-	    /* 1.2 specifies how much extra space to leave between lines;
-             * see LINESPACING in const.h.
-             */
-	    span->size.y = (int)(fontsize * 1.2);
+	    // LINESPACING specifies how much extra space to leave between lines
+	    span->size.y = fontsize * LINESPACING;
 	}
     }
-    return TRUE;
+    return true;
 }
 
 static gvtextlayout_engine_t gd_textlayout_engine = {

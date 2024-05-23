@@ -1,16 +1,20 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
+/**
+ * @file
+ * @brief function colorxlate (one of many) for gvcolor.c
+ */
 
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
+#include <cgraph/agxbuf.h>
+#include <cgraph/gv_ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -18,87 +22,49 @@
 #include <search.h>
 #endif
 #include <ctype.h>
-#ifndef FALSE
-#define FALSE (0)
-#endif
-#ifndef TRUE
-#define TRUE (!FALSE)
-#endif
-#ifndef NOT
-#define NOT(x)                  (!(x))
-#endif
-#ifndef NIL
-#define NIL(type)               ((type)0)
-#endif
-typedef struct hsbcolor_t {
+typedef struct {
     char *name;
     unsigned char h, s, b;
 } hsbcolor_t;
 
-
-#ifndef NOCOLORNAMES
 #include "colortbl.h"
+#include "colorxlate.h"
 
-/*
-	char *bsearch ((char *) key, (char *) base, nel, sizeof (*key), compar)
-	unsigned nel;
-	int (*compar)( );
-*/
-
-static unsigned char *canoncolor(char *orig, unsigned char *out)
-{
-    unsigned char c;
-    unsigned char *p = out;
-    while ((c = *(unsigned char *) orig++)) {
-	if (isalnum(c) == FALSE)
+static void canoncolor(const char *orig, agxbuf *out) {
+    char c;
+    while ((c = *orig++)) {
+	if (!gv_isalnum(c))
 	    continue;
-	if (isupper(c))
-	    c = tolower(c);
-	*p++ = c;
+	agxbputc(out, (char)tolower(c));
     }
-    *p = '\0';
-    return out;
 }
 
 static int colorcmpf(const void *a0, const void *a1)
 {
-    hsbcolor_t *p0 = (hsbcolor_t *) a0;
-    hsbcolor_t *p1 = (hsbcolor_t *) a1;
-    int i = (p0->name[0] - p1->name[0]);
-    return (i ? i : strcmp(p0->name, p1->name));
+    const hsbcolor_t *p1 = a1;
+    return strcmp(a0, p1->name);
 }
 
-char *colorxlate(char *str, char *buf)
-{
+void colorxlate(char *str, agxbuf *buf) {
     static hsbcolor_t *last;
-    unsigned char canon[128];
-    char *p;
-    hsbcolor_t fake;
+    agxbuf canon_buf = {0};
+    const char *canon = NULL;
 
-    if ((last == NULL) || (last->name[0] != str[0])
-	|| (strcmp(last->name, str))) {
-	fake.name = (char *) canoncolor(str, canon);
-	last =
-	    (hsbcolor_t *) bsearch(&fake, color_lib,
-				   sizeof(color_lib) / sizeof(hsbcolor_t),
-				   sizeof(fake), colorcmpf);
+    if (last == NULL || strcmp(last->name, str)) {
+	canoncolor(str, &canon_buf);
+	canon = agxbuse(&canon_buf);
+	last = bsearch(canon, color_lib, sizeof(color_lib) / sizeof(hsbcolor_t),
+	               sizeof(color_lib[0]), colorcmpf);
     }
     if (last == NULL) {
-	if (isdigit(canon[0]) == FALSE) {
+	if (!gv_isdigit(canon[0])) {
 	    fprintf(stderr, "warning: %s is not a known color\n", str);
-	    strcpy(buf, str);
+	    agxbput(buf, str);
 	} else
-	    for (p = buf; (*p = *str++); p++)
-		if (*p == ',')
-		    *p = ' ';
+	    for (const char *p = str; *p != '\0'; ++p)
+		agxbputc(buf, *p == ',' ? ' ' : *p);
     } else
-	sprintf(buf, "%.3f %.3f %.3f", ((double) last->h) / 255,
+	agxbprint(buf, "%.3f %.3f %.3f", ((double) last->h) / 255,
 		((double) last->s) / 255, ((double) last->b) / 255);
-    return buf;
+    agxbfree(&canon_buf);
 }
-#else
-char *colorxlate(char *str, char *buf)
-{
-    return str;
-}
-#endif

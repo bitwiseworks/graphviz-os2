@@ -1,14 +1,11 @@
-/* $Id$ $Revision$ */
-/* vim:set shiftwidth=4 ts=8: */
-
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
 /*
@@ -20,13 +17,12 @@
  * p is updated to point to the next character in s
  */
 
-#include <ast.h>
-/* #include <ccode.h> */
+#include <ast/ast.h>
 
-int chresc(register const char *s, char **p)
+int chresc(const char *s, char **p)
 {
-    register const char *q;
-    register int c;
+    const char *q;
+    int c;
 
     switch (c = *s++) {
     case 0:
@@ -129,7 +125,11 @@ int chresc(register const char *s, char **p)
 	case 0:
 	    s--;
 	    break;
+	default:
+	    break;
 	}
+	break;
+    default:
 	break;
     }
     if (p)

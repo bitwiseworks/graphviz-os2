@@ -3,15 +3,15 @@
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
- * http://www.eclipse.org/legal/epl-v10.html
+ * https://www.eclipse.org/legal/epl-v10.html
  *
- * Contributors: See CVS logs. Details at http://www.graphviz.org/
+ * Contributors: Details at https://graphviz.org
  *************************************************************************/
 
-#ifndef INK_H
-#define INK_H
+#pragma once
 
-#include <edge_bundling.h>
+#include <mingle/edge_bundling.h>
+#include <vector>
 
 typedef struct {
   double x, y;
@@ -29,9 +29,9 @@ typedef struct {
    meet1, meet2: meeting point
    return: best ink needed if bundled.
 */
-double ink(pedge* edges, int numEdges, int *pick, double *ink0, point_t *meet1, point_t *meet2, real angle_param, real angle);
-double ink1(pedge e);
+double ink(const std::vector<pedge> &edges, int numEdges, int *pick,
+           double *ink0, point_t *meet1, point_t *meet2, double angle_param,
+           double angle);
+double ink1(const pedge &e);
 
 extern double ink_count;
-
-#endif /* INK_H */
