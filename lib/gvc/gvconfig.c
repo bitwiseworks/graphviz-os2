@@ -505,18 +505,18 @@ static void config_rescan(GVC_t *gvc, char *config_path)
 
     libdir = gvconfig_libdir(gvc);
 
-    agxbuf config_glob = {0};
-    agxbprint(&config_glob, "%s%s%s", libdir, DIRSEP, plugin_glob);
-
 #ifdef __OS2__
     // in the glob() we need the path as /
     char *p;
-    for (p = agxbuse(&config_glob); *p; *p++)
+    for (p = libdir; *p; *p++)
     {
         if (*p == '\\')
             *p = '/';
     }
 #endif
+
+    agxbuf config_glob = {0};
+    agxbprint(&config_glob, "%s%s%s", libdir, DIRSEP, plugin_glob);
 
     /* load all libraries even if can't save config */
 
