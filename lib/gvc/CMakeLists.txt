@@ -1,4 +1,8 @@
+if (OS2)
+add_definitions(-DGVC_EXPORTS -DGVLIBDIR="/@unixroot/usr/${LIBRARY_INSTALL_DIR}/graphviz")
+else()
 add_definitions(-DGVC_EXPORTS -DGVLIBDIR="${LIBRARY_INSTALL_DIR}/graphviz")
+endif()
 
 add_library(gvc
   # Header files
