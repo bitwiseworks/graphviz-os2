@@ -182,6 +182,14 @@ target_link_libraries(gv2gml PRIVATE cgraph gvc)
 if(NOT HAVE_GETOPT_H)
   target_link_libraries(gv2gml PRIVATE ${GETOPT_LINK_LIBRARIES})
 endif()
+
+if(OS2)
+  set_target_properties(gv2gml PROPERTIES
+    OS2_DEF_VENDOR "$ENV{VENDOR}"
+    OS2_DEF_PATCH "${GRAPHVIZ_VERSION_PATCH}"
+    OS2_DEF_VERSION "${GRAPHVIZ_VERSION_FULL}")
+endif()
+
 install(TARGETS gv2gml RUNTIME DESTINATION ${BINARY_INSTALL_DIR})
 
 # ================================= graphml2gv =================================
@@ -374,7 +382,7 @@ if(EXPAT_FOUND)
   foreach(cmd_alias IN LISTS gxl2gv_aliases)
     set(GXL2GV_COPY
         "${CMAKE_CURRENT_BINARY_DIR}/${cmd_alias}${CMAKE_EXECUTABLE_SUFFIX}")
-    if(WIN32 OR CYGWIN)
+    if(WIN32 OR CYGWIN OR OS2)
       # copy instead of symlink to avoid
       # https://gitlab.com/graphviz/graphviz/-/issues/2123
       add_custom_command(
