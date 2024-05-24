@@ -209,7 +209,7 @@ else()
   )
 endif()
 
-if(NOT CMAKE_CROSSCOMPILING)
+if(NOT CMAKE_CROSSCOMPILING AND NOT OS2)
   configure_file(
     ../../cmake/configure_plugins.cmake.in configure_plugins.cmake @ONLY)
 
