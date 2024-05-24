@@ -14,6 +14,13 @@ if(NOT HAVE_GETOPT_H)
   target_link_libraries(prune PRIVATE ${GETOPT_LINK_LIBRARIES})
 endif()
 
+if(OS2)
+  set_target_properties(prune PROPERTIES
+    OS2_DEF_VENDOR "$ENV{VENDOR}"
+    OS2_DEF_PATCH "${GRAPHVIZ_VERSION_PATCH}"
+    OS2_DEF_VERSION "${GRAPHVIZ_VERSION_FULL}")
+endif()
+
 install(
   TARGETS prune
   RUNTIME DESTINATION ${BINARY_INSTALL_DIR}

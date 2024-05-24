@@ -29,6 +29,13 @@ elseif(WIN32)
   set_target_properties(dot PROPERTIES LINK_FLAGS /STACK:"33554432")
 endif()
 
+if(OS2)
+  set_target_properties(dot PROPERTIES
+    OS2_DEF_VENDOR "$ENV{VENDOR}"
+    OS2_DEF_PATCH "${GRAPHVIZ_VERSION_PATCH}"
+    OS2_DEF_VERSION "${GRAPHVIZ_VERSION_FULL}")
+endif()
+
 # Installation location of executables
 install(
   TARGETS dot
@@ -100,6 +107,13 @@ if(SOCKET)
   target_link_libraries(dot_builtins PRIVATE ${SOCKET})
 endif()
 
+if(OS2)
+  set_target_properties(dot_builtins PROPERTIES
+    OS2_DEF_VENDOR "$ENV{VENDOR}"
+    OS2_DEF_PATCH "${GRAPHVIZ_VERSION_PATCH}"
+    OS2_DEF_VERSION "${GRAPHVIZ_VERSION_FULL}")
+endif()
+
 install(
   TARGETS dot_builtins
   RUNTIME DESTINATION ${BINARY_INSTALL_DIR}
@@ -116,7 +130,7 @@ list(APPEND dot_aliases circo fdp neato osage patchwork sfdp twopi)
 foreach(cmd_alias IN LISTS dot_aliases)
   set(DOTCOPY
       "${CMAKE_CURRENT_BINARY_DIR}/${cmd_alias}${CMAKE_EXECUTABLE_SUFFIX}")
-  if(WIN32 OR CYGWIN)
+  if(WIN32 OR CYGWIN OR OS2)
     # Copy dot executable to each alias name then install copies to bindir
     add_custom_command(
       TARGET dot

@@ -7,6 +7,13 @@ if(GD_FOUND)
   target_include_directories(diffimg SYSTEM PRIVATE ${GD_INCLUDE_DIRS})
   target_link_libraries(diffimg PRIVATE ${GD_LIBRARIES})
 
+  if(OS2)
+    set_target_properties(diffimg PROPERTIES
+      OS2_DEF_VENDOR "$ENV{VENDOR}"
+      OS2_DEF_PATCH "${GRAPHVIZ_VERSION_PATCH}"
+      OS2_DEF_VERSION "${GRAPHVIZ_VERSION_FULL}")
+  endif()
+
   install(
     TARGETS diffimg
     RUNTIME DESTINATION ${BINARY_INSTALL_DIR}

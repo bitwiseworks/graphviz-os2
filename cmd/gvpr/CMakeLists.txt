@@ -24,6 +24,13 @@ target_link_libraries(gvpr-bin PRIVATE
 set_target_properties(gvpr-bin
   PROPERTIES OUTPUT_NAME gvpr)
 
+if(OS2)
+  set_target_properties(gvpr-bin PROPERTIES
+    OS2_DEF_VENDOR "$ENV{VENDOR}"
+    OS2_DEF_PATCH "${GRAPHVIZ_VERSION_PATCH}"
+    OS2_DEF_VERSION "${GRAPHVIZ_VERSION_FULL}")
+endif()
+
 # Installation location of executables
 install(
   TARGETS gvpr-bin

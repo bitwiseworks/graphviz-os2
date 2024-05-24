@@ -7,6 +7,13 @@ function(tool_defaults name)
     target_link_libraries(${name} PRIVATE ${GETOPT_LINK_LIBRARIES})
   endif()
 
+  if(OS2)
+    set_target_properties(${name} PROPERTIES
+      OS2_DEF_VENDOR "$ENV{VENDOR}"
+      OS2_DEF_PATCH "${GRAPHVIZ_VERSION_PATCH}"
+      OS2_DEF_VERSION "${GRAPHVIZ_VERSION_FULL}")
+  endif()
+
   install(
     TARGETS ${name}
     RUNTIME DESTINATION ${BINARY_INSTALL_DIR}

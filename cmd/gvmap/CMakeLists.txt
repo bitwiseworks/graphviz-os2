@@ -55,6 +55,13 @@ if(with_sfdp)
     )
   endif()
 
+  if(OS2)
+    set_target_properties(cluster PROPERTIES
+      OS2_DEF_VENDOR "$ENV{VENDOR}"
+      OS2_DEF_PATCH "${GRAPHVIZ_VERSION_PATCH}"
+      OS2_DEF_VERSION "${GRAPHVIZ_VERSION_FULL}")
+  endif()
+
   install(
     TARGETS cluster
     RUNTIME DESTINATION ${BINARY_INSTALL_DIR}
@@ -118,6 +125,13 @@ if(with_sfdp)
       FILES gvmap.1
       DESTINATION ${MAN_INSTALL_DIR}/man1
     )
+  endif()
+
+  if(OS2)
+    set_target_properties(gvmap PROPERTIES
+      OS2_DEF_VENDOR "$ENV{VENDOR}"
+      OS2_DEF_PATCH "${GRAPHVIZ_VERSION_PATCH}"
+      OS2_DEF_VERSION "${GRAPHVIZ_VERSION_FULL}")
   endif()
 
   install(
