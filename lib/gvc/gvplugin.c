@@ -167,7 +167,7 @@ gvplugin_library_t *gvplugin_library_load(GVC_t *gvc, const char *pathname) {
 #ifdef _WIN32
     if (pathname[1] == ':') {
 #elif defined(__OS2__)
-    if (pathname[1] == ':' || startswith(pathname, "/@unixroot") != 0) {
+    if (pathname[1] == ':' || startswith(pathname, "/@unixroot")) {
 #else
     if (pathname[0] == '/') {
 #endif
